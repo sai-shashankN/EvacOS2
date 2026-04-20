@@ -1,0 +1,110 @@
+{
+  "episode_id": "ep_goldfixture_0001",
+  "round_id": 17,
+  "orchestrator_action": {
+    "episode_id": "ep_goldfixture_0001",
+    "round_id": 17,
+    "agent_id": "orchestrator",
+    "action_id": "act_orch_001",
+    "action_type": "broadcast_directive",
+    "arguments": {
+      "directive": {
+        "directive_id": "dir_002",
+        "supersedes_directive_id_or_null": "dir_001",
+        "target": "floor_2",
+        "directive_type": "lockdown",
+        "params": {
+          "room_id": "room_202"
+        },
+        "priority": "high",
+        "issued_round": 17,
+        "ttl_rounds": 15,
+        "human_readable_note": "Lock down room 202 to contain fire spread."
+      }
+    },
+    "rationale": "Fire severity in room_202 increasing; lockdown to protect adjacent rooms.",
+    "client_metadata": {}
+  },
+  "floor_actions": {
+    "floor_0_agent": {
+      "episode_id": "ep_goldfixture_0001",
+      "round_id": 17,
+      "agent_id": "floor_0_agent",
+      "action_id": "act_f0_001",
+      "action_type": "route_within_floor",
+      "arguments": {
+        "from_room_id": "room_001",
+        "to_room_id": "room_005",
+        "civilian_group_id_or_null": "cg_001"
+      },
+      "rationale": null,
+      "client_metadata": {}
+    },
+    "floor_1_agent": {
+      "episode_id": "ep_goldfixture_0001",
+      "round_id": 17,
+      "agent_id": "floor_1_agent",
+      "action_id": "act_f1_001",
+      "action_type": "scout",
+      "arguments": {
+        "target_room_id": "room_103"
+      },
+      "rationale": null,
+      "client_metadata": {}
+    },
+    "floor_2_agent": {
+      "episode_id": "ep_goldfixture_0001",
+      "round_id": 17,
+      "agent_id": "floor_2_agent",
+      "action_id": "act_f2_001",
+      "action_type": "predict_state",
+      "arguments": {
+        "belief": {
+          "belief_id": "b_gold_001",
+          "predictor_agent_id": "floor_3_agent",
+          "target_entity_ids": [
+            "room_301"
+          ],
+          "horizon": 5,
+          "prediction_payload": {
+            "predicted_hazard_severity": 0.8,
+            "predicted_passable": false
+          },
+          "confidence": 0.75,
+          "justification": "Smoke spreading from room_302 corridor, likely to reach room_301 within 5 rounds.",
+          "created_round": 17,
+          "resolved_round_or_null": null
+        }
+      },
+      "rationale": null,
+      "client_metadata": {}
+    },
+    "floor_3_agent": {
+      "episode_id": "ep_goldfixture_0001",
+      "round_id": 17,
+      "agent_id": "floor_3_agent",
+      "action_id": "act_f3_001",
+      "action_type": "wait",
+      "arguments": {},
+      "rationale": null,
+      "client_metadata": {}
+    },
+    "floor_4_agent": {
+      "episode_id": "ep_goldfixture_0001",
+      "round_id": 17,
+      "agent_id": "floor_4_agent",
+      "action_id": "act_f4_001",
+      "action_type": "handoff_to_orchestrator",
+      "arguments": {
+        "category": "escalation",
+        "target_ids": [
+          "stair_B"
+        ],
+        "urgency": "normal",
+        "note": "Stairwell B showing signs of structural weakness"
+      },
+      "rationale": null,
+      "client_metadata": {}
+    }
+  }
+}

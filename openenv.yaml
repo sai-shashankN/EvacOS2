@@ -1,0 +1,34 @@
+env_name: evacos-ma
+version: 0.1.0
+description: Hierarchical Multi-Agent Evacuation Environment (Round 2)
+tasks:
+  - task_id: task_1_fire_easy
+    name: Single Fire Evacuation
+    difficulty: easy
+  - task_id: task_2_flood_medium
+    name: Flood Rising Rooftop Evacuation
+    difficulty: medium
+  - task_id: task_3_earthquake_hard
+    name: Post-Earthquake Structural Evacuation
+    difficulty: hard
+  - task_id: task_4_cascade_hard
+    name: Multi-Hazard Cascade
+    difficulty: expert
+action_schema_ref: evacos_ma.schemas.multi_agent.ActionEnvelopeMA
+observation_schema_ref: evacos_ma.schemas.multi_agent.RoleObservationMA
+debug_state_enabled: false
+supported_tiers:
+  - easy
+  - medium
+  - hard
+  - brutal
+agent_topology:
+  orchestrator_count: 1
+  floor_agent_count: 5
+protocol:
+  reset: /openenv/reset
+  step: /openenv/step
+  state: /openenv/state
+  schema: /openenv/schema
+  health: /openenv/health
+  metadata: /openenv/metadata

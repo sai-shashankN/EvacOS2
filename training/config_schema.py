@@ -1,0 +1,140 @@
+"""Training configuration schema.
+
+Uses Pydantic v2 with ``extra="forbid"`` and validates config constraints.
+Heavy-dependency-free (no pyyaml at import time — caller provides a dict).
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+# EVAL_SEEDS from curriculum — used for validation
+_EVAL_SEEDS_SET = frozenset({42, 123, 456, 789, 1024})
+
+
+class ModelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base: str = "Qwen/Qwen2.5-1.5B-Instruct"
+    dtype: str = "bfloat16"
+    max_prompt_tokens: int = 3500
+    max_completion_tokens: int = 256
+
+
+class LoRAConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rank: int = 16
+    alpha: int = 32
+    dropout: float = 0.05
+    target_modules: list[str] = Field(
+        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj"]
+    )
+
+
+class RolloutConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    episodes_per_step: int = 4
+    max_rounds_per_episode: int = 80
+    seed_retry_limit: int = 1000
+    use_vllm: bool = False
+    disaster_families: list[str] = Field(
+        default_factory=lambda: [
+            "fire", "flood", "gas", "structural",
+            "active_threat", "multi_cascade",
+        ]
+    )
+
+    @field_validator("seed_retry_limit")
+    @classmethod
+    def seed_retry_limit_must_be_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("rollout.seed_retry_limit must be > 0")
+        return value
+
+
+class GRPOConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    learning_rate: float = 5e-6
+    kl_coef: float = 0.04
+    group_size: int = 4
+    clip_range: float = 0.2
+    num_train_epochs_per_step: int = 1
+
+
+class RewardConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rationale_scaling: str = "linear_capped"
+    alpha: float = 0.01
+    beta: float = 0.25
+    cap: float = 1.0
+    eligible_token_ceiling: int = 160
+    clip_normalized_to: float = 1.0
+
+
+class EvalConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    every_steps: int = 20
+    tiers: list[str] = Field(default_factory=lambda: ["easy", "medium"])
+    seeds: list[int] = Field(default_factory=lambda: [42, 123, 456, 789, 1024])
+
+    @field_validator("seeds")
+    @classmethod
+    def seeds_must_be_eval_seeds(cls, v: list[int]) -> list[int]:
+        invalid = set(v) - _EVAL_SEEDS_SET
+        if invalid:
+            raise ValueError(
+                f"Eval seeds {invalid} are not in curriculum.EVAL_SEEDS {_EVAL_SEEDS_SET}"
+            )
+        return v
+
+
+class CheckpointConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    every_steps: int = 10
+    keep_last_n: int = 5
+    root_dir: str = "outputs/training/checkpoints"
+
+
+class MetricsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    csv_path: str = "outputs/training/metrics.csv"
+    jsonl_dir: str = "outputs/logs"
+
+
+class SeedConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    training_rng: int = 12345
+
+
+class TrainingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Backend selector for the training path.
+    #   "hf"      — HuggingFace TRL + transformers + PEFT (default; Windows + Colab).
+    #   "unsloth" — Unsloth quantized kernels; Colab/Linux+CUDA only. Opt-in.
+    backend: Literal["hf", "unsloth"] = "hf"
+    # Unsloth-specific knobs (ignored when backend == "hf").
+    unsloth_max_seq_length: int = 4096
+    load_in_4bit: bool = True
+
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    lora: LoRAConfig = Field(default_factory=LoRAConfig)
+    rollout: RolloutConfig = Field(default_factory=RolloutConfig)
+    grpo: GRPOConfig = Field(default_factory=GRPOConfig)
+    reward: RewardConfig = Field(default_factory=RewardConfig)
+    eval: EvalConfig = Field(default_factory=EvalConfig)
+    checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    seed: SeedConfig = Field(default_factory=SeedConfig)
+
+    @model_validator(mode="after")
+    def group_size_divisibility(self) -> "TrainingConfig":
+        """GRPO group_size must divide episodes_per_step * 6 (5 floors + 1 orch)."""
+        total_samples = self.rollout.episodes_per_step * 6
+        if total_samples % self.grpo.group_size != 0:
+            raise ValueError(
+                f"grpo.group_size ({self.grpo.group_size}) must divide "
+                f"rollout.episodes_per_step * 6 ({total_samples})"
+            )
+        return self

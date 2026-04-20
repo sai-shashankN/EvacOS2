@@ -1,0 +1,60 @@
+:root {
+  color-scheme: dark;
+  --bg: #08121d;
+  --panel: #132231;
+  --panel-border: #284052;
+  --accent: #7de2d1;
+  --text: #f1f6fb;
+  --muted: #95a7b9;
+  --hot: #ff8b5c;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top, #10253b 0%, var(--bg) 60%);
+  color: var(--text);
+}
+
+.layout {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 18px;
+}
+
+.panel {
+  background: rgba(19, 34, 49, 0.92);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+}
+
+.hero { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: end; }
+.eyebrow { color: var(--accent); margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px; }
+h1, h2 { margin: 0 0 12px; }
+.stage { grid-column: 1 / 2; }
+.stage-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ticker { color: var(--accent); }
+.floor-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.floor-card { background: #0d1824; border-radius: 14px; padding: 14px; min-height: 150px; }
+.floor-label { font-size: 24px; margin-bottom: 12px; }
+.floor-metric { color: var(--muted); margin-top: 8px; }
+.heatbar { height: 14px; background: #203645; border-radius: 999px; overflow: hidden; }
+.heatbar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--hot)); }
+.feed-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.feed-list li { display: flex; justify-content: space-between; gap: 8px; padding: 10px 12px; background: #0d1824; border-radius: 12px; }
+.score pre { margin: 0; white-space: pre-wrap; color: var(--muted); }
+.episode-picker { display: grid; gap: 6px; color: var(--muted); }
+select { background: #0d1824; color: var(--text); border: 1px solid var(--panel-border); border-radius: 10px; padding: 10px 12px; }
+
+@media (max-width: 960px) {
+  .layout { grid-template-columns: 1fr; }
+  .stage { grid-column: auto; }
+  .floor-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero { align-items: start; flex-direction: column; }
+}

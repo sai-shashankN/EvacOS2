@@ -1,0 +1,131 @@
+{
+  "episode_id": "ep_goldfixture_0001",
+  "round_id": 17,
+  "role": "floor_agent",
+  "agent_id": "floor_2_agent",
+  "step": 17,
+  "max_steps": 350,
+  "seed": 42,
+  "tier": "easy",
+  "disaster_family": "fire",
+  "action_mask": [
+    "route_within_floor",
+    "prioritize_room",
+    "open_exit",
+    "lockdown_room",
+    "scout",
+    "predict_state",
+    "handoff_to_orchestrator",
+    "wait"
+  ],
+  "last_reward_breakdown": {
+    "team_progress_dense": 0.1,
+    "floor_saved": 0.0
+  },
+  "done_last_round": false,
+  "notes": [
+    "Slight smoke detected on floor 2"
+  ],
+  "trace_schema_version": "v1",
+  "generator_config_hash": "sha256:abc123",
+  "floor_id": "floor_2",
+  "visible_rooms": [
+    {
+      "room_id": "room_201",
+      "floor_id": "floor_2",
+      "occupancy_mobile": 3,
+      "occupancy_injured": 1,
+      "occupancy_mobility_impaired": 0,
+      "hazard_severity": 0.0,
+      "smoke_level": 0.0,
+      "accessible": true,
+      "passable": true
+    },
+    {
+      "room_id": "room_202",
+      "floor_id": "floor_2",
+      "occupancy_mobile": 0,
+      "occupancy_injured": 0,
+      "occupancy_mobility_impaired": 0,
+      "hazard_severity": 0.6,
+      "smoke_level": 0.4,
+      "accessible": true,
+      "passable": true
+    }
+  ],
+  "visible_corridors": [
+    {
+      "corridor_id": "corr_201_202",
+      "from_node_id": "room_201",
+      "to_node_id": "room_202",
+      "hazard_severity": 0.1,
+      "passable": true
+    }
+  ],
+  "stairwell_entries": [
+    {
+      "stairwell_id": "stair_A",
+      "connects_floor_ids": [
+        1,
+        2,
+        3
+      ],
+      "blocked": false,
+      "capacity_per_step": 5
+    }
+  ],
+  "exits_on_floor": [
+    {
+      "exit_id": "exit_fire_escape_2",
+      "floor_id": 2,
+      "exit_type": "emergency_window",
+      "blocked": false,
+      "requires_open_action": true
+    }
+  ],
+  "visible_civilian_groups": [
+    {
+      "civilian_group_id": "cg_201",
+      "location_room_id": "room_201",
+      "mobility_profile": "mobile",
+      "count": 3,
+      "status": "waiting"
+    }
+  ],
+  "local_hazards": [
+    {
+      "hazard_id": "haz_fire_202",
+      "hazard_type": "fire",
+      "severity": 0.6,
+      "room_id": "room_202",
+      "projected_spread": {
+        "direction": "east",
+        "eta_rounds": 5
+      }
+    }
+  ],
+  "sensor_quality": 0.84,
+  "visibility_age_by_room": {
+    "room_201": 0,
+    "room_202": 4
+  },
+  "active_directive": {
+    "directive_id": "dir_001",
+    "supersedes_directive_id_or_null": null,
+    "target": "floor_2",
+    "directive_type": "prioritize_evacuation",
+    "params": {
+      "exit_id": "exit_fire_escape_2"
+    },
+    "priority": "high",
+    "issued_round": 15,
+    "ttl_rounds": 20,
+    "human_readable_note": "Evacuate floor 2 via fire escape exit - fire spreading."
+  },
+  "override_applied_last_round": false,
+  "override_reason_last_round": null,
+  "pending_explanation_request": false,
+  "belief_horizon_limit": 8,
+  "open_belief_slots": 1,
+  "last_prediction_score": 0.5
+}

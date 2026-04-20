@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EvacOS-MA Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="layout">
+    <header class="panel hero">
+      <div>
+        <p class="eyebrow">Round 2 Demo Dashboard</p>
+        <h1>Fixed-Suite Playback</h1>
+      </div>
+      <label class="episode-picker">
+        <span>Episode</span>
+        <select id="episodeSelect"></select>
+      </label>
+    </header>
+
+    <section class="panel stage">
+      <div class="stage-head">
+        <h2>Five-Floor Snapshot</h2>
+        <div id="rewardTicker" class="ticker">waiting for stream</div>
+      </div>
+      <div id="floorGrid" class="floor-grid"></div>
+    </section>
+
+    <section class="panel feed">
+      <h2>Directive Feed</h2>
+      <ul id="directiveFeed" class="feed-list"></ul>
+    </section>
+
+    <section class="panel feed">
+      <h2>Override Feed</h2>
+      <ul id="overrideFeed" class="feed-list"></ul>
+    </section>
+
+    <section class="panel score">
+      <h2>Score Snapshot</h2>
+      <pre id="scoreSnapshot"></pre>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

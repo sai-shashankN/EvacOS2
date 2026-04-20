@@ -1,0 +1,543 @@
+{
+  "observations_by_role": {
+    "orchestrator": {
+      "episode_id": "ep_goldfixture_0001",
+      "round_id": 17,
+      "role": "orchestrator",
+      "agent_id": "orchestrator",
+      "step": 17,
+      "max_steps": 350,
+      "seed": 42,
+      "tier": "easy",
+      "disaster_family": "fire",
+      "action_mask": [
+        "route_between_floors",
+        "call_elevator",
+        "evacuate_floor_priority",
+        "broadcast_directive",
+        "override_floor_agent",
+        "request_explanation",
+        "wait"
+      ],
+      "last_reward_breakdown": {
+        "team_progress_dense": 0.1,
+        "coordination_bonus": 0.05
+      },
+      "done_last_round": false,
+      "notes": [],
+      "trace_schema_version": "v1",
+      "generator_config_hash": "sha256:abc123",
+      "floor_summaries": [
+        {
+          "floor_id": "floor_0",
+          "known_civilian_count": 12,
+          "unknown_room_count": 0,
+          "hazard_severity": 0.0,
+          "queue_pressure": 0.2,
+          "exit_capacity_remaining": 5,
+          "last_updated_round": 17
+        },
+        {
+          "floor_id": "floor_1",
+          "known_civilian_count": 10,
+          "unknown_room_count": 1,
+          "hazard_severity": 0.1,
+          "queue_pressure": 0.3,
+          "exit_capacity_remaining": 4,
+          "last_updated_round": 17
+        },
+        {
+          "floor_id": "floor_2",
+          "known_civilian_count": 4,
+          "unknown_room_count": 0,
+          "hazard_severity": 0.6,
+          "queue_pressure": 0.5,
+          "exit_capacity_remaining": 1,
+          "last_updated_round": 17
+        },
+        {
+          "floor_id": "floor_3",
+          "known_civilian_count": 8,
+          "unknown_room_count": 2,
+          "hazard_severity": 0.0,
+          "queue_pressure": 0.1,
+          "exit_capacity_remaining": 3,
+          "last_updated_round": 16
+        },
+        {
+          "floor_id": "floor_4",
+          "known_civilian_count": 6,
+          "unknown_room_count": 1,
+          "hazard_severity": 0.0,
+          "queue_pressure": 0.0,
+          "exit_capacity_remaining": 2,
+          "last_updated_round": 16
+        }
+      ],
+      "inter_floor": {
+        "stairwells": [
+          {
+            "stairwell_id": "stair_A",
+            "floor_ids": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ],
+            "blocked": false,
+            "current_load": 2,
+            "capacity": 5
+          }
+        ],
+        "elevator": {
+          "elevator_id": "elev_1",
+          "current_floor": 1,
+          "target_floor": 0,
+          "operational": true,
+          "capacity": 6,
+          "queue_length": 1
+        },
+        "global_exit_queue": [
+          {
+            "exit_id": "exit_ground_1",
+            "floor_id": 0,
+            "queue_depth": 3,
+            "throughput_per_round": 2.0,
+            "blocked": false
+          }
+        ]
+      },
+      "belief_rollup": {
+        "total_beliefs": 7,
+        "avg_confidence": 0.72,
+        "resolved_count": 3,
+        "pending_count": 4,
+        "recent_highlights": [
+          {
+            "belief_id": "b_005",
+            "confidence": 0.85
+          }
+        ]
+      },
+      "recent_floor_actions": [
+        {
+          "agent_id": "floor_2_agent",
+          "floor_id": "floor_2",
+          "action_type": "route_within_floor",
+          "round_id": 16,
+          "summary": "Routed cg_201 toward exit"
+        },
+        {
+          "agent_id": "floor_0_agent",
+          "floor_id": "floor_0",
+          "action_type": "open_exit",
+          "round_id": 16,
+          "summary": "Opened exit_ground_1"
+        }
+      ],
+      "recent_directive_outcomes": [
+        {
+          "directive_id": "dir_001",
+          "target_floor_id": "floor_2",
+          "directive_type": "prioritize_evacuation",
+          "accepted": true,
+          "outcome_summary": "Floor 2 agent acknowledged and routing civilians"
+        }
+      ],
+      "cascade_hint": {
+        "next_cascade_round": 20,
+        "type": "gas_rupture",
+        "floor": 3
+      },
+      "unresolved_escalations": [
+        {
+          "agent_id": "floor_2_agent",
+          "floor_id": "floor_2",
+          "category": "resource_contention",
+          "urgency": "high",
+          "target_ids": [
+            "stair_A"
+          ],
+          "note": "Stairwell near capacity"
+        }
+      ]
+    },
+    "floors": {
+      "floor_0_agent": {
+        "episode_id": "ep_goldfixture_0001",
+        "round_id": 17,
+        "role": "floor_agent",
+        "agent_id": "floor_0_agent",
+        "step": 17,
+        "max_steps": 350,
+        "seed": 42,
+        "tier": "easy",
+        "disaster_family": "fire",
+        "action_mask": [],
+        "last_reward_breakdown": {},
+        "done_last_round": false,
+        "notes": [],
+        "trace_schema_version": "v1",
+        "generator_config_hash": "",
+        "floor_id": "floor_0",
+        "visible_rooms": [],
+        "visible_corridors": [],
+        "stairwell_entries": [],
+        "exits_on_floor": [],
+        "visible_civilian_groups": [],
+        "local_hazards": [],
+        "sensor_quality": 1.0,
+        "visibility_age_by_room": {},
+        "active_directive": null,
+        "override_applied_last_round": false,
+        "override_reason_last_round": null,
+        "pending_explanation_request": false,
+        "belief_horizon_limit": 8,
+        "open_belief_slots": 1,
+        "last_prediction_score": 0.0
+      },
+      "floor_1_agent": {
+        "episode_id": "ep_goldfixture_0001",
+        "round_id": 17,
+        "role": "floor_agent",
+        "agent_id": "floor_1_agent",
+        "step": 17,
+        "max_steps": 350,
+        "seed": 42,
+        "tier": "easy",
+        "disaster_family": "fire",
+        "action_mask": [],
+        "last_reward_breakdown": {},
+        "done_last_round": false,
+        "notes": [],
+        "trace_schema_version": "v1",
+        "generator_config_hash": "",
+        "floor_id": "floor_1",
+        "visible_rooms": [],
+        "visible_corridors": [],
+        "stairwell_entries": [],
+        "exits_on_floor": [],
+        "visible_civilian_groups": [],
+        "local_hazards": [],
+        "sensor_quality": 1.0,
+        "visibility_age_by_room": {},
+        "active_directive": null,
+        "override_applied_last_round": false,
+        "override_reason_last_round": null,
+        "pending_explanation_request": false,
+        "belief_horizon_limit": 8,
+        "open_belief_slots": 1,
+        "last_prediction_score": 0.0
+      },
+      "floor_2_agent": {
+        "episode_id": "ep_goldfixture_0001",
+        "round_id": 17,
+        "role": "floor_agent",
+        "agent_id": "floor_2_agent",
+        "step": 17,
+        "max_steps": 350,
+        "seed": 42,
+        "tier": "easy",
+        "disaster_family": "fire",
+        "action_mask": [
+          "route_within_floor",
+          "prioritize_room",
+          "open_exit",
+          "lockdown_room",
+          "scout",
+          "predict_state",
+          "handoff_to_orchestrator",
+          "wait"
+        ],
+        "last_reward_breakdown": {
+          "team_progress_dense": 0.1,
+          "floor_saved": 0.0
+        },
+        "done_last_round": false,
+        "notes": [
+          "Slight smoke detected on floor 2"
+        ],
+        "trace_schema_version": "v1",
+        "generator_config_hash": "sha256:abc123",
+        "floor_id": "floor_2",
+        "visible_rooms": [
+          {
+            "room_id": "room_201",
+            "floor_id": "floor_2",
+            "occupancy_mobile": 3,
+            "occupancy_injured": 1,
+            "occupancy_mobility_impaired": 0,
+            "hazard_severity": 0.0,
+            "smoke_level": 0.0,
+            "accessible": true,
+            "passable": true
+          },
+          {
+            "room_id": "room_202",
+            "floor_id": "floor_2",
+            "occupancy_mobile": 0,
+            "occupancy_injured": 0,
+            "occupancy_mobility_impaired": 0,
+            "hazard_severity": 0.6,
+            "smoke_level": 0.4,
+            "accessible": true,
+            "passable": true
+          }
+        ],
+        "visible_corridors": [
+          {
+            "corridor_id": "corr_201_202",
+            "from_node_id": "room_201",
+            "to_node_id": "room_202",
+            "hazard_severity": 0.1,
+            "passable": true
+          }
+        ],
+        "stairwell_entries": [
+          {
+            "stairwell_id": "stair_A",
+            "connects_floor_ids": [
+              1,
+              2,
+              3
+            ],
+            "blocked": false,
+            "capacity_per_step": 5
+          }
+        ],
+        "exits_on_floor": [
+          {
+            "exit_id": "exit_fire_escape_2",
+            "floor_id": 2,
+            "exit_type": "emergency_window",
+            "blocked": false,
+            "requires_open_action": true
+          }
+        ],
+        "visible_civilian_groups": [
+          {
+            "civilian_group_id": "cg_201",
+            "location_room_id": "room_201",
+            "mobility_profile": "mobile",
+            "count": 3,
+            "status": "waiting"
+          }
+        ],
+        "local_hazards": [
+          {
+            "hazard_id": "haz_fire_202",
+            "hazard_type": "fire",
+            "severity": 0.6,
+            "room_id": "room_202",
+            "projected_spread": {
+              "direction": "east",
+              "eta_rounds": 5
+            }
+          }
+        ],
+        "sensor_quality": 0.84,
+        "visibility_age_by_room": {
+          "room_201": 0,
+          "room_202": 4
+        },
+        "active_directive": {
+          "directive_id": "dir_001",
+          "supersedes_directive_id_or_null": null,
+          "target": "floor_2",
+          "directive_type": "prioritize_evacuation",
+          "params": {
+            "exit_id": "exit_fire_escape_2"
+          },
+          "priority": "high",
+          "issued_round": 15,
+          "ttl_rounds": 20,
+          "human_readable_note": "Evacuate floor 2 via fire escape exit - fire spreading."
+        },
+        "override_applied_last_round": false,
+        "override_reason_last_round": null,
+        "pending_explanation_request": false,
+        "belief_horizon_limit": 8,
+        "open_belief_slots": 1,
+        "last_prediction_score": 0.5
+      },
+      "floor_3_agent": {
+        "episode_id": "ep_goldfixture_0001",
+        "round_id": 17,
+        "role": "floor_agent",
+        "agent_id": "floor_3_agent",
+        "step": 17,
+        "max_steps": 350,
+        "seed": 42,
+        "tier": "easy",
+        "disaster_family": "fire",
+        "action_mask": [],
+        "last_reward_breakdown": {},
+        "done_last_round": false,
+        "notes": [],
+        "trace_schema_version": "v1",
+        "generator_config_hash": "",
+        "floor_id": "floor_3",
+        "visible_rooms": [],
+        "visible_corridors": [],
+        "stairwell_entries": [],
+        "exits_on_floor": [],
+        "visible_civilian_groups": [],
+        "local_hazards": [],
+        "sensor_quality": 1.0,
+        "visibility_age_by_room": {},
+        "active_directive": null,
+        "override_applied_last_round": false,
+        "override_reason_last_round": null,
+        "pending_explanation_request": false,
+        "belief_horizon_limit": 8,
+        "open_belief_slots": 1,
+        "last_prediction_score": 0.0
+      },
+      "floor_4_agent": {
+        "episode_id": "ep_goldfixture_0001",
+        "round_id": 17,
+        "role": "floor_agent",
+        "agent_id": "floor_4_agent",
+        "step": 17,
+        "max_steps": 350,
+        "seed": 42,
+        "tier": "easy",
+        "disaster_family": "fire",
+        "action_mask": [],
+        "last_reward_breakdown": {},
+        "done_last_round": false,
+        "notes": [],
+        "trace_schema_version": "v1",
+        "generator_config_hash": "",
+        "floor_id": "floor_4",
+        "visible_rooms": [],
+        "visible_corridors": [],
+        "stairwell_entries": [],
+        "exits_on_floor": [],
+        "visible_civilian_groups": [],
+        "local_hazards": [],
+        "sensor_quality": 1.0,
+        "visibility_age_by_room": {},
+        "active_directive": null,
+        "override_applied_last_round": false,
+        "override_reason_last_round": null,
+        "pending_explanation_request": false,
+        "belief_horizon_limit": 8,
+        "open_belief_slots": 1,
+        "last_prediction_score": 0.0
+      }
+    }
+  },
+  "rewards_by_role": {
+    "orchestrator": {
+      "raw": 0.18,
+      "normalized": 0.09,
+      "breakdown": {
+        "reward_schema_version": "v1",
+        "team_progress_dense": 0.1,
+        "coordination_bonus": 0.05,
+        "directive_quality": 0.03
+      },
+      "reward_schema_version": "v1"
+    },
+    "floors": {
+      "floor_0_agent": {
+        "raw": 0.1,
+        "normalized": 0.05,
+        "breakdown": {
+          "reward_schema_version": "v1",
+          "team_progress_dense": 0.1
+        },
+        "reward_schema_version": "v1"
+      },
+      "floor_1_agent": {
+        "raw": -0.1,
+        "normalized": -0.05,
+        "breakdown": {
+          "reward_schema_version": "v1",
+          "floor_scout_cost": -0.1
+        },
+        "reward_schema_version": "v1"
+      },
+      "floor_2_agent": {
+        "raw": 0.15,
+        "normalized": 0.075,
+        "breakdown": {
+          "reward_schema_version": "v1",
+          "team_progress_dense": 0.1,
+          "floor_prediction": 0.05
+        },
+        "reward_schema_version": "v1"
+      },
+      "floor_3_agent": {
+        "raw": -0.05,
+        "normalized": -0.025,
+        "breakdown": {
+          "reward_schema_version": "v1",
+          "floor_invalid_action": -0.05
+        },
+        "reward_schema_version": "v1"
+      },
+      "floor_4_agent": {
+        "raw": 0.05,
+        "normalized": 0.025,
+        "breakdown": {
+          "reward_schema_version": "v1",
+          "team_progress_dense": 0.05
+        },
+        "reward_schema_version": "v1"
+      }
+    }
+  },
+  "done": false,
+  "done_reason": null,
+  "invalid_actions": [
+    {
+      "agent_id": "floor_3_agent",
+      "action_id": "act_f3_001",
+      "reason": "Cannot wait when active directive requires action"
+    }
+  ],
+  "round_events": [
+    {
+      "event_id": "evt_001",
+      "event_type": "fire_ignition",
+      "target_id": "room_202",
+      "description": "Fire intensified in room 202"
+    },
+    {
+      "event_id": "evt_002",
+      "event_type": "civilian_loss",
+      "target_id": "cg_102",
+      "description": "1 civilian lost due to spreading hazard"
+    }
+  ],
+  "info": {
+    "reservation_trace": [
+      {
+        "resource": "stair_A",
+        "round": 17,
+        "reservations": [
+          {
+            "agent_id": "floor_2_agent",
+            "count": 3
+          }
+        ]
+      }
+    ],
+    "arbitration_trace": [
+      {
+        "conflict": "stair_A_capacity",
+        "winner": "floor_2_agent",
+        "reason": "directive_priority"
+      }
+    ],
+    "score_snapshot": {
+      "total_civilians": 60,
+      "saved": 5,
+      "lost": 1,
+      "in_transit": 2
+    }
+  }
+}

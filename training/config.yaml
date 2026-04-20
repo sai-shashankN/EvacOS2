@@ -1,0 +1,57 @@
+backend: "hf"
+unsloth_max_seq_length: 4096
+load_in_4bit: true
+model:
+  base: "Qwen/Qwen2.5-1.5B-Instruct"
+  dtype: "bfloat16"
+  max_prompt_tokens: 3500
+  max_completion_tokens: 256
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+rollout:
+  episodes_per_step: 4
+  max_rounds_per_episode: 80
+  seed_retry_limit: 1000
+  use_vllm: false
+  disaster_families: ["fire", "flood", "gas", "structural", "active_threat", "multi_cascade"]
+grpo:
+  learning_rate: 5.0e-6
+  kl_coef: 0.04
+  group_size: 4
+  clip_range: 0.2
+  num_train_epochs_per_step: 1
+reward:
+  rationale_scaling: "linear_capped"
+  alpha: 0.01
+  beta: 0.25
+  cap: 1.0
+  eligible_token_ceiling: 160
+  clip_normalized_to: 1.0
+eval:
+  every_steps: 20
+  tiers: ["easy", "medium"]
+  seeds: [42, 123, 456, 789, 1024]
+checkpoint:
+  every_steps: 10
+  keep_last_n: 5
+  root_dir: "outputs/training/checkpoints"
+metrics:
+  csv_path: "outputs/training/metrics.csv"
+  jsonl_dir: "outputs/logs"
+seed:
+  training_rng: 12345
+# ------------------------------------------------------------------------
+# Unsloth + vLLM backend (opt-in, Colab-T4-recommended) — uncomment to use.
+# Windows local dev MUST stay on backend: "hf" (unsloth is Linux+CUDA only).
+#
+# backend: "unsloth"
+# unsloth_max_seq_length: 4096
+# load_in_4bit: true
+# rollout:
+#   use_vllm: true              # shared-weight vLLM rollout; 5-10x faster on T4
+#   episodes_per_step: 4
+#   max_rounds_per_episode: 80
+# ------------------------------------------------------------------------
