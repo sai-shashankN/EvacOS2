@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pickle
 import random
 import signal
@@ -212,6 +213,29 @@ def _save_adapter_weights(policy: Any, target_dir: Path) -> None:
         save_pretrained(str(target_dir))
 
 
+def _init_wandb(config: TrainingConfig) -> Any | None:
+    """Initialize W&B only when explicitly enabled via environment."""
+    api_key = os.environ.get("WANDB_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    try:
+        import wandb  # type: ignore
+    except ImportError:
+        return None
+
+    project = os.environ.get("WANDB_PROJECT", "evacos-ma").strip() or "evacos-ma"
+    run_name = os.environ.get("WANDB_RUN_NAME", "").strip() or None
+
+    wandb.login(key=api_key)
+    return wandb.init(
+        project=project,
+        name=run_name,
+        config=config.model_dump(mode="json"),
+        settings=wandb.Settings(start_method="thread"),
+    )
+
+
 def _build_policy(
     config: TrainingConfig,
     bundle: Any | None,
@@ -346,6 +370,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     metrics_path = Path(config.metrics.csv_path)
     jsonl_dir = Path(config.metrics.jsonl_dir)
     jsonl_dir.mkdir(parents=True, exist_ok=True)
+    wandb_run = _init_wandb(config)
 
     rng = random.Random(config.seed.training_rng)
     bundle = load_checkpoint(ckpt_root)
@@ -447,23 +472,23 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                     if sample.parsed_action.get("fallback_reason") == "parse_error":
                         invalid_count += 1
 
-            append_training_metrics_row(
-                metrics_path,
-                {
-                    "step": step,
-                    "wall_seconds": round(wall_total, 2),
-                    "tier_mix": ";".join(sorted({result.tier for result in results})),
-                    "mean_raw_reward_orch": round(sum(all_raw_orch) / max(len(all_raw_orch), 1), 4),
-                    "mean_raw_reward_floor": round(sum(all_raw_floor) / max(len(all_raw_floor), 1), 4),
-                    "mean_norm_reward_orch": round(sum(all_norm_orch) / max(len(all_norm_orch), 1), 4),
-                    "mean_norm_reward_floor": round(sum(all_norm_floor) / max(len(all_norm_floor), 1), 4),
-                    "invalid_action_rate": round(invalid_count / max(total_samples, 1), 4),
-                    "override_rate": 0.0,
-                    "override_win_rate": 0.0,
-                    "rationale_bonus_mean": 0.0,
-                    "episodes_seen": (step + 1) * config.rollout.episodes_per_step,
-                },
-            )
+            metrics_row = {
+                "step": step,
+                "wall_seconds": round(wall_total, 2),
+                "tier_mix": ";".join(sorted({result.tier for result in results})),
+                "mean_raw_reward_orch": round(sum(all_raw_orch) / max(len(all_raw_orch), 1), 4),
+                "mean_raw_reward_floor": round(sum(all_raw_floor) / max(len(all_raw_floor), 1), 4),
+                "mean_norm_reward_orch": round(sum(all_norm_orch) / max(len(all_norm_orch), 1), 4),
+                "mean_norm_reward_floor": round(sum(all_norm_floor) / max(len(all_norm_floor), 1), 4),
+                "invalid_action_rate": round(invalid_count / max(total_samples, 1), 4),
+                "override_rate": 0.0,
+                "override_win_rate": 0.0,
+                "rationale_bonus_mean": 0.0,
+                "episodes_seen": (step + 1) * config.rollout.episodes_per_step,
+            }
+            append_training_metrics_row(metrics_path, metrics_row)
+            if wandb_run is not None:
+                wandb_run.log(metrics_row, step=step)
 
             if (step + 1) % config.eval.every_steps == 0:
                 _run_eval(
@@ -490,3 +515,5 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
         if stop_requested or bundle is not None:
             final_step = max(start_step, 0)
             _write_checkpoint(final_step if final_step > 0 else 0)
+        if wandb_run is not None:
+            wandb_run.finish()

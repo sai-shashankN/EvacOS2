@@ -9,6 +9,7 @@ bitsandbytes>=0.41
 datasets>=2.14
 pyyaml>=6.0
 nbformat>=5.9
+wandb>=0.19
 
 # --- Unsloth backend (optional, Colab-only) ---
 # Unsloth pins are Python/CUDA-specific. Install in Colab via:
