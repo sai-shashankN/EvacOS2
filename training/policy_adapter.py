@@ -138,6 +138,28 @@ class StubPolicy:
         return int(match.group(1)) if match else None
 
 
+def _should_enforce_eager_for_vllm() -> bool:
+    """Return True when the current GPU needs CUDA-graph capture disabled.
+
+    vLLM's default CUDA graph mode (FULL_AND_PIECEWISE) is incompatible with
+    the FlexAttention backend that Tesla T4 / V100 fall back to (Flash
+    Attention 2 requires compute capability >= 8.0). Forcing eager mode
+    avoids the ``CUDAGraphMode.FULL_AND_PIECEWISE is not supported`` crash
+    on pre-Ampere GPUs.
+    """
+    try:
+        import torch  # type: ignore
+    except ImportError:
+        return False
+    if not torch.cuda.is_available():
+        return False
+    try:
+        major, _minor = torch.cuda.get_device_capability(0)
+    except Exception:
+        return False
+    return major < 8
+
+
 def parse_completion_to_action(
     completion_text: str,
     agent_id: str,
@@ -367,12 +389,17 @@ class UnslothPolicy:
         self._temperature = temperature
         self._seed = seed
 
+        from_pretrained_kwargs: dict[str, Any] = {}
+        if use_vllm and _should_enforce_eager_for_vllm():
+            from_pretrained_kwargs["enforce_eager"] = True
+
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=base_model,
             max_seq_length=max_seq_length,
             load_in_4bit=load_in_4bit,
             fast_inference=use_vllm,
             dtype=None,
+            **from_pretrained_kwargs,
         )
 
         if lora_adapter_path is not None:

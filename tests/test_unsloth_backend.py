@@ -190,3 +190,117 @@ class TestRolloutFastPath:
         assert all(count == 6 for count in policy.batch_calls)
         # Critically: .act was never called — fast path dominated.
         assert policy.act_calls == []
+
+
+# ---------------------------------------------------------------------------
+# 6. enforce_eager auto-detect for T4 / pre-Ampere GPUs
+# ---------------------------------------------------------------------------
+
+
+class TestEnforceEagerDetection:
+    """Tests for ``_should_enforce_eager_for_vllm`` helper."""
+
+    def _import_helper(self):
+        """Import the helper fresh so it picks up mocked torch."""
+        from training.policy_adapter import _should_enforce_eager_for_vllm
+
+        return _should_enforce_eager_for_vllm
+
+    def test_returns_false_when_torch_missing(self, monkeypatch):
+        """When torch is not importable, the helper must return False."""
+        import sys
+
+        # Remove torch from sys.modules if present, then block import.
+        saved: dict = {}
+        for key in list(sys.modules):
+            if key == "torch" or key.startswith("torch."):
+                saved[key] = sys.modules.pop(key)
+        monkeypatch.setitem(sys.modules, "torch", None)
+        try:
+            helper = self._import_helper()
+            assert helper() is False
+        finally:
+            # Restore.
+            sys.modules.pop("torch", None)
+            for key in ("torch",) + tuple(
+                k for k in saved if k.startswith("torch")
+            ):
+                if key in saved:
+                    sys.modules[key] = saved[key]
+
+    def test_returns_false_when_cuda_unavailable(self, monkeypatch):
+        """When CUDA is not available, the helper must return False."""
+        import sys
+        import types
+
+        fake_torch = types.ModuleType("torch")
+        fake_cuda = types.ModuleType("torch.cuda")
+        fake_cuda.is_available = lambda: False  # type: ignore[attr-defined]
+        fake_torch.cuda = fake_cuda  # type: ignore[attr-defined]
+
+        saved: dict = {}
+        for key in list(sys.modules):
+            if key == "torch" or key.startswith("torch."):
+                saved[key] = sys.modules.pop(key)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setitem(sys.modules, "torch.cuda", fake_cuda)
+        try:
+            helper = self._import_helper()
+            assert helper() is False
+        finally:
+            sys.modules.pop("torch", None)
+            sys.modules.pop("torch.cuda", None)
+            for key in saved:
+                sys.modules[key] = saved[key]
+
+    def test_returns_true_on_t4(self, monkeypatch):
+        """Tesla T4 (compute 7.5) must trigger enforce_eager."""
+        import sys
+        import types
+
+        fake_torch = types.ModuleType("torch")
+        fake_cuda = types.ModuleType("torch.cuda")
+        fake_cuda.is_available = lambda: True  # type: ignore[attr-defined]
+        fake_cuda.get_device_capability = lambda _idx=0: (7, 5)  # type: ignore[attr-defined]
+        fake_torch.cuda = fake_cuda  # type: ignore[attr-defined]
+
+        saved: dict = {}
+        for key in list(sys.modules):
+            if key == "torch" or key.startswith("torch."):
+                saved[key] = sys.modules.pop(key)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setitem(sys.modules, "torch.cuda", fake_cuda)
+        try:
+            helper = self._import_helper()
+            assert helper() is True
+        finally:
+            sys.modules.pop("torch", None)
+            sys.modules.pop("torch.cuda", None)
+            for key in saved:
+                sys.modules[key] = saved[key]
+
+    def test_returns_false_on_a100(self, monkeypatch):
+        """A100 (compute 8.0) must NOT trigger enforce_eager."""
+        import sys
+        import types
+
+        fake_torch = types.ModuleType("torch")
+        fake_cuda = types.ModuleType("torch.cuda")
+        fake_cuda.is_available = lambda: True  # type: ignore[attr-defined]
+        fake_cuda.get_device_capability = lambda _idx=0: (8, 0)  # type: ignore[attr-defined]
+        fake_torch.cuda = fake_cuda  # type: ignore[attr-defined]
+
+        saved: dict = {}
+        for key in list(sys.modules):
+            if key == "torch" or key.startswith("torch."):
+                saved[key] = sys.modules.pop(key)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setitem(sys.modules, "torch.cuda", fake_cuda)
+        try:
+            helper = self._import_helper()
+            assert helper() is False
+        finally:
+            sys.modules.pop("torch", None)
+            sys.modules.pop("torch.cuda", None)
+            for key in saved:
+                sys.modules[key] = saved[key]
