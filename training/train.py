@@ -176,9 +176,26 @@ class _CompatGRPOTrainer:
 
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
         if not trainable_params:
+            trainable_params = self._recover_trainable_params()
+        if not trainable_params:
             raise RuntimeError("Compat GRPO trainer found no trainable parameters")
 
         self.optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
+
+    def _recover_trainable_params(self) -> list[Any]:
+        """Re-enable LoRA params when an inference-mode wrapper froze them.
+
+        Unsloth's inference path can leave all parameters non-trainable even
+        after `for_training(...)`. In that case, recover the expected LoRA
+        adapter parameters by name.
+        """
+        recovered: list[Any] = []
+        for name, param in self.model.named_parameters():
+            lower = name.lower()
+            if "lora_" in lower or "lora" in lower or "modules_to_save" in lower:
+                param.requires_grad_(True)
+                recovered.append(param)
+        return recovered
 
     def step(
         self,
