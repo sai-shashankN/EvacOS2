@@ -313,6 +313,8 @@ class RoundProtocol:
         snapshot = _freeze_snapshot(env, ep)
 
         # --- Step 2: process directives ---
+        rejections: list[dict[str, Any]] = []
+
         if orchestrator_action is not None and orchestrator_action.action_type == ActionTypeMA.broadcast_directive:
             directive_data = orchestrator_action.arguments.get("directive")
             if directive_data is not None:
@@ -334,8 +336,6 @@ class RoundProtocol:
         directive_store.tick(round_id)
 
         # --- Step 3: role permission validation ---
-        rejections: list[dict[str, Any]] = []
-
         if orchestrator_action is not None:
             vr = validate_action_for_role(orchestrator_action, AgentRole.orchestrator)
             if not vr.valid:
