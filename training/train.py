@@ -378,8 +378,13 @@ def _save_adapter_weights(policy: Any, target_dir: Path) -> None:
         save_pretrained(str(target_dir))
 
 
-def _init_wandb(config: TrainingConfig) -> Any | None:
-    """Initialize W&B only when explicitly enabled via environment."""
+def _maybe_init_wandb(config: TrainingConfig) -> Any | None:
+    """Initialize wandb if WANDB_API_KEY is set and wandb is importable.
+
+    Returns the wandb run handle, or None if either precondition is unmet.
+    Silent no-op on missing env var or missing package — this is how the HF
+    backend path stays green when wandb isn't installed locally.
+    """
     api_key = os.environ.get("WANDB_API_KEY", "").strip()
     if not api_key:
         return None
@@ -543,7 +548,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     metrics_path = Path(config.metrics.csv_path)
     jsonl_dir = Path(config.metrics.jsonl_dir)
     jsonl_dir.mkdir(parents=True, exist_ok=True)
-    wandb_run = _init_wandb(config)
+    wandb_run = _maybe_init_wandb(config)
 
     rng = random.Random(config.seed.training_rng)
     bundle = load_checkpoint(ckpt_root)
@@ -597,7 +602,8 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
         rotate_checkpoints(ckpt_root, config.checkpoint.keep_last_n)
 
     try:
-        for step in range(start_step, 100_000):
+        step_cap = config.max_steps if config.max_steps is not None else 100_000
+        for step in range(start_step, step_cap):
             if stop_requested:
                 break
 

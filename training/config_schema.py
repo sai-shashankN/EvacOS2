@@ -118,6 +118,18 @@ class TrainingConfig(BaseModel):
     unsloth_max_seq_length: int = 4096
     load_in_4bit: bool = True
 
+    max_steps: int | None = Field(
+        default=None,
+        description="Hard cap on GRPO steps; None means run until SIGTERM / KeyboardInterrupt.",
+    )
+
+    @field_validator("max_steps")
+    @classmethod
+    def max_steps_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("max_steps must be positive when set")
+        return v
+
     model: ModelConfig = Field(default_factory=ModelConfig)
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     rollout: RolloutConfig = Field(default_factory=RolloutConfig)

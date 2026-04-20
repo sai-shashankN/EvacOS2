@@ -1,4 +1,6 @@
 backend: "hf"
+# Hard cap on GRPO steps. Leave unset to run until SIGTERM/Ctrl+C.
+# max_steps: 100
 unsloth_max_seq_length: 4096
 load_in_4bit: true
 model:
