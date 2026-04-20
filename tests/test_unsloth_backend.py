@@ -304,3 +304,81 @@ class TestEnforceEagerDetection:
             sys.modules.pop("torch.cuda", None)
             for key in saved:
                 sys.modules[key] = saved[key]
+
+
+# ---------------------------------------------------------------------------
+# 7. _vllm_kwargs_for_current_gpu helper
+# ---------------------------------------------------------------------------
+
+
+class TestVllmKwargsForCurrentGpu:
+    """Tests for ``_vllm_kwargs_for_current_gpu`` helper."""
+
+    def _import_helper(self):
+        """Import the helper fresh so it picks up mocked torch."""
+        from training.policy_adapter import _vllm_kwargs_for_current_gpu
+
+        return _vllm_kwargs_for_current_gpu
+
+    def _setup_fake_torch(self, monkeypatch, *, is_available, capability=None):
+        """Common monkeypatch setup: remove real torch, install fake."""
+        import sys
+        import types
+
+        fake_torch = types.ModuleType("torch")
+        fake_cuda = types.ModuleType("torch.cuda")
+        fake_cuda.is_available = lambda: is_available  # type: ignore[attr-defined]
+        if capability is not None:
+            fake_cuda.get_device_capability = lambda _idx=0: capability  # type: ignore[attr-defined]
+        fake_torch.cuda = fake_cuda  # type: ignore[attr-defined]
+
+        saved: dict = {}
+        for key in list(sys.modules):
+            if key == "torch" or key.startswith("torch."):
+                saved[key] = sys.modules.pop(key)
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+        monkeypatch.setitem(sys.modules, "torch.cuda", fake_cuda)
+        return saved
+
+    def _teardown(self, saved):
+        import sys
+
+        sys.modules.pop("torch", None)
+        sys.modules.pop("torch.cuda", None)
+        for key in saved:
+            sys.modules[key] = saved[key]
+
+    def test_returns_empty_on_a100(self, monkeypatch):
+        """A100 (compute 8.0) must return no extra kwargs."""
+        saved = self._setup_fake_torch(
+            monkeypatch, is_available=True, capability=(8, 0)
+        )
+        try:
+            helper = self._import_helper()
+            assert helper() == {}
+        finally:
+            self._teardown(saved)
+
+    def test_returns_both_kwargs_on_t4(self, monkeypatch):
+        """T4 (compute 7.5) must return enforce_eager + compilation_config."""
+        saved = self._setup_fake_torch(
+            monkeypatch, is_available=True, capability=(7, 5)
+        )
+        try:
+            helper = self._import_helper()
+            result = helper()
+            assert result == {
+                "enforce_eager": True,
+                "compilation_config": {"level": 0},
+            }
+        finally:
+            self._teardown(saved)
+
+    def test_returns_empty_when_cuda_unavailable(self, monkeypatch):
+        """No CUDA → no extra kwargs (same as Ampere+ fast path)."""
+        saved = self._setup_fake_torch(monkeypatch, is_available=False)
+        try:
+            helper = self._import_helper()
+            assert helper() == {}
+        finally:
+            self._teardown(saved)

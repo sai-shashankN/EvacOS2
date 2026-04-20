@@ -160,6 +160,26 @@ def _should_enforce_eager_for_vllm() -> bool:
     return major < 8
 
 
+def _vllm_kwargs_for_current_gpu() -> dict[str, Any]:
+    """Return the vLLM kwargs needed for safe init on the current GPU.
+
+    On pre-Ampere GPUs (compute capability < 8.0, e.g. T4 / V100):
+    - ``enforce_eager=True`` disables vLLM's own CUDA graph capture,
+      avoiding the ``CUDAGraphMode.FULL_AND_PIECEWISE is not supported``
+      crash with the FlexAttention fallback backend.
+    - ``compilation_config={"level": 0}`` disables torch.compile / inductor
+      entirely, avoiding a second latent crash in inductor's
+      ``cudagraph_trees`` allocator-pool-checkpoint machinery that fires
+      when switching between rollout (vLLM) and training (compat GRPO)
+      modes on shared weights.
+
+    Returns ``{}`` on Ampere+ GPUs (the default vLLM fast path is safe).
+    """
+    if not _should_enforce_eager_for_vllm():
+        return {}
+    return {"enforce_eager": True, "compilation_config": {"level": 0}}
+
+
 def parse_completion_to_action(
     completion_text: str,
     agent_id: str,
@@ -389,9 +409,9 @@ class UnslothPolicy:
         self._temperature = temperature
         self._seed = seed
 
-        from_pretrained_kwargs: dict[str, Any] = {}
-        if use_vllm and _should_enforce_eager_for_vllm():
-            from_pretrained_kwargs["enforce_eager"] = True
+        from_pretrained_kwargs: dict[str, Any] = (
+            _vllm_kwargs_for_current_gpu() if use_vllm else {}
+        )
 
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=base_model,
