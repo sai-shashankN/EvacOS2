@@ -603,22 +603,42 @@ class EvacEnvironment:
         for agent_id, action in sorted(bundle.floor_actions.items()):
             parsed_type = ActionTypeMA(action.action_type)
             if parsed_type == ActionTypeMA.scout:
-                parsed = ScoutArgs.model_validate(action.arguments)
-                self._mark_room_scouted(ep, agent_id, parsed.target_room_id)
-                floor_components[agent_id]["floor_scout_cost"] = self._scout_reward_component(ep)
-            elif parsed_type == ActionTypeMA.predict_state:
-                parsed = PredictStateArgs.model_validate(action.arguments)
-                registration = self._register_belief(ep, agent_id, parsed.belief)
-                registrations[agent_id] = registration
-                if not registration.accepted:
-                    floor_components[agent_id]["duplicate_belief_penalty"] = self._duplicate_penalty_component(ep)
+                try:
+                    parsed = ScoutArgs.model_validate(action.arguments)
+                except Exception as exc:
                     invalid_actions.append(
                         {
                             "agent_id": agent_id,
                             "action_id": action.action_id,
-                            "reason": registration.reason,
+                            "reason": f"invalid_scout_args: {exc}",
                         }
                     )
+                else:
+                    self._mark_room_scouted(ep, agent_id, parsed.target_room_id)
+                    floor_components[agent_id]["floor_scout_cost"] = self._scout_reward_component(ep)
+            elif parsed_type == ActionTypeMA.predict_state:
+                try:
+                    parsed = PredictStateArgs.model_validate(action.arguments)
+                except Exception as exc:
+                    invalid_actions.append(
+                        {
+                            "agent_id": agent_id,
+                            "action_id": action.action_id,
+                            "reason": f"invalid_predict_state_args: {exc}",
+                        }
+                    )
+                else:
+                    registration = self._register_belief(ep, agent_id, parsed.belief)
+                    registrations[agent_id] = registration
+                    if not registration.accepted:
+                        floor_components[agent_id]["duplicate_belief_penalty"] = self._duplicate_penalty_component(ep)
+                        invalid_actions.append(
+                            {
+                                "agent_id": agent_id,
+                                "action_id": action.action_id,
+                                "reason": registration.reason,
+                            }
+                        )
 
         # Advance the underlying simulation step (disaster engine, transit, etc.)
         base_obs, _, done, base_info = self.step(
