@@ -135,6 +135,141 @@ def _extract_trainer_tokenizer(policy: Any) -> Any:
     return getattr(policy, "_tokenizer", None)
 
 
+class _CompatGRPOTrainer:
+    """Minimal local fallback when TRL's GRPOTrainer API is incompatible.
+
+    This trainer uses group-centered rewards as advantages and optimizes
+    completion-token log-probabilities directly. It is intentionally simple:
+    enough to keep Colab training unblocked when the installed TRL release no
+    longer supports the older step-wise constructor expected by this repo.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: Any,
+        tokenizer: Any,
+        learning_rate: float,
+        group_size: int,
+        num_train_epochs_per_step: int,
+    ) -> None:
+        import torch
+
+        if tokenizer is None:
+            raise RuntimeError("Compat GRPO trainer requires a tokenizer")
+
+        self._torch = torch
+        self.model = model
+        self.tokenizer = tokenizer
+        self.group_size = group_size
+        self.num_train_epochs_per_step = max(1, int(num_train_epochs_per_step))
+
+        if getattr(self.tokenizer, "pad_token", None) is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        try:
+            from unsloth import FastLanguageModel  # type: ignore
+
+            FastLanguageModel.for_training(self.model)
+        except Exception:
+            self.model.train()
+
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        if not trainable_params:
+            raise RuntimeError("Compat GRPO trainer found no trainable parameters")
+
+        self.optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
+
+    def step(
+        self,
+        grouped_prompts: list[list[Any]],
+        grouped_completions: list[list[str]],
+        grouped_rewards: list[list[float]],
+    ) -> dict[str, float]:
+        torch = self._torch
+        losses: list[float] = []
+
+        for _ in range(self.num_train_epochs_per_step):
+            self.optimizer.zero_grad()
+            total_loss = None
+
+            for prompts, completions, rewards in zip(
+                grouped_prompts, grouped_completions, grouped_rewards, strict=False
+            ):
+                group_loss = self._compute_group_loss(prompts, completions, rewards)
+                total_loss = group_loss if total_loss is None else total_loss + group_loss
+
+            if total_loss is None:
+                raise RuntimeError("Compat GRPO trainer received no rollout groups")
+
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            self.optimizer.step()
+            losses.append(float(total_loss.detach().item()))
+
+        return {"loss": sum(losses) / max(len(losses), 1)}
+
+    def _compute_group_loss(
+        self,
+        prompts: list[Any],
+        completions: list[str],
+        rewards: list[float],
+    ) -> Any:
+        torch = self._torch
+
+        rendered_prompts = [
+            self.tokenizer.apply_chat_template(
+                prompt,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for prompt in prompts
+        ]
+        full_texts = [prompt_text + completion for prompt_text, completion in zip(rendered_prompts, completions, strict=False)]
+
+        encoded_full = self.tokenizer(
+            full_texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )
+        encoded_prompt = self.tokenizer(
+            rendered_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        )
+
+        device = next(self.model.parameters()).device
+        encoded_full = {k: v.to(device) for k, v in encoded_full.items()}
+        prompt_lengths = encoded_prompt["attention_mask"].sum(dim=1).tolist()
+
+        labels = encoded_full["input_ids"].clone()
+        labels[encoded_full["attention_mask"] == 0] = -100
+        for row_idx, prompt_len in enumerate(prompt_lengths):
+            labels[row_idx, : int(prompt_len)] = -100
+
+        outputs = self.model(**encoded_full)
+        logits = outputs.logits[:, :-1, :]
+        shifted_labels = labels[:, 1:]
+
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+        gather_labels = shifted_labels.masked_fill(shifted_labels == -100, 0)
+        token_log_probs = log_probs.gather(-1, gather_labels.unsqueeze(-1)).squeeze(-1)
+        valid_mask = shifted_labels != -100
+        token_log_probs = token_log_probs * valid_mask
+
+        token_counts = valid_mask.sum(dim=1).clamp_min(1)
+        seq_log_probs = token_log_probs.sum(dim=1) / token_counts
+
+        reward_tensor = torch.tensor(rewards, device=device, dtype=seq_log_probs.dtype)
+        advantages = reward_tensor - reward_tensor.mean()
+        if reward_tensor.numel() > 1:
+            advantages = advantages / reward_tensor.std(unbiased=False).clamp_min(1e-6)
+
+        return -(advantages.detach() * seq_log_probs).mean()
+
+
 def _build_grpo_trainer(GRPOTrainer: Any, policy: Any, config: TrainingConfig) -> Any:
     """Instantiate GRPOTrainer across permissive stub and real implementations."""
     trainer_model = _extract_trainer_model(policy)
@@ -162,6 +297,19 @@ def _build_grpo_trainer(GRPOTrainer: Any, policy: Any, config: TrainingConfig) -
     try:
         return GRPOTrainer(trainer_model)
     except TypeError as exc:
+        message = str(exc)
+        if "reward_funcs" in message:
+            print(
+                "Falling back to local compat GRPO trainer because the installed "
+                "TRL GRPOTrainer expects the newer reward_funcs-based API."
+            )
+            return _CompatGRPOTrainer(
+                model=trainer_model,
+                tokenizer=tokenizer,
+                learning_rate=config.grpo.learning_rate,
+                group_size=config.grpo.group_size,
+                num_train_epochs_per_step=config.grpo.num_train_epochs_per_step,
+            )
         raise RuntimeError(f"Unable to initialize GRPOTrainer: {exc}") from exc
 
 
