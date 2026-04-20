@@ -135,13 +135,15 @@ def _extract_trainer_tokenizer(policy: Any) -> Any:
     return getattr(policy, "_tokenizer", None)
 
 
-class _CompatGRPOTrainer:
-    """Minimal local fallback when TRL's GRPOTrainer API is incompatible.
+class MultiAgentGRPOTrainer:
+    """GRPO-family trainer with role-specific group-relative advantages.
 
-    This trainer uses group-centered rewards as advantages and optimizes
-    completion-token log-probabilities directly. It is intentionally simple:
-    enough to keep Colab training unblocked when the installed TRL release no
-    longer supports the older step-wise constructor expected by this repo.
+    Implements a clipped surrogate objective (PPO-style) with Schulman k3 KL
+    penalty to a reference model obtained by disabling LoRA adapters.  Per-
+    token, masked, numerically stable.  This is *not* plain GRPO — it is a
+    multi-agent adaptation where advantages are computed within role-specific
+    groups (orchestrator pooled across the rollout batch; floor agents per
+    (episode, round)).
     """
 
     def __init__(
@@ -150,17 +152,21 @@ class _CompatGRPOTrainer:
         model: Any,
         tokenizer: Any,
         learning_rate: float,
+        kl_coef: float,
+        clip_range: float,
         group_size: int,
         num_train_epochs_per_step: int,
     ) -> None:
         import torch
 
         if tokenizer is None:
-            raise RuntimeError("Compat GRPO trainer requires a tokenizer")
+            raise RuntimeError("MultiAgentGRPOTrainer requires a tokenizer")
 
         self._torch = torch
         self.model = model
         self.tokenizer = tokenizer
+        self.kl_coef = float(kl_coef)
+        self.clip_range = float(clip_range)
         self.group_size = group_size
         self.num_train_epochs_per_step = max(1, int(num_train_epochs_per_step))
 
@@ -178,7 +184,7 @@ class _CompatGRPOTrainer:
         if not trainable_params:
             trainable_params = self._recover_trainable_params()
         if not trainable_params:
-            raise RuntimeError("Compat GRPO trainer found no trainable parameters")
+            raise RuntimeError("MultiAgentGRPOTrainer found no trainable parameters")
 
         self.optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
 
@@ -197,41 +203,20 @@ class _CompatGRPOTrainer:
                 recovered.append(param)
         return recovered
 
-    def step(
-        self,
-        grouped_prompts: list[list[Any]],
-        grouped_completions: list[list[str]],
-        grouped_rewards: list[list[float]],
-    ) -> dict[str, float]:
-        torch = self._torch
-        losses: list[float] = []
+    # ------------------------------------------------------------------
+    # Tokenisation helpers
+    # ------------------------------------------------------------------
 
-        for _ in range(self.num_train_epochs_per_step):
-            self.optimizer.zero_grad()
-            total_loss = None
-
-            for prompts, completions, rewards in zip(
-                grouped_prompts, grouped_completions, grouped_rewards, strict=False
-            ):
-                group_loss = self._compute_group_loss(prompts, completions, rewards)
-                total_loss = group_loss if total_loss is None else total_loss + group_loss
-
-            if total_loss is None:
-                raise RuntimeError("Compat GRPO trainer received no rollout groups")
-
-            total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
-            losses.append(float(total_loss.detach().item()))
-
-        return {"loss": sum(losses) / max(len(losses), 1)}
-
-    def _compute_group_loss(
+    def _tokenize_batch(
         self,
         prompts: list[Any],
         completions: list[str],
-        rewards: list[float],
-    ) -> Any:
+    ) -> tuple[dict[str, Any], Any]:
+        """Tokenize prompts+completions, build labels with prompt masked out.
+
+        Returns (encoded_full, shifted_labels) where shifted_labels has -100
+        at every position that is padding or prompt (completion-only mask).
+        """
         torch = self._torch
 
         rendered_prompts = [
@@ -242,7 +227,10 @@ class _CompatGRPOTrainer:
             )
             for prompt in prompts
         ]
-        full_texts = [prompt_text + completion for prompt_text, completion in zip(rendered_prompts, completions, strict=False)]
+        full_texts = [
+            ptext + comp
+            for ptext, comp in zip(rendered_prompts, completions, strict=False)
+        ]
 
         encoded_full = self.tokenizer(
             full_texts,
@@ -263,28 +251,224 @@ class _CompatGRPOTrainer:
 
         labels = encoded_full["input_ids"].clone()
         labels[encoded_full["attention_mask"] == 0] = -100
-        for row_idx, prompt_len in enumerate(prompt_lengths):
-            labels[row_idx, : int(prompt_len)] = -100
+        for row_idx, plen in enumerate(prompt_lengths):
+            labels[row_idx, : int(plen)] = -100
 
-        outputs = self.model(**encoded_full)
-        logits = outputs.logits[:, :-1, :]
+        # Shift to align logits(t) -> label(t+1)
         shifted_labels = labels[:, 1:]
+        return encoded_full, shifted_labels
+
+    def _masked_token_logprobs(
+        self,
+        encoded_full: dict[str, Any],
+        shifted_labels: Any,
+    ) -> Any:
+        """Compute per-token log-probs for the completion tokens.
+
+        Returns (S, L-1) tensor of log-probs at every position.  Positions
+        where shifted_labels == -100 are set to 0 (caller should mask them).
+        """
+        torch = self._torch
+        outputs = self.model(**encoded_full)
+        logits = outputs.logits[:, :-1, :]  # (S, L-1, V)
 
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
         gather_labels = shifted_labels.masked_fill(shifted_labels == -100, 0)
         token_log_probs = log_probs.gather(-1, gather_labels.unsqueeze(-1)).squeeze(-1)
-        valid_mask = shifted_labels != -100
-        token_log_probs = token_log_probs * valid_mask
+        # Zero out invalid positions but don't multiply — keep raw logprobs
+        token_log_probs = token_log_probs.masked_fill(shifted_labels == -100, 0.0)
+        return token_log_probs
 
-        token_counts = valid_mask.sum(dim=1).clamp_min(1)
-        seq_log_probs = token_log_probs.sum(dim=1) / token_counts
+    # ------------------------------------------------------------------
+    # Advantage computation
+    # ------------------------------------------------------------------
 
-        reward_tensor = torch.tensor(rewards, device=device, dtype=seq_log_probs.dtype)
-        advantages = reward_tensor - reward_tensor.mean()
-        if reward_tensor.numel() > 1:
-            advantages = advantages / reward_tensor.std(unbiased=False).clamp_min(1e-6)
+    def _compute_group_advantages(
+        self,
+        grouped_raw_rewards: dict[str, list[float]],
+        total_samples: int,
+    ) -> Any:
+        """Compute group-normalised advantages from raw rewards.
 
-        return -(advantages.detach() * seq_log_probs).mean()
+        Args:
+            grouped_raw_rewards: maps group_id -> list of raw (un-normalized)
+                reward floats, in the order samples were flattened.
+            total_samples: total number of samples across all groups.
+
+        Returns:
+            (total_samples,) float tensor of advantages, detached.
+        """
+        import warnings
+
+        torch = self._torch
+        device = next(self.model.parameters()).device
+        advantages = torch.zeros(total_samples, device=device, dtype=torch.float32)
+        offset = 0
+
+        for group_id, rewards in grouped_raw_rewards.items():
+            n = len(rewards)
+            if n == 0:
+                continue
+            r = torch.tensor(rewards, device=device, dtype=torch.float32)
+            if n >= 2:
+                mean_r = r.mean()
+                std_r = r.std(unbiased=False).clamp_min(1e-8)
+                group_adv = (r - mean_r) / std_r
+            else:
+                warnings.warn(
+                    f"Group {group_id!r} has only 1 sample; "
+                    "setting advantage to 0.0 as defensive fallback.",
+                    stacklevel=2,
+                )
+                group_adv = torch.zeros_like(r)
+            advantages[offset : offset + n] = group_adv
+            offset += n
+
+        return advantages.detach()
+
+    # ------------------------------------------------------------------
+    # Main training step
+    # ------------------------------------------------------------------
+
+    def step(
+        self,
+        grouped_inputs: dict[str, list[list[Any]]],
+    ) -> dict[str, float]:
+        """Execute one GRPO step with PPO-style clipped surrogate + KL penalty.
+
+        grouped_inputs is produced by ``_group_for_grpo`` and has keys:
+            "prompts"   -> list[list[chat_messages]]  (per group)
+            "completions" -> list[list[str]]           (per group)
+            "raw_rewards" -> list[list[float]]         (per group, RAW not normalised)
+            "samples"     -> list[list[TrajectorySample]] (per group, for diagnostics)
+        """
+        torch = self._torch
+        import warnings
+
+        # --- Flatten across groups -----------------------------------------
+        all_prompts: list[Any] = []
+        all_completions: list[str] = []
+        grouped_raw_rewards: dict[str, list[float]] = {}
+        total_samples = 0
+        prompt_groups = grouped_inputs["prompts"]
+        completion_groups = grouped_inputs["completions"]
+        raw_reward_groups = grouped_inputs["raw_rewards"]
+        group_keys = sorted(grouped_raw_rewards) if grouped_raw_rewards else []
+        # Use the ordering from the grouped_inputs (already sorted by key)
+        for idx, (prompts, completions, rewards) in enumerate(
+            zip(prompt_groups, completion_groups, raw_reward_groups, strict=False)
+        ):
+            group_key = f"group_{idx}"
+            all_prompts.extend(prompts)
+            all_completions.extend(completions)
+            grouped_raw_rewards[group_key] = rewards
+            total_samples += len(prompts)
+
+        if total_samples == 0:
+            raise RuntimeError("MultiAgentGRPOTrainer received no rollout samples")
+
+        # --- Tokenize ONCE -------------------------------------------------
+        encoded_full, shifted_labels = self._tokenize_batch(all_prompts, all_completions)
+        completion_mask = (shifted_labels != -100).float()  # (S, L-1)
+
+        # --- 1. Old log-probs: frozen, captured ONCE -----------------------
+        with torch.no_grad():
+            self.model.eval()
+            old_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1)
+            self.model.train()
+
+        # --- 2. Ref log-probs: LoRA adapter disabled -----------------------
+        with torch.no_grad():
+            self.model.eval()
+            try:
+                cm = self.model.disable_adapter()
+            except AttributeError:
+                # Model doesn't support disable_adapter (e.g. non-PEFT);
+                # fall back to old_lp (KL will be zero, which is harmless).
+                cm = None
+
+            if cm is not None:
+                with cm:
+                    ref_lp = self._masked_token_logprobs(encoded_full, shifted_labels)
+            else:
+                warnings.warn(
+                    "Model does not expose disable_adapter(); "
+                    "reference log-probs will equal old log-probs (KL = 0).",
+                    stacklevel=2,
+                )
+                ref_lp = old_lp.clone()
+            self.model.train()
+
+        # --- 3. Advantages: computed once, detached -------------------------
+        advantages = self._compute_group_advantages(
+            grouped_raw_rewards, total_samples
+        )  # (S,)
+
+        # --- 4. Inner PPO epoch loop ----------------------------------------
+        for _epoch in range(self.num_train_epochs_per_step):
+            new_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1), WITH grad
+
+            # FP16-safe log-prob ratio via log-space delta
+            delta = (new_lp - old_lp).clamp(-5.0, 5.0)  # (S, L-1)
+            ratio = delta.exp()  # (S, L-1)
+
+            # Broadcast advantage to token dimension: (S,) -> (S, L-1)
+            A_tok = advantages.unsqueeze(-1) * torch.ones_like(ratio)
+
+            # Clipped surrogate
+            surr1 = ratio * A_tok
+            surr2 = ratio.clamp(1.0 - self.clip_range, 1.0 + self.clip_range) * A_tok
+            policy_loss = (
+                -(torch.min(surr1, surr2) * completion_mask).sum()
+                / completion_mask.sum().clamp_min(1.0)
+            )
+
+            # Schulman k3 KL estimator: k3 = exp(ref - new) - (ref - new) - 1
+            ref_delta = ref_lp - new_lp
+            kl_per_tok = ref_delta.exp() - ref_delta - 1.0  # >= 0 by construction
+            kl_loss = (
+                (kl_per_tok * completion_mask).sum()
+                / completion_mask.sum().clamp_min(1.0)
+            )
+
+            loss = policy_loss + self.kl_coef * kl_loss
+
+            self.optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            self.optimizer.step()
+
+        # --- 5. Diagnostics -------------------------------------------------
+        mask_sum = completion_mask.sum().clamp_min(1.0).item()
+        masked_ratio = ratio.detach() * completion_mask
+        ratio_mean = masked_ratio.sum().item() / mask_sum
+        # Masked std: E[r^2] - E[r]^2  under the mask
+        ratio_sq_mean = (masked_ratio ** 2).sum().item() / mask_sum
+        ratio_std = (max(ratio_sq_mean - ratio_mean ** 2, 0.0)) ** 0.5
+        # Clip fraction: fraction of valid tokens where ratio is outside clip range
+        outside_clip = (
+            ((ratio.detach() < 1.0 - self.clip_range)
+             | (ratio.detach() > 1.0 + self.clip_range))
+            * completion_mask
+        )
+        clip_fraction = outside_clip.sum().item() / mask_sum
+        kl_max = (kl_per_tok.detach() * completion_mask).max().item()
+        mask_coverage = completion_mask.mean().item()
+        mean_advantage = advantages.mean().item()
+        advantage_std = advantages.std().item() if advantages.numel() > 1 else 0.0
+
+        return {
+            "loss": loss.detach().item(),
+            "policy_loss": policy_loss.detach().item(),
+            "kl_loss": kl_loss.detach().item(),
+            "ratio_mean": ratio_mean,
+            "ratio_std": ratio_std,
+            "clip_fraction": clip_fraction,
+            "kl_max": kl_max,
+            "mask_coverage": mask_coverage,
+            "mean_advantage": mean_advantage,
+            "advantage_std": advantage_std,
+        }
 
 
 def _build_grpo_trainer(GRPOTrainer: Any, policy: Any, config: TrainingConfig) -> Any:
@@ -317,13 +501,15 @@ def _build_grpo_trainer(GRPOTrainer: Any, policy: Any, config: TrainingConfig) -
         message = str(exc)
         if "reward_funcs" in message:
             print(
-                "Falling back to local compat GRPO trainer because the installed "
-                "TRL GRPOTrainer expects the newer reward_funcs-based API."
+                "Falling back to local multi-agent GRPO trainer because the "
+                "installed TRL GRPOTrainer expects the newer reward_funcs-based API."
             )
-            return _CompatGRPOTrainer(
+            return MultiAgentGRPOTrainer(
                 model=trainer_model,
                 tokenizer=tokenizer,
                 learning_rate=config.grpo.learning_rate,
+                kl_coef=config.grpo.kl_coef,
+                clip_range=config.grpo.clip_range,
                 group_size=config.grpo.group_size,
                 num_train_epochs_per_step=config.grpo.num_train_epochs_per_step,
             )
@@ -331,14 +517,25 @@ def _build_grpo_trainer(GRPOTrainer: Any, policy: Any, config: TrainingConfig) -
 
 
 def _call_trainer_step(trainer: Any, grouped_inputs: dict[str, list[list[Any]]]) -> Any:
-    """Call the trainer step using a permissive signature fallback."""
+    """Call the trainer step with the grouped-inputs dict.
+
+    MultiAgentGRPOTrainer.step expects a single dict argument produced by
+    ``_group_for_grpo``.  TRL-based trainers (when compatible) are tried
+    first with keyword args, then positional.
+    """
     step_fn = getattr(trainer, "step", None)
     if step_fn is None:
-        raise RuntimeError("GRPOTrainer does not expose a step(...) method")
+        raise RuntimeError("GRPOTrainer does not expose a step(...) method)")
+
+    # Fast path: our MultiAgentGRPOTrainer accepts a single dict
+    try:
+        return step_fn(grouped_inputs=grouped_inputs)
+    except TypeError:
+        pass
 
     prompt_groups = grouped_inputs["prompts"]
     completion_groups = grouped_inputs["completions"]
-    reward_groups = grouped_inputs["rewards"]
+    reward_groups = grouped_inputs["raw_rewards"]
 
     try:
         return step_fn(
@@ -356,17 +553,21 @@ def _group_for_grpo(results: list[Any]) -> dict[str, list[list[Any]]]:
         for sample in result.samples:
             bucket = grouped.setdefault(
                 sample.group_id,
-                {"prompts": [], "completions": [], "rewards": []},
+                {"prompts": [], "completions": [], "raw_rewards": [], "normalized_rewards": [], "samples": []},
             )
             bucket["prompts"].append(sample.prompt)
             bucket["completions"].append(sample.completion_text)
-            bucket["rewards"].append(sample.normalized_reward)
+            bucket["raw_rewards"].append(sample.raw_reward)
+            bucket["normalized_rewards"].append(sample.normalized_reward)
+            bucket["samples"].append(sample)
 
     ordered_keys = sorted(grouped)
     return {
         "prompts": [grouped[key]["prompts"] for key in ordered_keys],
         "completions": [grouped[key]["completions"] for key in ordered_keys],
-        "rewards": [grouped[key]["rewards"] for key in ordered_keys],
+        "raw_rewards": [grouped[key]["raw_rewards"] for key in ordered_keys],
+        "normalized_rewards": [grouped[key]["normalized_rewards"] for key in ordered_keys],
+        "samples": [grouped[key]["samples"] for key in ordered_keys],
     }
 
 

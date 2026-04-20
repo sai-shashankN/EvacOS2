@@ -65,7 +65,7 @@ class TestCollectEpisode:
         assert result.wall_clock_seconds > 0
 
     def test_group_id_format(self):
-        """group_id format is 'tier_<tier>_<role>' for every sample."""
+        """group_id uses role-specific semantics: orchestrator is batch-wide, floor is per-(episode, round)."""
         env = _make_env()
         policy = _make_policy(seed=1)
         result = collect_episode(
@@ -78,9 +78,11 @@ class TestCollectEpisode:
         )
         for sample in result.samples:
             if sample.role == "orchestrator":
-                assert sample.group_id == "tier_easy_orchestrator"
+                assert sample.group_id == "rollout_orchestrator"
             else:
-                assert sample.group_id == "tier_easy_floor_agent"
+                assert sample.group_id.startswith("ep_")
+                assert "_r_" in sample.group_id
+                assert sample.group_id.endswith("_floor")
 
 
 class TestCollectBatchEvalSeeds:
