@@ -316,9 +316,19 @@ class RoundProtocol:
         if orchestrator_action is not None and orchestrator_action.action_type == ActionTypeMA.broadcast_directive:
             directive_data = orchestrator_action.arguments.get("directive")
             if directive_data is not None:
-                directive = Directive.model_validate(directive_data)
-                directive_store.issue(directive)
-                self._mark_addressed_handoffs_for_directive(handoff_store, directive)
+                try:
+                    directive = Directive.model_validate(directive_data)
+                except Exception as exc:
+                    rejections.append({
+                        "agent_id": orchestrator_action.agent_id,
+                        "action_id": orchestrator_action.action_id,
+                        "action_type": orchestrator_action.action_type.value,
+                        "reason": f"invalid_directive_payload: {exc}",
+                    })
+                    orchestrator_action = None
+                else:
+                    directive_store.issue(directive)
+                    self._mark_addressed_handoffs_for_directive(handoff_store, directive)
 
         # Tick directives for expiration
         directive_store.tick(round_id)
