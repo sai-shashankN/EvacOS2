@@ -206,6 +206,9 @@ def hf_policy_factory(
                 torch_dtype = getattr(torch, torch_dtype, getattr(torch, "float32", None))
 
             self._tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self._tokenizer.padding_side = "left"
+            if getattr(self._tokenizer, "pad_token", None) is None:
+                self._tokenizer.pad_token = self._tokenizer.eos_token
             self._model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 torch_dtype=torch_dtype,
@@ -399,6 +402,9 @@ class UnslothPolicy:
 
         self._model = model
         self._tokenizer = tokenizer
+        self._tokenizer.padding_side = "left"
+        if getattr(self._tokenizer, "pad_token", None) is None:
+            self._tokenizer.pad_token = self._tokenizer.eos_token
 
     # ------------------------------------------------------------------ Policy
 
@@ -467,6 +473,7 @@ class UnslothPolicy:
         tokenizer = self._tokenizer
         if getattr(tokenizer, "pad_token", None) is None:
             tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
 
         encoded = tokenizer(
             rendered,

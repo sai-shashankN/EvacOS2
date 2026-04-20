@@ -479,6 +479,14 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     raw = _load_yaml_config(config_path)
     config = TrainingConfig(**raw)
 
+    if config.backend == "unsloth":
+        try:
+            # Import Unsloth before TRL / transformers / PEFT so its monkey
+            # patches apply to the training stack as intended.
+            import unsloth  # type: ignore  # noqa: F401
+        except ImportError:
+            pass
+
     try:
         import torch  # noqa: F401
     except ImportError as exc:
