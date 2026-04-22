@@ -589,3 +589,29 @@ class TestTransformersCompatShim:
             sys.modules.pop("transformers.cache_utils", None)
             for key, value in saved.items():
                 sys.modules[key] = value
+
+    def test_patch_transformers_cache_exports_falls_back_to_dynamiccache(self, monkeypatch):
+        import sys
+
+        from training.compat import patch_transformers_cache_exports
+
+        fake_transformers = types.ModuleType("transformers")
+
+        class FakeDynamicCache:
+            pass
+
+        fake_transformers.DynamicCache = FakeDynamicCache  # type: ignore[attr-defined]
+
+        saved: dict[str, object] = {}
+        if "transformers" in sys.modules:
+            saved["transformers"] = sys.modules["transformers"]
+
+        monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+        try:
+            assert not hasattr(fake_transformers, "HybridCache")
+            patch_transformers_cache_exports()
+            assert fake_transformers.HybridCache is FakeDynamicCache  # type: ignore[attr-defined]
+        finally:
+            sys.modules.pop("transformers", None)
+            for key, value in saved.items():
+                sys.modules[key] = value

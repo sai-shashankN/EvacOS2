@@ -30,7 +30,7 @@ def patch_transformers_cache_exports() -> None:
     try:
         from transformers import cache_utils  # type: ignore
     except Exception:
-        return
+        cache_utils = None  # type: ignore[assignment]
 
     for name in (
         "Cache",
@@ -38,5 +38,26 @@ def patch_transformers_cache_exports() -> None:
         "EncoderDecoderCache",
         "HybridCache",
     ):
-        if not hasattr(transformers, name) and hasattr(cache_utils, name):
-            setattr(transformers, name, getattr(cache_utils, name))
+        if hasattr(transformers, name):
+            continue
+
+        replacement = None
+        if cache_utils is not None and hasattr(cache_utils, name):
+            replacement = getattr(cache_utils, name)
+        elif name == "HybridCache":
+            replacement = (
+                getattr(transformers, "DynamicCache", None)
+                or getattr(transformers, "Cache", None)
+            )
+        elif name == "EncoderDecoderCache":
+            replacement = (
+                getattr(transformers, "Cache", None)
+                or getattr(transformers, "DynamicCache", None)
+            )
+        elif name == "DynamicCache":
+            replacement = getattr(transformers, "Cache", None)
+        elif name == "Cache":
+            replacement = object
+
+        if replacement is not None:
+            setattr(transformers, name, replacement)
