@@ -50,6 +50,12 @@ class BeliefStore:
                 reason="horizon_out_of_range",
                 belief_id=belief.belief_id,
             )
+        if belief.belief_id in self._beliefs:
+            return BeliefRegistration(
+                accepted=False,
+                reason="duplicate_belief_id",
+                belief_id=belief.belief_id,
+            )
 
         target_key = tuple(sorted(belief.target_entity_ids))
         pending_for_predictor = self.pending_beliefs(predictor)

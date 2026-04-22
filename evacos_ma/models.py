@@ -100,6 +100,15 @@ class RewardWeights(EvacBaseModel):
     floor_prediction: float = 0.3
     floor_scout_cost: float = 1.0
     duplicate_belief_penalty: float = 1.0
+    team_progress_dense_floor: float = 0.5
+    team_progress_dense_orchestrator: float = 0.8
+    floor_saved: float = 1.0
+    floor_lost: float = -1.0
+    floor_invalid_action: float = -1.0
+    total_saved_terminal: float = 1.0
+    total_lost_terminal: float = -1.0
+    coordination_bonus: float = -0.3
+    directive_quality: float = 0.2
 
 
 class ThreatState(EvacBaseModel):
@@ -550,3 +559,4 @@ class EpisodeStateInternal(EvacBaseModel):
     last_floor_reward_breakdowns: dict[str, dict[str, float]] = Field(default_factory=dict)
     last_prediction_score_by_agent: dict[str, float] = Field(default_factory=dict)
     belief_audit_log: list[dict[str, Any]] = Field(default_factory=list)
+    rollout_metadata: dict[str, Any] = Field(default_factory=dict)

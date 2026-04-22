@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from curriculum.controller import EVAL_SEEDS
 from evacos_ma.models import DisasterType
-from training.policy_adapter import Policy
+from evaluation._training_contract import Policy
 
 from .fixed_suite import DEFAULT_DISASTER_FAMILIES, FixedSuiteResult, SCHEMA_VERSION, run_fixed_suite
 

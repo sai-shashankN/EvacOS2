@@ -7,7 +7,9 @@ import pytest
 from evacos_ma.env import EvacEnvironment
 from evacos_ma.models import (
     ActionType,
+    DisasterType,
     EvacuateFloorAction,
+    IncidentOutcomes,
     LockdownRoomAction,
     Occupancy,
     RouteCiviliansAction,
@@ -15,6 +17,7 @@ from evacos_ma.models import (
     TerminationReason,
     WaitAction,
 )
+from tests.procgen_helpers import make_five_floor_building
 
 
 def _room_by_id(ep, room_id: str):
@@ -44,6 +47,53 @@ def _reward_component_sum(reward) -> float:
     )
 
 
+def _population_conservation_total(ep) -> int:
+    room_total = sum(
+        room.occupancy.total
+        for floor in ep.building.floors
+        for room in floor.rooms
+    )
+    transit_total = sum(group.occupancy.total for group in ep.civilians_in_transit)
+    return ep.civilians_saved.total + ep.civilians_lost.total + room_total + transit_total
+
+
+def _prepare_single_source_episode(env: EvacEnvironment, episode_id: str, *, room_id: str, occupancy: Occupancy):
+    ep = env.get_internal_state(episode_id)
+    for floor in ep.building.floors:
+        for room in floor.rooms:
+            room.occupancy = Occupancy()
+    source_room = _room_by_id(ep, room_id)
+    source_room.occupancy = occupancy.model_copy(deep=True)
+    ep.total_civilians = occupancy.model_copy(deep=True)
+    ep.civilians_saved = Occupancy()
+    ep.civilians_lost = Occupancy()
+    ep.civilians_in_transit = []
+    ep.resolved_incident_outcomes = IncidentOutcomes()
+    ep.room_incident_outcomes = {}
+    env._sync_room_incident_outcomes(ep)
+    return ep, source_room
+
+
+def _make_atomic_transit_fixture(env: EvacEnvironment):
+    episode_id, _ = env.reset("task_1_fire_easy", 42)
+    ep = env.get_internal_state(episode_id)
+    ep.building = make_five_floor_building(stairwell_floors=(), with_elevator=True, exits_on_floors=(0,))
+    source_room = _room_by_id(ep, "F4_R0")
+    source_room.occupancy = Occupancy(mobile=4, injured=5)
+    for floor in ep.building.floors:
+        for room in floor.rooms:
+            if room.room_id != source_room.room_id:
+                room.occupancy = Occupancy()
+    ep.total_civilians = Occupancy(mobile=4, injured=5)
+    ep.civilians_saved = Occupancy()
+    ep.civilians_lost = Occupancy()
+    ep.civilians_in_transit = []
+    ep.resolved_incident_outcomes = IncidentOutcomes()
+    ep.room_incident_outcomes = {}
+    env._sync_room_incident_outcomes(ep)
+    return ep, source_room
+
+
 def test_reset_creates_episode() -> None:
     env = EvacEnvironment()
 
@@ -64,6 +114,46 @@ def test_reset_deterministic() -> None:
 
     assert episode_a != episode_b
     assert _normalized_observation(observation_a) == _normalized_observation(observation_b)
+
+
+def test_env_reset_procgen_max_steps_respected() -> None:
+    env = EvacEnvironment()
+
+    episode_id, _ = env.reset_multi_agent(
+        "procgen_easy_fire",
+        seed=42,
+        procgen_tier="easy",
+        procgen_disaster_family=DisasterType.fire,
+        procgen_max_steps=200,
+    )
+    assert env.get_internal_state(episode_id).task.max_steps == 200
+
+
+def test_env_reset_public_procgen_max_steps_respected() -> None:
+    env = EvacEnvironment()
+
+    episode_id, observation = env.reset(
+        "procgen_easy_fire",
+        seed=42,
+        procgen_tier="easy",
+        procgen_disaster_family=DisasterType.fire,
+        procgen_max_steps=120,
+    )
+
+    assert observation.episode_id == episode_id
+    assert env.get_internal_state(episode_id).task.max_steps == 120
+
+
+def test_env_reset_procgen_max_steps_default_preserved() -> None:
+    env = EvacEnvironment()
+
+    episode_id, _ = env.reset_multi_agent(
+        "procgen_easy_fire",
+        seed=42,
+        procgen_tier="easy",
+        procgen_disaster_family=DisasterType.fire,
+    )
+    assert env.get_internal_state(episode_id).task.max_steps == 80
 
 
 def test_step_wait_action() -> None:
@@ -347,3 +437,134 @@ def test_evacuate_floor_routes_all() -> None:
     ep = env.get_internal_state(episode_id)
     for room_id in before:
         assert _room_by_id(ep, room_id).occupancy.total == 0
+
+
+def test_exit_bound_transit_returns_to_source_when_exit_blocks_mid_transit() -> None:
+    env = EvacEnvironment()
+    episode_id, _ = env.reset("task_1_fire_easy", 42)
+    ep, source_room = _prepare_single_source_episode(
+        env,
+        episode_id,
+        room_id="F0_R0",
+        occupancy=Occupancy(injured=1),
+    )
+    starting_total = _population_conservation_total(ep)
+
+    env.step(
+        RouteCiviliansAction(
+            episode_id=episode_id,
+            expected_step=0,
+            action_type=ActionType.route_civilians,
+            from_node_id="F0_R0",
+            to_node_id="EX0",
+            occupancy=Occupancy(injured=1),
+            preference="fastest",
+        )
+    )
+
+    assert len(ep.civilians_in_transit) == 1
+    assert ep.civilians_in_transit[0].steps_remaining == 1
+
+    env._exit_lookup(ep.building)["EX0"].blocked = True
+
+    _, _, done, _ = env.step(
+        WaitAction(
+            episode_id=episode_id,
+            expected_step=1,
+            action_type=ActionType.wait,
+        )
+    )
+
+    assert ep.civilians_in_transit == []
+    assert source_room.occupancy.injured == 1
+    assert ep.room_incident_outcomes[source_room.room_id].safe == 1
+    assert ep.civilians_lost.total == 0
+    assert done is False
+    assert _population_conservation_total(ep) == starting_total
+
+
+def test_exit_bound_transit_marked_lost_when_source_becomes_impassable() -> None:
+    env = EvacEnvironment()
+    episode_id, _ = env.reset("task_1_fire_easy", 42)
+    ep, source_room = _prepare_single_source_episode(
+        env,
+        episode_id,
+        room_id="F0_R0",
+        occupancy=Occupancy(injured=1),
+    )
+    starting_total = _population_conservation_total(ep)
+
+    env.step(
+        RouteCiviliansAction(
+            episode_id=episode_id,
+            expected_step=0,
+            action_type=ActionType.route_civilians,
+            from_node_id="F0_R0",
+            to_node_id="EX0",
+            occupancy=Occupancy(injured=1),
+            preference="fastest",
+        )
+    )
+
+    env._exit_lookup(ep.building)["EX0"].blocked = True
+    source_room.accessible = False
+
+    env.step(
+        WaitAction(
+            episode_id=episode_id,
+            expected_step=1,
+            action_type=ActionType.wait,
+        )
+    )
+
+    assert ep.civilians_in_transit == []
+    assert source_room.occupancy.total == 0
+    assert ep.civilians_lost.injured == 1
+    assert ep.resolved_incident_outcomes.deaths == 1
+    assert _population_conservation_total(ep) == starting_total
+
+
+def test_build_transit_groups_atomic_rollback_on_capacity_failure() -> None:
+    env = EvacEnvironment()
+    ep, source_room = _make_atomic_transit_fixture(env)
+    before = source_room.occupancy.model_copy(deep=True)
+    before_total = _population_conservation_total(ep)
+
+    valid, reason, transits = env._build_transit_groups(
+        ep,
+        source_room,
+        "F3_R0",
+        Occupancy(mobile=4, injured=5),
+        preference="fastest",
+    )
+
+    assert valid is False
+    assert reason is not None and "capacity exceeded" in reason
+    assert transits == []
+    assert source_room.occupancy.mobile == before.mobile
+    assert source_room.occupancy.injured == before.injured
+    assert ep.civilians_in_transit == []
+    assert _population_conservation_total(ep) == before_total
+
+
+def test_build_transit_groups_commits_all_when_all_cohorts_valid() -> None:
+    env = EvacEnvironment()
+    ep, source_room = _make_atomic_transit_fixture(env)
+    for floor in ep.building.floors:
+        for elevator in floor.elevators:
+            elevator.capacity = 10
+
+    valid, reason, transits = env._build_transit_groups(
+        ep,
+        source_room,
+        "F3_R0",
+        Occupancy(mobile=4, injured=5),
+        preference="fastest",
+    )
+
+    assert valid is True
+    assert reason is None
+    assert len(transits) == 2
+    assert sum(group.occupancy.total for group in transits) == 9
+    assert source_room.occupancy.total == 0
+    assert ep.civilians_in_transit == []

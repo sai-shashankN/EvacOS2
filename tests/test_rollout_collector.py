@@ -1,8 +1,10 @@
 """Tests for the multi-role rollout collector."""
 
 import json
+import math
 import os
 import random
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -83,6 +85,161 @@ class TestCollectEpisode:
                 assert sample.group_id.startswith("ep_")
                 assert "_r_" in sample.group_id
                 assert sample.group_id.endswith("_floor")
+
+    def test_episode_summary_uses_real_civilian_counts(self):
+        env = _make_env()
+        policy = _make_policy(seed=7)
+        logs_dir = _tmp_logs_dir()
+        try:
+            result = collect_episode(
+                env,
+                policy,
+                seed=11,
+                tier="easy",
+                disaster_family=DisasterType.fire,
+                max_rounds=2,
+                jsonl_dir=logs_dir,
+            )
+            state = env.get_internal_state(result.episode_id)
+            summary_rows = [
+                json.loads(line)
+                for line in (logs_dir / "episode_summary.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            summary = summary_rows[-1]
+            assert summary["civilians_saved"] == state.civilians_saved.total
+            assert summary["civilians_lost"] == state.civilians_lost.total
+        finally:
+            shutil.rmtree(logs_dir, ignore_errors=True)
+
+    def test_orchestrator_rationale_audit_uses_override_target_counterfactual_delta(self, monkeypatch):
+        from evacos_ma import round_protocol as round_protocol_mod
+
+        class OverridePolicy:
+            @staticmethod
+            def _episode_id(prompt):
+                system_msg = next(msg for msg in prompt if msg["role"] == "system")
+                match = re.search(r'"episode_id"\s*:\s*"([^"]+)"', system_msg["content"])
+                return match.group(1) if match else "ep_test"
+
+            @staticmethod
+            def _round_id(prompt):
+                system_msg = next(msg for msg in prompt if msg["role"] == "system")
+                match = re.search(r"Round:\s*(\d+)", system_msg["content"])
+                return int(match.group(1)) if match else 0
+
+            def act(self, prompt, agent_id, role):
+                episode_id = self._episode_id(prompt)
+                round_id = self._round_id(prompt)
+                if role == "orchestrator":
+                    return json.dumps(
+                        {
+                            "episode_id": episode_id,
+                            "round_id": round_id,
+                            "agent_id": "orchestrator",
+                            "action_id": "orch_override",
+                            "action_type": "override_floor_agent",
+                            "arguments": {
+                                "target_floor_agent_id": "floor_0_agent",
+                                "replacement_action_type": "wait",
+                                "replacement_arguments": {},
+                            },
+                            "rationale": "override floor_0_agent for audit coverage",
+                        }
+                    )
+                return json.dumps(
+                    {
+                        "episode_id": episode_id,
+                        "round_id": round_id,
+                        "agent_id": agent_id,
+                        "action_id": f"act_{agent_id}",
+                        "action_type": "wait",
+                        "arguments": {},
+                        "rationale": f"{agent_id} waiting",
+                    }
+                )
+
+        monkeypatch.setattr(round_protocol_mod, "_compute_counterfactual_delta", lambda *args, **kwargs: 7.25)
+
+        env = _make_env()
+        logs_dir = _tmp_logs_dir()
+        try:
+            collect_episode(
+                env,
+                OverridePolicy(),
+                seed=21,
+                tier="easy",
+                disaster_family=DisasterType.fire,
+                max_rounds=1,
+                jsonl_dir=logs_dir,
+            )
+            rationale_rows = [
+                json.loads(line)
+                for line in (logs_dir / "rationale_audit.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            orch_row = next(row for row in rationale_rows if row["agent_id"] == "orchestrator")
+            assert orch_row["action_id"] == "orch_override"
+            assert orch_row["counterfactual_delta"] == 7.25
+        finally:
+            shutil.rmtree(logs_dir, ignore_errors=True)
+
+    def test_episode_collects_nonzero_raw_reward_when_physics_active(self):
+        env = _make_env()
+        policy = _make_policy(seed=17)
+        logs_dir = _tmp_logs_dir()
+        try:
+            result = collect_episode(
+                env,
+                policy,
+                seed=33,
+                tier="easy",
+                disaster_family=DisasterType.fire,
+                max_rounds=1,
+                jsonl_dir=logs_dir,
+            )
+            assert any(sample.raw_reward != 0.0 for sample in result.samples)
+            reward_rows = [
+                json.loads(line)
+                for line in (logs_dir / "reward_trace.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            assert any(
+                row["breakdown"].get("base_sim_reward", 0.0) != 0.0
+                or row["breakdown"].get("base_sim_reward_share", 0.0) != 0.0
+                for row in reward_rows
+            )
+        finally:
+            shutil.rmtree(logs_dir, ignore_errors=True)
+
+    def test_rollout_threads_max_rounds_to_env(self):
+        env = _make_env()
+        policy = _make_policy(seed=23)
+        result = collect_episode(
+            env,
+            policy,
+            seed=37,
+            tier="easy",
+            disaster_family=DisasterType.fire,
+            max_rounds=150,
+        )
+        assert env.get_internal_state(result.episode_id).task.max_steps == 150
+
+    def test_trajectory_sample_normalized_reward_uses_normalizer(self):
+        env = _make_env()
+        policy = _make_policy(seed=19)
+        result = collect_episode(
+            env,
+            policy,
+            seed=35,
+            tier="easy",
+            disaster_family=DisasterType.fire,
+            max_rounds=1,
+        )
+        assert result.samples
+        for sample in result.samples:
+            expected = max(-1.0, min(1.0, math.tanh(sample.raw_reward)))
+            assert sample.normalized_reward == expected
 
 
 class TestCollectBatchEvalSeeds:
@@ -211,3 +368,33 @@ class TestParseFallback:
         assert fallback_count > 0
         # Every sample should be present (no crash)
         assert len(result.samples) == result.num_rounds * 6
+
+
+class TestCiviliansSavedLost:
+    def test_episode_summary_has_real_civilian_counts(self):
+        """episode_summary.jsonl should have civilians_saved/lost from env state, not hardcoded 0."""
+        env = _make_env()
+        policy = _make_policy(seed=42)
+        logs_dir = _tmp_logs_dir()
+        try:
+            collect_episode(
+                env,
+                policy,
+                seed=77,
+                tier="easy",
+                disaster_family=DisasterType.fire,
+                max_rounds=3,
+                jsonl_dir=logs_dir,
+            )
+            summary_path = logs_dir / "episode_summary.jsonl"
+            assert summary_path.exists()
+            rows = [json.loads(line) for line in summary_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            assert rows
+            row = rows[-1]
+            # The values should be integers (not hardcoded 0)
+            assert "civilians_saved" in row
+            assert "civilians_lost" in row
+            assert isinstance(row["civilians_saved"], int), f"Expected int, got {type(row['civilians_saved'])}"
+            assert isinstance(row["civilians_lost"], int), f"Expected int, got {type(row['civilians_lost'])}"
+        finally:
+            shutil.rmtree(logs_dir, ignore_errors=True)

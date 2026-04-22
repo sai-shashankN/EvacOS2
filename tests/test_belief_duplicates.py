@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from evacos_ma.env import EvacEnvironment
+from evacos_ma.beliefs import BeliefStore
 from evacos_ma.schemas.multi_agent import ActionTypeMA, StructuredBelief
 
 
@@ -62,3 +63,37 @@ def test_slot_limit_rejects_second_pending_target_for_same_predictor() -> None:
     assert reward.breakdown.duplicate_belief_penalty < 0
     assert info["score_snapshot"]["registrations"]["floor_2_agent"]["accepted"] is False
     assert info["score_snapshot"]["registrations"]["floor_2_agent"]["reason"] == "slot_limit"
+
+
+def test_duplicate_belief_id_is_rejected_without_replacing_original() -> None:
+    store = BeliefStore(
+        episode_id="ep",
+        seed=42,
+        tier="easy",
+        disaster_family="fire",
+    )
+    first = StructuredBelief(
+        belief_id="belief-1",
+        predictor_agent_id="floor_0_agent",
+        target_entity_ids=["F0_R1"],
+        horizon=2,
+        prediction_payload={"expected_civilians_in_room": 2},
+        confidence=0.7,
+    )
+    second = StructuredBelief(
+        belief_id="belief-1",
+        predictor_agent_id="floor_0_agent",
+        target_entity_ids=["F0_R2"],
+        horizon=2,
+        prediction_payload={"expected_civilians_in_room": 1},
+        confidence=0.9,
+    )
+
+    first_result = store.register(first, "floor_0_agent")
+    second_result = store.register(second, "floor_0_agent")
+
+    assert first_result.accepted is True
+    assert second_result.accepted is False
+    assert second_result.reason == "duplicate_belief_id"
+    assert [belief.belief_id for belief in store.beliefs()] == ["belief-1"]
+    assert store.beliefs()[0].target_entity_ids == ["F0_R1"]

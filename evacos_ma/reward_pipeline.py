@@ -75,11 +75,16 @@ def normalize_reward(
 
 
 class RewardPipeline:
-    """Orchestrates per-tier running reward stats and normalization.
+    """Orchestrates per-tier environment reward stats and normalization.
 
     Holds one RunningRewardStats per tier. Usage pattern:
       1. Call normalize() to get normalized_reward for the current sample.
       2. Call observe() AFTER using the current snapshot (avoids self-normalization).
+
+    This is the environment/public reward contract keyed only by scenario tier.
+    Training-time rollout normalization is handled separately by
+    ``training.reward.RewardNormalizer``, which intentionally tracks
+    ``(role, tier)`` stats instead.
     """
 
     def __init__(self) -> None:

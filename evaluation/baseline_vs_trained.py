@@ -7,12 +7,11 @@ import math
 from pathlib import Path
 from typing import Callable, Sequence
 
-import yaml
 from pydantic import BaseModel
 
 from curriculum.controller import EVAL_SEEDS
 from evacos_ma.models import DisasterType
-from training.policy_adapter import StubPolicy, hf_policy_factory
+from evaluation._training_contract import StubPolicy, hf_policy_factory
 
 from .fixed_suite import (
     DEFAULT_DISASTER_FAMILIES,
@@ -30,6 +29,12 @@ class ComparisonResult(BaseModel):
 
 
 def _load_model_name(config_path: Path = Path("training/config.yaml")) -> str:
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:
+        raise ImportError(
+            "PyYAML is required by evaluation.baseline_vs_trained._load_model_name()"
+        ) from exc
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     return str(data.get("model", {}).get("base", "Qwen/Qwen2.5B-Instruct"))
 
@@ -64,6 +69,7 @@ def run_comparison(
     rationale_mode: str = "linear_capped",
     output_csv: Path = Path("outputs/evals/baseline_vs_trained.csv"),
     skip_trained: bool = False,
+    trained_normalizer_snapshot: dict | None = None,
 ) -> ComparisonResult:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
@@ -75,6 +81,7 @@ def run_comparison(
         rationale_mode=rationale_mode,
         label="baseline",
         output_dir=output_csv.parent,
+        normalizer_snapshot=None,
     )
 
     trained_suite: FixedSuiteResult | None = None
@@ -91,6 +98,7 @@ def run_comparison(
             rationale_mode=rationale_mode,
             label="trained",
             output_dir=output_csv.parent,
+            normalizer_snapshot=trained_normalizer_snapshot,
         )
         trained_json = output_csv.parent / f"fixed_suite_trained_{rationale_mode}.json"
 

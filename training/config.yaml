@@ -22,7 +22,6 @@ rollout:
 grpo:
   learning_rate: 5.0e-6
   kl_coef: 0.04
-  group_size: 4
   clip_range: 0.2
   num_train_epochs_per_step: 1
 reward:

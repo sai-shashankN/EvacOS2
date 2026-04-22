@@ -1,16 +1,20 @@
 """Checkpoint save/load/rotate utilities.
 
 Heavy-dependency-free.  LoRA weight saving is delegated to the training loop.
+torch imports are function-local so the module imports without torch installed.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -23,6 +27,11 @@ class CheckpointBundle:
     lora_weights_path: Path  # pointer to the adapter weights dir
     model_name: str
     config_hash: str  # sha256 of the resolved TrainingConfig JSON
+    # Phase 12 fields — all default to None for backward compatibility
+    optimizer_state: dict | None = None
+    torch_rng_state: bytes | None = None  # pickled torch RNG state
+    torch_cuda_rng_state: bytes | None = None  # pickled torch CUDA RNG state
+    wandb_run_id: str | None = None
 
 
 def save_checkpoint(
@@ -30,11 +39,16 @@ def save_checkpoint(
     bundle: CheckpointBundle,
     extras: dict | None = None,
 ) -> Path:
-    """Save a checkpoint bundle to ``root/ckpt_<step>/`` and update ``root/latest/``."""
+    """Save a checkpoint bundle to ``root/ckpt_<step>/``.
+
+    NOTE: This no longer updates ``root/latest/``.  Call
+    :func:`atomic_replace_latest` separately after confirming all artifacts
+    (adapter weights, optimizer state, RNG pickles) are durable.
+    """
     ckpt_dir = root / f"ckpt_{bundle.step}"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    meta = {
+    meta: dict = {
         "step": bundle.step,
         "wall_seconds_total": bundle.wall_seconds_total,
         "curriculum_snapshot": bundle.curriculum_snapshot,
@@ -43,6 +57,8 @@ def save_checkpoint(
         "config_hash": bundle.config_hash,
         "lora_weights_path": str(bundle.lora_weights_path),
     }
+    if bundle.wandb_run_id is not None:
+        meta["wandb_run_id"] = bundle.wandb_run_id
     if extras:
         meta["extras"] = extras
 
@@ -52,20 +68,79 @@ def save_checkpoint(
     with open(ckpt_dir / "rollout_rng_state.pkl", "wb") as f:
         pickle.dump(bundle.rollout_rng_state, f)
 
-    # Update latest symlink/copy
-    latest_dir = root / "latest"
-    if latest_dir.exists():
-        shutil.rmtree(latest_dir, ignore_errors=True)
-    shutil.copytree(ckpt_dir, latest_dir)
+    # Phase 12: optimizer state
+    if bundle.optimizer_state is not None:
+        try:
+            import torch
+
+            torch.save(bundle.optimizer_state, ckpt_dir / "optimizer_state.pt")
+        except ImportError:
+            logger.debug(
+                "torch not importable \u2014 falling back to pickle for optimizer_state"
+            )
+            with open(ckpt_dir / "optimizer_state.pkl", "wb") as f:
+                pickle.dump(bundle.optimizer_state, f)
+
+    # Phase 12: torch RNG state
+    if bundle.torch_rng_state is not None:
+        with open(ckpt_dir / "torch_rng_state.pkl", "wb") as f:
+            pickle.dump(bundle.torch_rng_state, f)
+
+    # Phase 12: torch CUDA RNG state
+    if bundle.torch_cuda_rng_state is not None:
+        with open(ckpt_dir / "torch_cuda_rng_state.pkl", "wb") as f:
+            pickle.dump(bundle.torch_cuda_rng_state, f)
 
     return ckpt_dir
 
 
-def load_checkpoint(root: Path) -> CheckpointBundle | None:
-    """Load the latest checkpoint from ``root/latest/``."""
+def atomic_replace_latest(root: Path, ckpt_dir: Path) -> None:
+    """Atomically publish *ckpt_dir* as ``root/latest/``.
+
+    Writes to ``latest.tmp/`` first, then renames.  Best-effort atomicity
+    (POSIX rename is atomic; Windows is best-effort).
+    """
     latest_dir = root / "latest"
-    if not latest_dir.exists():
-        return None
+    tmp_dir = root / "latest.tmp"
+
+    # Clean up any leftover temp dir
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    shutil.copytree(ckpt_dir, tmp_dir)
+
+    if latest_dir.exists():
+        shutil.rmtree(latest_dir, ignore_errors=True)
+
+    try:
+        # os.rename is atomic on POSIX
+        import os
+
+        os.rename(str(tmp_dir), str(latest_dir))
+    except OSError:
+        # Fallback for cross-device or Windows cases
+        shutil.copytree(tmp_dir, latest_dir)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def load_checkpoint(root: Path) -> CheckpointBundle | None:
+    """Load the latest checkpoint from ``root/latest/``.
+
+    Backward-compatible: missing Phase-12 fields default to ``None`` with a
+    one-time warning per field.
+    """
+    latest_dir = root / "latest"
+
+    # If latest/ is missing or broken, try to find the highest valid ckpt_N/
+    if not latest_dir.exists() or not (latest_dir / "meta.json").exists():
+        found = _find_highest_valid_ckpt(root)
+        if found is not None:
+            logger.warning(
+                "latest/ is missing or corrupt; falling back to %s", found.name
+            )
+            latest_dir = found
+        else:
+            return None
 
     meta_path = latest_dir / "meta.json"
     if not meta_path.exists():
@@ -80,6 +155,48 @@ def load_checkpoint(root: Path) -> CheckpointBundle | None:
         with open(rng_path, "rb") as f:
             rng_state = pickle.load(f)
 
+    # Phase 12: optimizer state (backward compat)
+    optimizer_state: dict | None = None
+    opt_path = latest_dir / "optimizer_state.pt"
+    opt_pickle_path = latest_dir / "optimizer_state.pkl"
+    if opt_path.exists():
+        try:
+            import torch
+
+            optimizer_state = torch.load(opt_path, map_location="cpu", weights_only=False)
+        except ImportError:
+            logger.warning(
+                "torch not importable — optimizer_state.pt ignored"
+            )
+    elif opt_pickle_path.exists():
+        with open(opt_pickle_path, "rb") as f:
+            optimizer_state = pickle.load(f)
+    else:
+        logger.debug("optimizer_state.pt not found in checkpoint; starting fresh")
+
+    # Phase 12: torch RNG state
+    torch_rng_state: bytes | None = None
+    torch_rng_path = latest_dir / "torch_rng_state.pkl"
+    if torch_rng_path.exists():
+        with open(torch_rng_path, "rb") as f:
+            torch_rng_state = pickle.load(f)
+    else:
+        logger.debug("torch_rng_state.pkl not found in checkpoint")
+
+    # Phase 12: torch CUDA RNG state
+    torch_cuda_rng_state: bytes | None = None
+    cuda_rng_path = latest_dir / "torch_cuda_rng_state.pkl"
+    if cuda_rng_path.exists():
+        with open(cuda_rng_path, "rb") as f:
+            torch_cuda_rng_state = pickle.load(f)
+    else:
+        logger.debug("torch_cuda_rng_state.pkl not found in checkpoint")
+
+    # Phase 12: wandb run id
+    wandb_run_id: str | None = meta.get("wandb_run_id", None)
+    if "wandb_run_id" not in meta:
+        logger.debug("wandb_run_id not found in checkpoint meta.json")
+
     return CheckpointBundle(
         step=meta["step"],
         wall_seconds_total=meta["wall_seconds_total"],
@@ -89,7 +206,41 @@ def load_checkpoint(root: Path) -> CheckpointBundle | None:
         lora_weights_path=Path(meta["lora_weights_path"]),
         model_name=meta["model_name"],
         config_hash=meta["config_hash"],
+        optimizer_state=optimizer_state,
+        torch_rng_state=torch_rng_state,
+        torch_cuda_rng_state=torch_cuda_rng_state,
+        wandb_run_id=wandb_run_id,
     )
+
+
+def _find_highest_valid_ckpt(root: Path) -> Path | None:
+    """Walk *root* for the highest-numbered ``ckpt_N/`` that has a valid
+    ``meta.json`` and an existing ``lora_weights_path`` directory."""
+    candidates: list[tuple[int, Path]] = []
+    if not root.exists():
+        return None
+    for p in root.iterdir():
+        if not p.is_dir():
+            continue
+        m = re.match(r"ckpt_(\d+)", p.name)
+        if not m:
+            continue
+        meta_path = p / "meta.json"
+        if not meta_path.exists():
+            continue
+        # Check that the adapter directory referenced in meta.json exists
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            lora_path = Path(meta.get("lora_weights_path", ""))
+            if lora_path.exists():
+                candidates.append((int(m.group(1)), p))
+        except Exception:
+            continue
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0])
+    return candidates[-1][1]
 
 
 def rotate_checkpoints(root: Path, keep_last_n: int) -> None:
@@ -97,7 +248,7 @@ def rotate_checkpoints(root: Path, keep_last_n: int) -> None:
     if not root.exists():
         return
 
-    ckpt_dirs = []
+    ckpt_dirs: list[tuple[int, Path]] = []
     for p in root.iterdir():
         if p.is_dir() and re.match(r"ckpt_(\d+)", p.name):
             m = re.match(r"ckpt_(\d+)", p.name)

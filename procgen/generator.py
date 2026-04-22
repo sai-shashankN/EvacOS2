@@ -31,7 +31,7 @@ from evacos_ma.models import (
     Stairwell,
 )
 
-GENERATOR_CONFIG_VERSION = "2026.04.20"
+GENERATOR_CONFIG_VERSION = "2026.04.22"
 Tier = Literal["easy", "medium", "hard", "brutal"]
 
 # ---------------------------------------------------------------------------
@@ -94,6 +94,7 @@ class GeneratorConfig:
     tier: Tier
     disaster_family: str  # DisasterType.value
     config_version: str = GENERATOR_CONFIG_VERSION
+    min_playable_blockage_round: int = 1
 
     @property
     def knobs(self) -> dict:
@@ -112,12 +113,18 @@ class GeneratedInstance:
 # ---------------------------------------------------------------------------
 # Hashing
 # ---------------------------------------------------------------------------
-def _compute_config_hash(tier: str, disaster_family: str, config_version: str) -> str:
+def _compute_config_hash(
+    tier: str,
+    disaster_family: str,
+    config_version: str,
+    min_playable_blockage_round: int,
+) -> str:
     knobs = TIER_KNOBS[tier]
     canonical = {
         "tier": tier,
         "disaster_family": disaster_family,
         "config_version": config_version,
+        "min_playable_blockage_round": min_playable_blockage_round,
         "knobs": knobs,
     }
     blob = json.dumps(canonical, sort_keys=True).encode()
@@ -554,6 +561,7 @@ def generate_instance(
     tier: Tier,
     disaster_family: "str",
     config_version: str = GENERATOR_CONFIG_VERSION,
+    min_playable_blockage_round: int = 1,
 ) -> GeneratedInstance:
     """Generate a deterministic Building + ScheduledEvent set from (seed, tier, disaster_family)."""
     from evacos_ma.models import DisasterType
@@ -563,8 +571,18 @@ def generate_instance(
     df_str = df_enum.value
 
     knobs = TIER_KNOBS[tier]
-    config = GeneratorConfig(tier=tier, disaster_family=df_str, config_version=config_version)
-    config_hash = _compute_config_hash(tier, df_str, config_version)
+    config = GeneratorConfig(
+        tier=tier,
+        disaster_family=df_str,
+        config_version=config_version,
+        min_playable_blockage_round=min_playable_blockage_round,
+    )
+    config_hash = _compute_config_hash(
+        tier,
+        df_str,
+        config_version,
+        min_playable_blockage_round,
+    )
 
     rng = random.Random(seed)
 

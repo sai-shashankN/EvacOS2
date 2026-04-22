@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from training.checkpoint import (
+    atomic_replace_latest,
     CheckpointBundle,
     load_checkpoint,
     rotate_checkpoints,
@@ -35,6 +36,9 @@ class TestCheckpointRoundtrip:
         try:
             rng = random.Random(42)
             rng_state = pickle.dumps(rng.getstate())
+            lora_dir = ckpt_root / "ckpt_10" / "lora_adapter"
+            lora_dir.mkdir(parents=True)
+            (lora_dir / "adapter_config.json").write_text("{}")
 
             bundle = CheckpointBundle(
                 step=10,
@@ -42,13 +46,14 @@ class TestCheckpointRoundtrip:
                 curriculum_snapshot={"current_tier": {"fire": "easy"}, "stats": {}, "total_outcomes": 5},
                 normalizer_snapshot={"orchestrator:easy": {"count": 5, "mean": 0.3, "m2": 0.1}},
                 rollout_rng_state=rng_state,
-                lora_weights_path=ckpt_root / "lora_weights",
+                lora_weights_path=lora_dir,
                 model_name="stub",
                 config_hash="sha256:abcdef123456",
             )
 
             saved_path = save_checkpoint(ckpt_root, bundle)
             assert saved_path.exists()
+            atomic_replace_latest(ckpt_root, saved_path)
 
             loaded = load_checkpoint(ckpt_root)
             assert loaded is not None

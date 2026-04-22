@@ -154,8 +154,8 @@ class MultiAgentGRPOTrainer:
         learning_rate: float,
         kl_coef: float,
         clip_range: float,
-        group_size: int,
         num_train_epochs_per_step: int,
+        optimizer_state: dict | None = None,
     ) -> None:
         import torch
 
@@ -167,7 +167,6 @@ class MultiAgentGRPOTrainer:
         self.tokenizer = tokenizer
         self.kl_coef = float(kl_coef)
         self.clip_range = float(clip_range)
-        self.group_size = group_size
         self.num_train_epochs_per_step = max(1, int(num_train_epochs_per_step))
 
         if getattr(self.tokenizer, "pad_token", None) is None:
@@ -187,6 +186,12 @@ class MultiAgentGRPOTrainer:
             raise RuntimeError("MultiAgentGRPOTrainer found no trainable parameters")
 
         self.optimizer = torch.optim.AdamW(trainable_params, lr=learning_rate)
+        self._warned_missing_completion_token_ids = False
+        self._step_counter = 0
+
+        # Phase 12: restore optimizer state when resuming from checkpoint
+        if optimizer_state is not None:
+            self.optimizer.load_state_dict(optimizer_state)
 
     def _recover_trainable_params(self) -> list[Any]:
         """Re-enable LoRA params when an inference-mode wrapper froze them.
@@ -211,52 +216,184 @@ class MultiAgentGRPOTrainer:
         self,
         prompts: list[Any],
         completions: list[str],
+        completion_token_ids: list[list[int] | None] | None = None,
     ) -> tuple[dict[str, Any], Any]:
         """Tokenize prompts+completions, build labels with prompt masked out.
 
         Returns (encoded_full, shifted_labels) where shifted_labels has -100
         at every position that is padding or prompt (completion-only mask).
         """
+        import logging
+
         torch = self._torch
+        logger = logging.getLogger(__name__)
 
-        rendered_prompts = [
-            self.tokenizer.apply_chat_template(
-                prompt,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-            for prompt in prompts
-        ]
-        full_texts = [
-            ptext + comp
-            for ptext, comp in zip(rendered_prompts, completions, strict=False)
-        ]
+        if completion_token_ids is None:
+            completion_token_ids = [None] * len(completions)
 
-        encoded_full = self.tokenizer(
-            full_texts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        )
-        encoded_prompt = self.tokenizer(
-            rendered_prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        )
+        # Fix C8: tokenizer may be left-padded from generation paths.
+        # Force right-padding for the training tokenization so that the
+        # prompt-masking logic labels[row_idx, :plen] = -100 is correct.
+        previous_padding_side = self.tokenizer.padding_side
+        self.tokenizer.padding_side = "right"
+        try:
+            rendered_prompts = [
+                self.tokenizer.apply_chat_template(
+                    prompt,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                for prompt in prompts
+            ]
 
-        device = next(self.model.parameters()).device
-        encoded_full = {k: v.to(device) for k, v in encoded_full.items()}
-        prompt_lengths = encoded_prompt["attention_mask"].sum(dim=1).tolist()
+            has_direct_completion_ids = any(bool(ids) for ids in completion_token_ids)
+            max_len = getattr(self.tokenizer, "model_max_length", 4096)
 
-        labels = encoded_full["input_ids"].clone()
-        labels[encoded_full["attention_mask"] == 0] = -100
-        for row_idx, plen in enumerate(prompt_lengths):
-            labels[row_idx, : int(plen)] = -100
+            if not has_direct_completion_ids:
+                if not self._warned_missing_completion_token_ids:
+                    logger.warning(
+                        "Trainer received rollout samples without completion_token_ids; "
+                        "falling back to decode/re-encode for completion text."
+                    )
+                    self._warned_missing_completion_token_ids = True
 
-        # Shift to align logits(t) -> label(t+1)
-        shifted_labels = labels[:, 1:]
-        return encoded_full, shifted_labels
+                full_texts = [
+                    ptext + comp
+                    for ptext, comp in zip(rendered_prompts, completions, strict=False)
+                ]
+
+                encoded_full = self.tokenizer(
+                    full_texts,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=max_len,
+                )
+                encoded_prompt = self.tokenizer(
+                    rendered_prompts,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=max_len,
+                )
+
+                device = next(self.model.parameters()).device
+                encoded_full = {k: v.to(device) for k, v in encoded_full.items()}
+                prompt_lengths = encoded_prompt["attention_mask"].sum(dim=1).tolist()
+
+                labels = encoded_full["input_ids"].clone()
+                labels[encoded_full["attention_mask"] == 0] = -100
+                L_full = encoded_full["input_ids"].shape[1]
+                prompt_only_rows: list[tuple[int, int, int]] = []
+                for row_idx, plen in enumerate(prompt_lengths):
+                    labels[row_idx, : int(plen)] = -100
+                    if plen >= L_full:
+                        logger.warning(
+                            "Row %d truncated to prompt-only (plen=%d, L=%d); "
+                            "completion mask will be empty for this row.",
+                            row_idx,
+                            plen,
+                            L_full,
+                        )
+                        prompt_only_rows.append((row_idx, plen, L_full))
+                if prompt_only_rows:
+                    row_idx, plen, L = prompt_only_rows[0]
+                    raise RuntimeError(
+                        f"Prompt-only truncation detected: row {row_idx} has "
+                        f"plen={plen} >= L_full={L}. "
+                        f"{len(prompt_only_rows)} row(s) affected. "
+                        f"Increase max_length or shorten prompts/completions."
+                    )
+
+                shifted_labels = labels[:, 1:]
+                return encoded_full, shifted_labels
+
+            prompt_token_ids_per_row: list[list[int]] = []
+            full_token_ids_per_row: list[list[int]] = []
+            prompt_lengths: list[int] = []
+            prompt_only_rows: list[tuple[int, int, int]] = []
+
+            for row_idx, (prompt, rendered_prompt, completion, row_completion_ids) in enumerate(
+                zip(prompts, rendered_prompts, completions, completion_token_ids, strict=False)
+            ):
+                prompt_ids = self.tokenizer.apply_chat_template(
+                    prompt,
+                    tokenize=True,
+                    add_generation_prompt=True,
+                )
+                if not isinstance(prompt_ids, list):
+                    prompt_ids = self.tokenizer(
+                        rendered_prompt,
+                        add_special_tokens=False,
+                    )["input_ids"]
+                prompt_ids = list(prompt_ids)
+                prompt_token_ids_per_row.append(prompt_ids)
+
+                if row_completion_ids:
+                    completion_ids = list(row_completion_ids)
+                else:
+                    if not self._warned_missing_completion_token_ids:
+                        logger.warning(
+                            "Trainer received rollout samples without completion_token_ids; "
+                            "falling back to decode/re-encode for completion text."
+                        )
+                        self._warned_missing_completion_token_ids = True
+                    completion_ids = list(
+                        self.tokenizer(completion, add_special_tokens=False)["input_ids"]
+                    )
+
+                full_ids = (prompt_ids + completion_ids)[:max_len]
+                truncated_prompt_len = min(len(prompt_ids), max_len)
+                prompt_lengths.append(truncated_prompt_len)
+                if truncated_prompt_len >= len(full_ids):
+                    logger.warning(
+                        "Row %d truncated to prompt-only (plen=%d, L=%d); "
+                        "completion mask will be empty for this row.",
+                        row_idx,
+                        truncated_prompt_len,
+                        len(full_ids),
+                    )
+                    prompt_only_rows.append((row_idx, truncated_prompt_len, len(full_ids)))
+                full_token_ids_per_row.append(full_ids)
+
+            if prompt_only_rows:
+                row_idx, plen, L = prompt_only_rows[0]
+                raise RuntimeError(
+                    f"Prompt-only truncation detected: row {row_idx} has "
+                    f"plen={plen} >= L_full={L}. "
+                    f"{len(prompt_only_rows)} row(s) affected. "
+                    f"Increase max_length or shorten prompts/completions."
+                )
+
+            pad_token_id = self.tokenizer.pad_token_id
+            if pad_token_id is None:
+                pad_token_id = self.tokenizer.eos_token_id
+            if pad_token_id is None:
+                raise RuntimeError("Tokenizer must define pad_token_id or eos_token_id")
+
+            batch_width = max(len(row) for row in full_token_ids_per_row)
+            padded_input_ids: list[list[int]] = []
+            attention_masks: list[list[int]] = []
+            for full_ids in full_token_ids_per_row:
+                pad_width = batch_width - len(full_ids)
+                padded_input_ids.append(full_ids + [pad_token_id] * pad_width)
+                attention_masks.append([1] * len(full_ids) + [0] * pad_width)
+
+            device = next(self.model.parameters()).device
+            encoded_full = {
+                "input_ids": torch.tensor(padded_input_ids).to(device),
+                "attention_mask": torch.tensor(attention_masks).to(device),
+            }
+
+            labels = encoded_full["input_ids"].clone()
+            labels[encoded_full["attention_mask"] == 0] = -100
+            for row_idx, plen in enumerate(prompt_lengths):
+                labels[row_idx, : int(plen)] = -100
+
+            shifted_labels = labels[:, 1:]
+            return encoded_full, shifted_labels
+        finally:
+            self.tokenizer.padding_side = previous_padding_side
 
     def _masked_token_logprobs(
         self,
@@ -339,6 +476,7 @@ class MultiAgentGRPOTrainer:
         grouped_inputs is produced by ``_group_for_grpo`` and has keys:
             "prompts"   -> list[list[chat_messages]]  (per group)
             "completions" -> list[list[str]]           (per group)
+            "completion_token_ids" -> list[list[list[int] | None]] (per group)
             "raw_rewards" -> list[list[float]]         (per group, RAW not normalised)
             "samples"     -> list[list[TrajectorySample]] (per group, for diagnostics)
         """
@@ -350,17 +488,30 @@ class MultiAgentGRPOTrainer:
         all_completions: list[str] = []
         grouped_raw_rewards: dict[str, list[float]] = {}
         total_samples = 0
+        all_completion_token_ids: list[list[int] | None] = []
         prompt_groups = grouped_inputs["prompts"]
         completion_groups = grouped_inputs["completions"]
+        completion_token_id_groups = grouped_inputs.get("completion_token_ids", [])
+        if not completion_token_id_groups:
+            completion_token_id_groups = [
+                [None for _ in completions]
+                for completions in completion_groups
+            ]
         raw_reward_groups = grouped_inputs["raw_rewards"]
-        group_keys = sorted(grouped_raw_rewards) if grouped_raw_rewards else []
         # Use the ordering from the grouped_inputs (already sorted by key)
-        for idx, (prompts, completions, rewards) in enumerate(
-            zip(prompt_groups, completion_groups, raw_reward_groups, strict=False)
+        for idx, (prompts, completions, completion_ids, rewards) in enumerate(
+            zip(
+                prompt_groups,
+                completion_groups,
+                completion_token_id_groups,
+                raw_reward_groups,
+                strict=False,
+            )
         ):
             group_key = f"group_{idx}"
             all_prompts.extend(prompts)
             all_completions.extend(completions)
+            all_completion_token_ids.extend(completion_ids)
             grouped_raw_rewards[group_key] = rewards
             total_samples += len(prompts)
 
@@ -368,113 +519,205 @@ class MultiAgentGRPOTrainer:
             raise RuntimeError("MultiAgentGRPOTrainer received no rollout samples")
 
         # --- Tokenize ONCE -------------------------------------------------
-        encoded_full, shifted_labels = self._tokenize_batch(all_prompts, all_completions)
+        encoded_full, shifted_labels = self._tokenize_batch(
+            all_prompts,
+            all_completions,
+            all_completion_token_ids,
+        )
         completion_mask = (shifted_labels != -100).float()  # (S, L-1)
+        self._step_counter += 1
+
+        # Fix H3/H28: keep model in eval mode for ALL forward passes so that
+        # dropout is disabled and old_lp/new_lp/ref_lp are computed under the
+        # same deterministic regime.  Gradients still flow via requires_grad
+        # on LoRA parameters — eval mode only disables dropout/batchnorm
+        # running-stats, which is exactly what we want for stable ratios.
+        previous_training_mode = self.model.training
+        self.model.eval()
+        try:
 
         # --- 1. Old log-probs: frozen, captured ONCE -----------------------
-        with torch.no_grad():
-            self.model.eval()
-            old_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1)
-            self.model.train()
+            with torch.no_grad():
+                old_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1)
 
         # --- 2. Ref log-probs: LoRA adapter disabled -----------------------
-        with torch.no_grad():
-            self.model.eval()
-            try:
-                cm = self.model.disable_adapter()
-            except AttributeError:
-                # Model doesn't support disable_adapter (e.g. non-PEFT);
-                # fall back to old_lp (KL will be zero, which is harmless).
-                cm = None
+            with torch.no_grad():
+                try:
+                    cm = self.model.disable_adapter()
+                except AttributeError:
+                    # Model doesn't support disable_adapter (e.g. non-PEFT);
+                    # fall back to old_lp (KL will be zero, which is harmless).
+                    cm = None
 
-            if cm is not None:
-                with cm:
-                    ref_lp = self._masked_token_logprobs(encoded_full, shifted_labels)
-            else:
-                warnings.warn(
-                    "Model does not expose disable_adapter(); "
-                    "reference log-probs will equal old log-probs (KL = 0).",
-                    stacklevel=2,
-                )
-                ref_lp = old_lp.clone()
-            self.model.train()
+                if cm is not None:
+                    with cm:
+                        ref_lp = self._masked_token_logprobs(encoded_full, shifted_labels)
+                else:
+                    warnings.warn(
+                        "Model does not expose disable_adapter(); "
+                        "reference log-probs will equal old log-probs (KL = 0).",
+                        stacklevel=2,
+                    )
+                    ref_lp = old_lp.clone()
 
         # --- 3. Advantages: computed once, detached -------------------------
-        advantages = self._compute_group_advantages(
-            grouped_raw_rewards, total_samples
-        )  # (S,)
+            advantages = self._compute_group_advantages(
+                grouped_raw_rewards, total_samples
+            )  # (S,)
 
         # --- 4. Inner PPO epoch loop ----------------------------------------
-        for _epoch in range(self.num_train_epochs_per_step):
-            new_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1), WITH grad
+            epoch_ratio_means: list[float] = []
+            epoch_ratio_stds: list[float] = []
+            epoch_clip_fractions: list[float] = []
+            epoch_kl_maxes: list[float] = []
+            epoch_policy_losses: list[float] = []
+            epoch_kl_losses: list[float] = []
+            epoch_losses: list[float] = []
+
+            for _epoch in range(self.num_train_epochs_per_step):
+                new_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1), WITH grad
 
             # FP16-safe log-prob ratio via log-space delta
-            delta = (new_lp - old_lp).clamp(-5.0, 5.0)  # (S, L-1)
-            ratio = delta.exp()  # (S, L-1)
+                delta = (new_lp - old_lp).clamp(-5.0, 5.0)  # (S, L-1)
+                ratio = delta.exp()  # (S, L-1)
 
             # Broadcast advantage to token dimension: (S,) -> (S, L-1)
-            A_tok = advantages.unsqueeze(-1) * torch.ones_like(ratio)
+                A_tok = advantages.unsqueeze(-1) * torch.ones_like(ratio)
 
             # Clipped surrogate
-            surr1 = ratio * A_tok
-            surr2 = ratio.clamp(1.0 - self.clip_range, 1.0 + self.clip_range) * A_tok
-            policy_loss = (
-                -(torch.min(surr1, surr2) * completion_mask).sum()
-                / completion_mask.sum().clamp_min(1.0)
-            )
+                surr1 = ratio * A_tok
+                surr2 = ratio.clamp(1.0 - self.clip_range, 1.0 + self.clip_range) * A_tok
+                policy_loss = (
+                    -(torch.min(surr1, surr2) * completion_mask).sum()
+                    / completion_mask.sum().clamp_min(1.0)
+                )
 
             # Schulman k3 KL estimator: k3 = exp(ref - new) - (ref - new) - 1
-            ref_delta = ref_lp - new_lp
-            kl_per_tok = ref_delta.exp() - ref_delta - 1.0  # >= 0 by construction
-            kl_loss = (
-                (kl_per_tok * completion_mask).sum()
-                / completion_mask.sum().clamp_min(1.0)
-            )
+                ref_delta = (ref_lp - new_lp).clamp(-5.0, 5.0)
+                kl_per_tok = ref_delta.exp() - ref_delta - 1.0  # >= 0 by construction
+                kl_loss = (
+                    (kl_per_tok * completion_mask).sum()
+                    / completion_mask.sum().clamp_min(1.0)
+                )
+                if hasattr(torch, "isfinite"):
+                    finite_kl = torch.isfinite(kl_loss).all()
+                    if hasattr(finite_kl, "item"):
+                        finite_kl = finite_kl.item()
+                    if not finite_kl:
+                        raise RuntimeError(
+                            f"Non-finite kl_loss detected at step {self._step_counter}; "
+                            f"dtype={getattr(kl_loss, 'dtype', '?')}, value={kl_loss.detach()}"
+                        )
+                    finite_policy = torch.isfinite(policy_loss).all()
+                    if hasattr(finite_policy, "item"):
+                        finite_policy = finite_policy.item()
+                    if not finite_policy:
+                        raise RuntimeError(
+                            f"Non-finite policy_loss detected at step {self._step_counter}; "
+                            f"dtype={getattr(policy_loss, 'dtype', '?')}, value={policy_loss.detach()}"
+                        )
 
-            loss = policy_loss + self.kl_coef * kl_loss
+                loss = policy_loss + self.kl_coef * kl_loss
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
+                mask_sum_epoch = completion_mask.sum().clamp_min(1.0).item()
+                masked_ratio_epoch = ratio.detach() * completion_mask
+                ratio_mean_epoch = masked_ratio_epoch.sum().item() / mask_sum_epoch
+                ratio_sq_mean_epoch = (masked_ratio_epoch ** 2).sum().item() / mask_sum_epoch
+                ratio_std_epoch = (max(ratio_sq_mean_epoch - ratio_mean_epoch ** 2, 0.0)) ** 0.5
+                outside_clip_epoch = (
+                    ((ratio.detach() < 1.0 - self.clip_range)
+                     | (ratio.detach() > 1.0 + self.clip_range))
+                    * completion_mask
+                )
+                clip_fraction_epoch = outside_clip_epoch.sum().item() / mask_sum_epoch
+                kl_max_epoch = (kl_per_tok.detach() * completion_mask).max().item()
+
+                epoch_ratio_means.append(ratio_mean_epoch)
+                epoch_ratio_stds.append(ratio_std_epoch)
+                epoch_clip_fractions.append(clip_fraction_epoch)
+                epoch_kl_maxes.append(kl_max_epoch)
+                epoch_policy_losses.append(policy_loss.detach().item())
+                epoch_kl_losses.append(kl_loss.detach().item())
+                epoch_losses.append(loss.detach().item())
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.optimizer.step()
 
         # --- 5. Diagnostics -------------------------------------------------
-        mask_sum = completion_mask.sum().clamp_min(1.0).item()
-        masked_ratio = ratio.detach() * completion_mask
-        ratio_mean = masked_ratio.sum().item() / mask_sum
+            mask_sum = completion_mask.sum().clamp_min(1.0).item()
+            masked_ratio = ratio.detach() * completion_mask
+            ratio_mean = masked_ratio.sum().item() / mask_sum
         # Masked std: E[r^2] - E[r]^2  under the mask
-        ratio_sq_mean = (masked_ratio ** 2).sum().item() / mask_sum
-        ratio_std = (max(ratio_sq_mean - ratio_mean ** 2, 0.0)) ** 0.5
+            ratio_sq_mean = (masked_ratio ** 2).sum().item() / mask_sum
+            ratio_std = (max(ratio_sq_mean - ratio_mean ** 2, 0.0)) ** 0.5
         # Clip fraction: fraction of valid tokens where ratio is outside clip range
-        outside_clip = (
-            ((ratio.detach() < 1.0 - self.clip_range)
-             | (ratio.detach() > 1.0 + self.clip_range))
-            * completion_mask
-        )
-        clip_fraction = outside_clip.sum().item() / mask_sum
-        kl_max = (kl_per_tok.detach() * completion_mask).max().item()
-        mask_coverage = completion_mask.mean().item()
-        mean_advantage = advantages.mean().item()
-        advantage_std = advantages.std().item() if advantages.numel() > 1 else 0.0
+            outside_clip = (
+                ((ratio.detach() < 1.0 - self.clip_range)
+                 | (ratio.detach() > 1.0 + self.clip_range))
+                * completion_mask
+            )
+            clip_fraction = outside_clip.sum().item() / mask_sum
+            kl_max = (kl_per_tok.detach() * completion_mask).max().item()
+            mask_coverage = completion_mask.mean().item()
+            mean_advantage = advantages.mean().item()
+            advantage_std = advantages.std().item() if advantages.numel() > 1 else 0.0
 
-        return {
-            "loss": loss.detach().item(),
-            "policy_loss": policy_loss.detach().item(),
-            "kl_loss": kl_loss.detach().item(),
-            "ratio_mean": ratio_mean,
-            "ratio_std": ratio_std,
-            "clip_fraction": clip_fraction,
-            "kl_max": kl_max,
-            "mask_coverage": mask_coverage,
-            "mean_advantage": mean_advantage,
-            "advantage_std": advantage_std,
-        }
+            return {
+                "loss": epoch_losses[-1],
+                "policy_loss": epoch_policy_losses[-1],
+                "kl_loss": epoch_kl_losses[-1],
+                "ratio_mean": epoch_ratio_means[-1],
+                "ratio_std": epoch_ratio_stds[-1],
+                "clip_fraction": epoch_clip_fractions[-1],
+                "kl_max": epoch_kl_maxes[-1],
+                "mask_coverage": mask_coverage,
+                "mean_advantage": mean_advantage,
+                "advantage_std": advantage_std,
+                "loss_mean_across_epochs": sum(epoch_losses) / max(len(epoch_losses), 1),
+                "policy_loss_mean_across_epochs": sum(epoch_policy_losses) / max(len(epoch_policy_losses), 1),
+                "kl_loss_mean_across_epochs": sum(epoch_kl_losses) / max(len(epoch_kl_losses), 1),
+                "ratio_mean_across_epochs": sum(epoch_ratio_means) / max(len(epoch_ratio_means), 1),
+                "ratio_std_mean_across_epochs": sum(epoch_ratio_stds) / max(len(epoch_ratio_stds), 1),
+                "clip_fraction_mean_across_epochs": sum(epoch_clip_fractions) / max(len(epoch_clip_fractions), 1),
+                "kl_max_across_epochs": max(epoch_kl_maxes) if epoch_kl_maxes else 0.0,
+                "num_inner_epochs": len(epoch_losses),
+            }
+        finally:
+            if previous_training_mode:
+                self.model.train()
+            else:
+                self.model.eval()
 
 
-def _build_grpo_trainer(GRPOTrainer: Any, policy: Any, config: TrainingConfig) -> Any:
-    """Instantiate GRPOTrainer across permissive stub and real implementations."""
+def _build_grpo_trainer(
+    GRPOTrainer: Any,
+    policy: Any,
+    config: TrainingConfig,
+    optimizer_state: dict | None = None,
+) -> Any:
+    """Instantiate the project GRPO trainer by default, with opt-in TRL probing."""
+    import inspect
+
     trainer_model = _extract_trainer_model(policy)
     tokenizer = _extract_trainer_tokenizer(policy)
+    use_project_trainer = (
+        not getattr(config.grpo, "prefer_trl", False)
+        or GRPOTrainer is MultiAgentGRPOTrainer
+        or GRPOTrainer is None
+    )
+    if use_project_trainer:
+        return MultiAgentGRPOTrainer(
+            model=trainer_model,
+            tokenizer=tokenizer,
+            learning_rate=config.grpo.learning_rate,
+            kl_coef=config.grpo.kl_coef,
+            clip_range=config.grpo.clip_range,
+            num_train_epochs_per_step=config.grpo.num_train_epochs_per_step,
+            optimizer_state=optimizer_state,
+        )
+
     trainer_kwargs = {
         "model": trainer_model,
         "tokenizer": tokenizer,
@@ -482,38 +725,20 @@ def _build_grpo_trainer(GRPOTrainer: Any, policy: Any, config: TrainingConfig) -
         "kl_coef": config.grpo.kl_coef,
         "clip_range": config.grpo.clip_range,
         "num_train_epochs_per_step": config.grpo.num_train_epochs_per_step,
-        "group_size": config.grpo.group_size,
     }
-    candidate_kwargs = [
-        trainer_kwargs,
-        {k: v for k, v in trainer_kwargs.items() if v is not None},
-        {"model": trainer_model},
-        {},
-    ]
-    for kwargs in candidate_kwargs:
-        try:
-            return GRPOTrainer(**kwargs)
-        except TypeError:
-            continue
+    params = set(inspect.signature(GRPOTrainer.__init__).parameters.keys())
+    filtered = {
+        key: value
+        for key, value in trainer_kwargs.items()
+        if key in params and value is not None
+    }
     try:
-        return GRPOTrainer(trainer_model)
+        return GRPOTrainer(**filtered)
     except TypeError as exc:
-        message = str(exc)
-        if "reward_funcs" in message:
-            print(
-                "Falling back to local multi-agent GRPO trainer because the "
-                "installed TRL GRPOTrainer expects the newer reward_funcs-based API."
-            )
-            return MultiAgentGRPOTrainer(
-                model=trainer_model,
-                tokenizer=tokenizer,
-                learning_rate=config.grpo.learning_rate,
-                kl_coef=config.grpo.kl_coef,
-                clip_range=config.grpo.clip_range,
-                group_size=config.grpo.group_size,
-                num_train_epochs_per_step=config.grpo.num_train_epochs_per_step,
-            )
-        raise RuntimeError(f"Unable to initialize GRPOTrainer: {exc}") from exc
+        raise RuntimeError(
+            "TRL GRPOTrainer signature does not accept our kwargs "
+            f"({sorted(filtered)}); set grpo.prefer_trl=false to use MultiAgentGRPOTrainer."
+        ) from exc
 
 
 def _call_trainer_step(trainer: Any, grouped_inputs: dict[str, list[list[Any]]]) -> Any:
@@ -553,21 +778,53 @@ def _group_for_grpo(results: list[Any]) -> dict[str, list[list[Any]]]:
         for sample in result.samples:
             bucket = grouped.setdefault(
                 sample.group_id,
-                {"prompts": [], "completions": [], "raw_rewards": [], "normalized_rewards": [], "samples": []},
+                {
+                    "prompts": [],
+                    "completions": [],
+                    "completion_token_ids": [],
+                    "raw_rewards": [],
+                    "normalized_rewards": [],
+                    "samples": [],
+                },
             )
             bucket["prompts"].append(sample.prompt)
             bucket["completions"].append(sample.completion_text)
+            bucket["completion_token_ids"].append(sample.completion_token_ids)
             bucket["raw_rewards"].append(sample.raw_reward)
             bucket["normalized_rewards"].append(sample.normalized_reward)
             bucket["samples"].append(sample)
 
+    # Downstream trainers consume these grouped arrays positionally and do not
+    # inspect the original group_id strings, so deterministic lexicographic
+    # ordering is sufficient here.
     ordered_keys = sorted(grouped)
     return {
         "prompts": [grouped[key]["prompts"] for key in ordered_keys],
         "completions": [grouped[key]["completions"] for key in ordered_keys],
+        "completion_token_ids": [grouped[key]["completion_token_ids"] for key in ordered_keys],
         "raw_rewards": [grouped[key]["raw_rewards"] for key in ordered_keys],
         "normalized_rewards": [grouped[key]["normalized_rewards"] for key in ordered_keys],
         "samples": [grouped[key]["samples"] for key in ordered_keys],
+    }
+
+
+def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
+    override_count = sum(int(getattr(result, "override_count", 0)) for result in results)
+    orchestrator_action_count = sum(
+        int(getattr(result, "orchestrator_action_count", 0)) for result in results
+    )
+    override_win_count = sum(int(getattr(result, "override_win_count", 0)) for result in results)
+    rationale_bonus_total = sum(
+        float(getattr(result, "rationale_bonus_total", 0.0)) for result in results
+    )
+    rationale_bonus_count = sum(
+        int(getattr(result, "rationale_bonus_count", 0)) for result in results
+    )
+
+    return {
+        "override_rate": round(override_count / max(orchestrator_action_count, 1), 4),
+        "override_win_rate": round(override_win_count / max(override_count, 1), 4),
+        "rationale_bonus_mean": round(rationale_bonus_total / max(rationale_bonus_count, 1), 4),
     }
 
 
@@ -579,12 +836,19 @@ def _save_adapter_weights(policy: Any, target_dir: Path) -> None:
         save_pretrained(str(target_dir))
 
 
-def _maybe_init_wandb(config: TrainingConfig) -> Any | None:
+def _maybe_init_wandb(
+    config: TrainingConfig,
+    *,
+    run_id: str | None = None,
+) -> Any | None:
     """Initialize wandb if WANDB_API_KEY is set and wandb is importable.
 
     Returns the wandb run handle, or None if either precondition is unmet.
     Silent no-op on missing env var or missing package — this is how the HF
     backend path stays green when wandb isn't installed locally.
+
+    When *run_id* is provided, the run is resumed via ``id=run_id,
+    resume="allow"``.
     """
     api_key = os.environ.get("WANDB_API_KEY", "").strip()
     if not api_key:
@@ -599,12 +863,16 @@ def _maybe_init_wandb(config: TrainingConfig) -> Any | None:
     run_name = os.environ.get("WANDB_RUN_NAME", "").strip() or None
 
     wandb.login(key=api_key)
-    return wandb.init(
-        project=project,
-        name=run_name,
-        config=config.model_dump(mode="json"),
-        settings=wandb.Settings(start_method="thread"),
-    )
+    init_kwargs: dict[str, Any] = {
+        "project": project,
+        "name": run_name,
+        "config": config.model_dump(mode="json"),
+        "settings": wandb.Settings(start_method="thread"),
+    }
+    if run_id is not None:
+        init_kwargs["id"] = run_id
+        init_kwargs["resume"] = "allow"
+    return wandb.init(**init_kwargs)
 
 
 def _build_policy(
@@ -614,7 +882,13 @@ def _build_policy(
     LoraConfig: Any,
 ) -> Any:
     lora_adapter_path: str | None = None
-    if bundle is not None and bundle.lora_weights_path.exists():
+    if bundle is not None:
+        if not bundle.lora_weights_path.exists():
+            raise RuntimeError(
+                f"Checkpoint bundle references adapter at "
+                f"{bundle.lora_weights_path!s} but that directory does not exist. "
+                f"Cannot resume from a corrupt or partial checkpoint."
+            )
         lora_adapter_path = str(bundle.lora_weights_path)
 
     backend = config.backend
@@ -629,6 +903,8 @@ def _build_policy(
             lora_target_modules=list(config.lora.target_modules),
             max_seq_length=config.unsloth_max_seq_length,
             load_in_4bit=config.load_in_4bit,
+            dtype=config.model.dtype,
+            max_prompt_tokens=config.model.max_prompt_tokens,
             use_vllm=config.rollout.use_vllm,
             max_new_tokens=config.model.max_completion_tokens,
             temperature=0.0,
@@ -651,6 +927,7 @@ def _build_policy(
             lora_adapter_path=lora_adapter_path,
             peft_config=peft_config,
             torch_dtype=config.model.dtype,
+            max_prompt_tokens=config.model.max_prompt_tokens,
             max_new_tokens=config.model.max_completion_tokens,
             do_sample=False,
         )
@@ -671,6 +948,7 @@ def _run_eval(
 ) -> list[Any]:
     eval_results: list[Any] = []
     family_count = len(disaster_families)
+    reward_config = config.reward.model_dump(mode="python")
     for tier in config.eval.tiers:
         fixed_curriculum = _FixedTierCurriculum(tier)
         seeds: list[int] = []
@@ -692,6 +970,8 @@ def _run_eval(
                 normalizer=normalizer,
                 jsonl_dir=jsonl_dir,
                 seed_collision_retry_limit=config.rollout.seed_retry_limit,
+                rationale_mode=config.reward.rationale_scaling,
+                reward_config=reward_config,
             )
         )
     return eval_results
@@ -699,8 +979,20 @@ def _run_eval(
 
 def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     """Run the Phase 7 training loop."""
+    import logging
+
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
     raw = _load_yaml_config(config_path)
     config = TrainingConfig(**raw)
+    logger.info(
+        "Reward normalization: group-mean-std on raw_rewards (trainer-owned). "
+        "RoleReward.normalized and TrajectorySample.normalized_reward are identity "
+        "passthroughs retained for trace compatibility."
+    )
+    reward_config = config.reward.model_dump(mode="python")
 
     if config.backend == "unsloth":
         try:
@@ -737,6 +1029,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
     from training.checkpoint import (
         CheckpointBundle,
+        atomic_replace_latest,
         load_checkpoint,
         rotate_checkpoints,
         save_checkpoint,
@@ -749,9 +1042,12 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     metrics_path = Path(config.metrics.csv_path)
     jsonl_dir = Path(config.metrics.jsonl_dir)
     jsonl_dir.mkdir(parents=True, exist_ok=True)
-    wandb_run = _maybe_init_wandb(config)
 
     rng = random.Random(config.seed.training_rng)
+    torch.manual_seed(config.seed.training_rng)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(config.seed.training_rng)
+
     bundle = load_checkpoint(ckpt_root)
     start_step = 0
     wall_total = 0.0
@@ -759,6 +1055,18 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
         start_step = bundle.step + 1
         wall_total = bundle.wall_seconds_total
         rng.setstate(pickle.loads(bundle.rollout_rng_state))
+
+    # Restore torch RNG states when resuming
+    if bundle is not None and bundle.torch_rng_state is not None:
+        torch.set_rng_state(pickle.loads(bundle.torch_rng_state))
+    if bundle is not None and bundle.torch_cuda_rng_state is not None:
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(pickle.loads(bundle.torch_cuda_rng_state))
+
+    wandb_run = _maybe_init_wandb(
+        config,
+        run_id=bundle.wandb_run_id if bundle is not None else None,
+    )
 
     curriculum = CurriculumController()
     normalizer = RewardNormalizer()
@@ -768,12 +1076,18 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
     env = EvacEnvironment()
     policy = _build_policy(config, bundle, LoraConfig=LoraConfig)
-    trainer = _build_grpo_trainer(GRPOTrainer, policy, config)
+    trainer = _build_grpo_trainer(
+        GRPOTrainer,
+        policy,
+        config,
+        optimizer_state=bundle.optimizer_state if bundle is not None else None,
+    )
     model_name = config.model.base
     config_hash = _config_hash(config)
     disaster_families = [DisasterType(item) for item in config.rollout.disaster_families]
 
     stop_requested = False
+    last_completed_step = start_step - 1
 
     def _signal_handler(signum: int, frame: Any) -> None:
         del signum, frame
@@ -786,7 +1100,26 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
         return rng.randint(0, 2_147_483_647)
 
     def _write_checkpoint(step: int) -> None:
-        adapter_path = ckpt_root / f"ckpt_{step}" / "lora_adapter"
+        ckpt_dir = ckpt_root / f"ckpt_{step}"
+        adapter_path = ckpt_dir / "lora_adapter"
+
+        # 1. Write adapter weights into ckpt_N/lora_adapter (durable first)
+        _save_adapter_weights(policy, adapter_path)
+
+        # 2. Build the bundle pointing at the durable adapter path
+        import torch as _torch_mod
+
+        torch_rng_bytes: bytes | None = None
+        torch_cuda_rng_bytes: bytes | None = None
+        try:
+            torch_rng_bytes = pickle.dumps(_torch_mod.get_rng_state())
+            if _torch_mod.cuda.is_available():
+                torch_cuda_rng_bytes = pickle.dumps(
+                    _torch_mod.cuda.get_rng_state_all()
+                )
+        except Exception:
+            pass
+
         new_bundle = CheckpointBundle(
             step=step,
             wall_seconds_total=wall_total,
@@ -796,10 +1129,19 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             lora_weights_path=adapter_path,
             model_name=model_name,
             config_hash=config_hash,
+            optimizer_state=trainer.optimizer.state_dict(),
+            torch_rng_state=torch_rng_bytes,
+            torch_cuda_rng_state=torch_cuda_rng_bytes,
+            wandb_run_id=wandb_run.id if wandb_run is not None else None,
         )
-        saved_dir = save_checkpoint(ckpt_root, new_bundle)
-        _save_adapter_weights(policy, saved_dir / "lora_adapter")
-        _save_adapter_weights(policy, ckpt_root / "latest" / "lora_adapter")
+
+        # 3. Write meta.json, RNG files, optimizer state into ckpt_N
+        save_checkpoint(ckpt_root, new_bundle)
+
+        # 4. Publish latest/ last (atomic)
+        atomic_replace_latest(ckpt_root, ckpt_dir)
+
+        # 5. Rotate old checkpoints
         rotate_checkpoints(ckpt_root, config.checkpoint.keep_last_n)
 
     try:
@@ -824,10 +1166,12 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 normalizer=normalizer,
                 jsonl_dir=jsonl_dir,
                 seed_collision_retry_limit=config.rollout.seed_retry_limit,
+                rationale_mode=config.reward.rationale_scaling,
+                reward_config=reward_config,
             )
 
             grouped_inputs = _group_for_grpo(results)
-            _call_trainer_step(trainer, grouped_inputs)
+            trainer_diagnostics = _call_trainer_step(trainer, grouped_inputs) or {}
 
             step_wall = time.monotonic() - step_started
             wall_total += step_wall
@@ -852,6 +1196,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                     if sample.parsed_action.get("fallback_reason") == "parse_error":
                         invalid_count += 1
 
+            rollout_metrics = _compute_rollout_metrics(results)
             metrics_row = {
                 "step": step,
                 "wall_seconds": round(wall_total, 2),
@@ -861,11 +1206,21 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 "mean_norm_reward_orch": round(sum(all_norm_orch) / max(len(all_norm_orch), 1), 4),
                 "mean_norm_reward_floor": round(sum(all_norm_floor) / max(len(all_norm_floor), 1), 4),
                 "invalid_action_rate": round(invalid_count / max(total_samples, 1), 4),
-                "override_rate": 0.0,
-                "override_win_rate": 0.0,
-                "rationale_bonus_mean": 0.0,
+                **rollout_metrics,
                 "episodes_seen": (step + 1) * config.rollout.episodes_per_step,
             }
+            # Merge trainer diagnostics (loss, kl, ratio stats, etc.)
+            for _diag_key in (
+                "loss", "policy_loss", "kl_loss",
+                "ratio_mean", "ratio_std", "clip_fraction",
+                "kl_max", "mask_coverage", "mean_advantage", "advantage_std",
+                "loss_mean_across_epochs", "policy_loss_mean_across_epochs",
+                "kl_loss_mean_across_epochs", "ratio_mean_across_epochs",
+                "ratio_std_mean_across_epochs", "clip_fraction_mean_across_epochs",
+                "kl_max_across_epochs", "num_inner_epochs",
+            ):
+                if _diag_key in trainer_diagnostics:
+                    metrics_row[_diag_key] = trainer_diagnostics[_diag_key]
             append_training_metrics_row(metrics_path, metrics_row)
             if wandb_run is not None:
                 wandb_run.log(metrics_row, step=step)
@@ -886,14 +1241,18 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             if (step + 1) % config.checkpoint.every_steps == 0:
                 _write_checkpoint(step)
 
+            last_completed_step = step
+
             if stop_requested:
                 break
 
     except KeyboardInterrupt:
         stop_requested = True
     finally:
-        if stop_requested or bundle is not None:
-            final_step = max(start_step, 0)
-            _write_checkpoint(final_step if final_step > 0 else 0)
+        # Write a final checkpoint only if we made net-new progress.
+        # Avoid duplicating an already-on-disk checkpoint when zero steps
+        # completed after resume.
+        if last_completed_step >= start_step:
+            _write_checkpoint(last_completed_step)
         if wandb_run is not None:
             wandb_run.finish()

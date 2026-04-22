@@ -259,3 +259,34 @@ class TestDirectiveOutcomes:
         )
         result = env.step_multi_agent(bundle)
         assert len(result.observations_by_role.orchestrator.recent_directive_outcomes) >= 1
+
+
+def test_duplicate_directive_id_is_rejected_without_overwriting_active_state():
+    store = DirectiveStore()
+    first = Directive(
+        directive_id="dup-dir",
+        target="floor_0_agent",
+        directive_type="hold_floor",
+        params={"a": 1},
+        priority=DirectivePriority.normal,
+        issued_round=0,
+        ttl_rounds=5,
+    )
+    second = Directive(
+        directive_id="dup-dir",
+        target="floor_1_agent",
+        directive_type="evacuate_via_stairwell",
+        params={"stairwell_id": "S1"},
+        priority=DirectivePriority.high,
+        issued_round=1,
+        ttl_rounds=5,
+    )
+
+    first_outcome = store.issue(first)
+    second_outcome = store.issue(second)
+
+    assert first_outcome.accepted is True
+    assert second_outcome.accepted is False
+    assert second_outcome.outcome_summary == "duplicate_directive_id"
+    assert list(store._active) == ["dup-dir"]
+    assert store._active["dup-dir"] == first

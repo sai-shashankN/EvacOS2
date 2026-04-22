@@ -16,10 +16,10 @@ def test_reward_curve_writes_png(tmp_path: Path):
     metrics_path.write_text(
         "\n".join(
             [
-                "step,wall_seconds,tier_mix,mean_raw_reward_orch,mean_raw_reward_floor,mean_norm_reward_orch,mean_norm_reward_floor,invalid_action_rate,override_rate,override_win_rate,rationale_bonus_mean,episodes_seen",
-                "1,1.0,easy,0.1,0.2,0.3,0.4,0.0,0.0,0.0,0.0,1",
-                "2,2.0,easy,0.2,0.3,0.4,0.5,0.0,0.0,0.0,0.0,2",
-                "3,3.0,easy,0.3,0.4,0.5,0.6,0.0,0.0,0.0,0.0,3",
+                "step,wall_seconds,tier_mix,mean_raw_reward_orch,mean_raw_reward_floor,mean_norm_reward_orch,mean_norm_reward_floor,invalid_action_rate,override_rate,override_win_rate,rationale_bonus_mean,episodes_seen,loss,policy_loss,kl_loss,ratio_mean,ratio_std,clip_fraction,kl_max,mask_coverage,mean_advantage,advantage_std",
+                "1,1.0,easy,0.1,0.2,0.3,0.4,0.0,0.0,0.0,0.0,1,1.0,0.8,0.2,1.0,0.0,0.0,0.2,0.5,0.0,1.0",
+                "2,2.0,easy,0.2,0.3,0.4,0.5,0.0,0.1,1.0,0.2,2,0.9,0.7,0.2,1.0,0.0,0.0,0.2,0.5,0.1,0.9",
+                "3,3.0,easy,0.3,0.4,0.5,0.6,0.0,0.2,0.5,0.3,3,0.8,0.6,0.2,1.0,0.0,0.0,0.2,0.5,0.2,0.8",
             ]
         ),
         encoding="utf-8",

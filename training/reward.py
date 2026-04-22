@@ -45,7 +45,13 @@ _STDDEV_FLOOR: float = 1e-6
 
 
 class RewardNormalizer:
-    """Maintains Welford running statistics keyed by (role, tier)."""
+    """Maintains rollout/trainer Welford stats keyed by ``(role, tier)``.
+
+    Unlike ``evacos_ma.reward_pipeline.RewardPipeline``, this normalizer is
+    not the public environment reward contract. It is a training-only view
+    applied after rollout collection, and it intentionally collapses all floor
+    agents into the shared ``floor_agent`` role bucket for GRPO normalization.
+    """
 
     def __init__(self) -> None:
         self._states: dict[tuple[str, str], TierNormalizerState] = {}
@@ -125,29 +131,35 @@ def normalize_per_role(
     normalizer: RewardNormalizer,
     *,
     update: bool = True,
+    clip: float = 1.0,
 ) -> dict[str, float]:
     """Return ``{agent_id: normalized_reward}`` for orchestrator + floor agents.
 
     Parameters
     ----------
     update:
-        When *True* (training mode), feed raw rewards into the normalizer before
-        computing the normalized value.  When *False* (eval mode), only query
-        without contaminating training stats.
+        When *True* (training mode), compute normalized rewards against the
+        pre-update running statistics, then feed raw rewards into the
+        normalizer. When *False* (eval mode), only query without contaminating
+        training stats.
+
+    This helper sits on the rollout/trainer side and intentionally reuses the
+    shared role buckets above; the environment-side per-tier normalization
+    contract remains in ``evacos_ma.reward_pipeline``.
     """
     result: dict[str, float] = {}
 
     orch_raw = rewards_by_role.orchestrator.raw
+    orch_norm = normalizer.normalize("orchestrator", tier, orch_raw, clip=clip)
     if update:
         normalizer.update("orchestrator", tier, orch_raw)
-    orch_norm = normalizer.normalize("orchestrator", tier, orch_raw)
     result["orchestrator"] = orch_norm
 
     for agent_id, role_reward in rewards_by_role.floors.items():
         floor_raw = role_reward.raw
+        floor_norm = normalizer.normalize("floor_agent", tier, floor_raw, clip=clip)
         if update:
             normalizer.update("floor_agent", tier, floor_raw)
-        floor_norm = normalizer.normalize("floor_agent", tier, floor_raw)
         result[agent_id] = floor_norm
 
     return result

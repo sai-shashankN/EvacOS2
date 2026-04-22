@@ -7,12 +7,14 @@ strictly opt-in via ``TrainingConfig.backend = "unsloth"``.
 
 from __future__ import annotations
 
+import sys
+import types
 from unittest import mock
 
 import pytest
 
 from training.config_schema import TrainingConfig
-from training.policy_adapter import StubPolicy, unsloth_policy_factory
+from training.policy_adapter import StubPolicy, UnslothPolicy, unsloth_policy_factory
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,173 @@ class TestPolicyProtocolOptionalBatch:
         rollout's hasattr-based fast-path detection must degrade gracefully."""
         policy = StubPolicy(seed=0)
         assert not hasattr(policy, "act_batch")
+
+
+class TestGenerationModeGuards:
+    def test_unsloth_hf_generate_runs_with_dropout_disabled(self, monkeypatch):
+        class _NoGrad:
+            def __enter__(self):
+                return None
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_torch = types.ModuleType("torch")
+        fake_torch.no_grad = lambda: _NoGrad()  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        class FakeFastLanguageModel:
+            @staticmethod
+            def for_inference(model):
+                model.eval()
+
+            @staticmethod
+            def for_training(model):
+                model.train()
+
+        fake_unsloth = types.ModuleType("unsloth")
+        fake_unsloth.FastLanguageModel = FakeFastLanguageModel  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "unsloth", fake_unsloth)
+
+        class FakeInputIds:
+            shape = (1, 2)
+
+        class FakeBatch(dict):
+            def to(self, device):
+                return self
+
+        class FakeTokenizer:
+            pad_token = None
+            eos_token = "<eos>"
+            pad_token_id = 0
+            padding_side = "left"
+
+            def __call__(self, rendered, return_tensors="pt", padding=True, truncation=False):
+                del rendered, return_tensors, padding, truncation
+                return FakeBatch({"input_ids": FakeInputIds()})
+
+            @staticmethod
+            def decode(generated, skip_special_tokens=True):
+                del skip_special_tokens
+                return " ".join(str(tok) for tok in generated)
+
+        class FakeModel:
+            def __init__(self):
+                self.training = True
+                self.device = "cpu"
+                self.generate_kwargs = None
+
+            def eval(self):
+                self.training = False
+                return self
+
+            def train(self, mode=True):
+                self.training = mode
+                return self
+
+            def generate(self, **kwargs):
+                assert self.training is False
+                assert "input_ids" in kwargs
+                self.generate_kwargs = kwargs
+                return [[101, 102, 103, 104]]
+
+        policy = UnslothPolicy.__new__(UnslothPolicy)
+        policy._tokenizer = FakeTokenizer()
+        policy._model = FakeModel()
+        policy._max_new_tokens = 8
+        policy._temperature = 0.0
+
+        outputs = policy._hf_generate(["prompt"])
+
+        assert outputs == [("103 104", [103, 104])]
+        assert policy._model.training is True
+        assert policy._model.generate_kwargs["do_sample"] is False
+        assert "temperature" not in policy._model.generate_kwargs
+
+    def test_unsloth_hf_generate_passes_temperature_only_for_sampling(self, monkeypatch):
+        class _NoGrad:
+            def __enter__(self):
+                return None
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_torch = types.ModuleType("torch")
+        fake_torch.no_grad = lambda: _NoGrad()  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        class FakeFastLanguageModel:
+            @staticmethod
+            def for_inference(model):
+                model.eval()
+
+            @staticmethod
+            def for_training(model):
+                model.train()
+
+        fake_unsloth = types.ModuleType("unsloth")
+        fake_unsloth.FastLanguageModel = FakeFastLanguageModel  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "unsloth", fake_unsloth)
+
+        class FakeInputIds:
+            shape = (1, 2)
+
+        class FakeBatch(dict):
+            def to(self, device):
+                return self
+
+        class FakeTokenizer:
+            pad_token = None
+            eos_token = "<eos>"
+            pad_token_id = 0
+            padding_side = "left"
+
+            def __call__(
+                self,
+                rendered,
+                return_tensors="pt",
+                padding=True,
+                truncation=False,
+                max_length=None,
+            ):
+                del rendered, return_tensors, padding, truncation, max_length
+                return FakeBatch({"input_ids": FakeInputIds()})
+
+            @staticmethod
+            def decode(generated, skip_special_tokens=True):
+                del skip_special_tokens
+                return " ".join(str(tok) for tok in generated)
+
+        class FakeModel:
+            def __init__(self):
+                self.training = True
+                self.device = "cpu"
+                self.generate_kwargs = None
+
+            def eval(self):
+                self.training = False
+                return self
+
+            def train(self, mode=True):
+                self.training = mode
+                return self
+
+            def generate(self, **kwargs):
+                self.generate_kwargs = kwargs
+                return [[101, 102, 103, 104]]
+
+        policy = UnslothPolicy.__new__(UnslothPolicy)
+        policy._tokenizer = FakeTokenizer()
+        policy._model = FakeModel()
+        policy._max_new_tokens = 8
+        policy._max_prompt_tokens = 128
+        policy._temperature = 0.7
+
+        outputs = policy._hf_generate(["prompt"])
+
+        assert outputs == [("103 104", [103, 104])]
+        assert policy._model.generate_kwargs["do_sample"] is True
+        assert policy._model.generate_kwargs["temperature"] == 0.7
 
 
 # ---------------------------------------------------------------------------

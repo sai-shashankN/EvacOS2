@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -12,12 +12,20 @@ from pydantic import BaseModel, Field
 from curriculum.controller import EVAL_SEEDS
 from evacos_ma.env import EvacEnvironment
 from evacos_ma.models import DisasterType
-from training.policy_adapter import Policy
-from training.reward import RewardNormalizer
-from training.rollout import collect_batch
+
+from evaluation._training_contract import Policy, RewardNormalizer, collect_batch
 
 SCHEMA_VERSION = "2026.04.20"
 DEFAULT_DISASTER_FAMILIES: tuple[DisasterType, ...] = tuple(DisasterType)
+_MIN_EVAL_ZSCORE_SAMPLES = 30
+_DEFAULT_REWARD_CONFIG: dict[str, float | str] = {
+    "rationale_scaling": "linear_capped",
+    "alpha": 0.01,
+    "beta": 0.25,
+    "cap": 1.0,
+    "eligible_token_ceiling": 160,
+    "clip_normalized_to": 1.0,
+}
 
 
 class SummaryStats(BaseModel):
@@ -68,6 +76,8 @@ class FixedSuiteResult(BaseModel):
     seeds: list[int]
     disaster_families: list[str]
     rationale_mode: str
+    env_side_rationale_wired: bool = False
+    normalizer_z_scored: bool = False
     episodes: list[EpisodeResult]
     aggregate: AggregateStats
     schema_version: str = SCHEMA_VERSION
@@ -115,6 +125,17 @@ def _summary(values: Sequence[float]) -> SummaryStats:
         p25=float(np.percentile(arr, 25)),
         p75=float(np.percentile(arr, 75)),
     )
+
+
+def _resolve_reward_config(
+    reward_config: Mapping[str, object] | None,
+    rationale_mode: str,
+) -> dict[str, object]:
+    payload: dict[str, object] = dict(_DEFAULT_REWARD_CONFIG)
+    if reward_config is not None:
+        payload.update(dict(reward_config))
+    payload["rationale_scaling"] = rationale_mode
+    return payload
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -236,12 +257,27 @@ def _write_result(result: FixedSuiteResult, path: Path) -> None:
         json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True),
         encoding="utf-8",
     )
-def _seed_eval_normalizer(tier: str) -> RewardNormalizer:
-    # Phase 8 eval purity contract: no .update() calls in eval. Return a cold
-    # normalizer; collect_batch(is_eval=True, update_normalizer=False) will
-    # normalize through whatever state the normalizer is in, matching the
-    # Phase 7 notebook eval cell's pattern (cold RewardNormalizer + is_eval=True).
-    return RewardNormalizer()
+
+
+def _seed_eval_normalizer(
+    tier: str,
+    snapshot: dict | None = None,
+) -> RewardNormalizer:
+    """Return an eval normalizer, optionally preloaded from checkpoint stats."""
+    del tier
+    normalizer = RewardNormalizer()
+    if snapshot is not None:
+        normalizer.load_snapshot(snapshot)
+    return normalizer
+
+
+def _snapshot_has_zscore_state(snapshot: dict | None) -> bool:
+    if snapshot is None:
+        return False
+    for state in snapshot.values():
+        if int(state.get("count", 0)) >= _MIN_EVAL_ZSCORE_SAMPLES:
+            return True
+    return False
 
 
 def run_fixed_suite(
@@ -254,9 +290,12 @@ def run_fixed_suite(
     rationale_mode: str = "linear_capped",
     label: str = "trained",
     output_dir: Path = Path("outputs/evals"),
+    normalizer_snapshot: dict | None = None,
+    reward_config: Mapping[str, object] | None = None,
 ) -> FixedSuiteResult:
     families = [_coerce_family(family) for family in disaster_families]
     episodes: list[EpisodeResult] = []
+    resolved_reward_config = _resolve_reward_config(reward_config, rationale_mode)
 
     for tier in tiers:
         for seed in seeds:
@@ -264,8 +303,9 @@ def run_fixed_suite(
                 env = EvacEnvironment()
                 curriculum = FixedTierCurriculum(tier)
                 policy = policy_factory()
-                normalizer = _seed_eval_normalizer(tier)
-                log_dir = Path("outputs/logs")
+                normalizer = _seed_eval_normalizer(tier, snapshot=normalizer_snapshot)
+                log_dir = output_dir / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
                 results = collect_batch(
                     env,
                     policy,
@@ -279,6 +319,9 @@ def run_fixed_suite(
                     is_eval=True,
                     normalizer=normalizer,
                     jsonl_dir=log_dir,
+                    rationale_mode=rationale_mode,
+                    reward_config=resolved_reward_config,
+                    cleanup_env_episodes=False,
                 )
                 # Eval-purity contract is enforced by `is_eval=True` flowing into
                 # `collect_batch -> collect_episode -> normalize_per_role(update=False)`.
@@ -304,6 +347,8 @@ def run_fixed_suite(
         seeds=[int(seed) for seed in seeds],
         disaster_families=[family.value for family in families],
         rationale_mode=rationale_mode,
+        env_side_rationale_wired=True,
+        normalizer_z_scored=_snapshot_has_zscore_state(normalizer_snapshot),
         episodes=episodes,
         aggregate=_build_aggregate(episodes),
     )

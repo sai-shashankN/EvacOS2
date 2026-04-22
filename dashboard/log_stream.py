@@ -29,6 +29,42 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _incremental_jsonl_rows(
+    path: Path,
+    state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not path.exists():
+        state["offset"] = 0
+        state["remainder"] = ""
+        return []
+
+    size = path.stat().st_size
+    if size < int(state.get("offset", 0)):
+        state["offset"] = 0
+        state["remainder"] = ""
+
+    with path.open("r", encoding="utf-8") as handle:
+        handle.seek(int(state.get("offset", 0)))
+        chunk = handle.read()
+        state["offset"] = handle.tell()
+
+    if not chunk:
+        return []
+
+    text = f"{state.get('remainder', '')}{chunk}"
+    lines = text.splitlines(keepends=True)
+    remainder = ""
+    if lines and not lines[-1].endswith(("\n", "\r")):
+        remainder = lines.pop()
+    state["remainder"] = remainder
+
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
+
+
 def list_episodes(log_dir: Path) -> list[EpisodeMeta]:
     rows = _read_jsonl(log_dir / "episode_summary.jsonl")
     metas = [
@@ -108,24 +144,41 @@ def tail_episode(
 ) -> Iterator[dict[str, Any]]:
     yielded: set[int] = set()
     started = time.monotonic()
-    summary_rows = _read_jsonl(log_dir / "episode_summary.jsonl")
+    summary_path = log_dir / "episode_summary.jsonl"
+    round_path = log_dir / "round_trace.jsonl"
+    action_path = log_dir / "action_trace.jsonl"
+
+    summary_rows = _read_jsonl(summary_path)
     summary = next((row for row in summary_rows if row.get("episode_id") == episode_id), None)
+    summary_state = {
+        "offset": summary_path.stat().st_size if summary_path.exists() else 0,
+        "remainder": "",
+    }
+    round_state = {"offset": 0, "remainder": ""}
+    action_state = {"offset": 0, "remainder": ""}
+    round_rows_by_id: dict[int, dict[str, Any]] = {}
+    action_rows_by_round: dict[int, list[dict[str, Any]]] = {}
 
     while True:
-        round_rows = [
-            row for row in _read_jsonl(log_dir / "round_trace.jsonl")
-            if row.get("episode_id") == episode_id
-        ]
-        action_rows_all = [
-            row for row in _read_jsonl(log_dir / "action_trace.jsonl")
-            if row.get("episode_id") == episode_id
-        ]
+        for row in _incremental_jsonl_rows(round_path, round_state):
+            if row.get("episode_id") != episode_id:
+                continue
+            round_id = int(row.get("round_id", 0))
+            round_rows_by_id[round_id] = row
+
+        for row in _incremental_jsonl_rows(action_path, action_state):
+            if row.get("episode_id") != episode_id:
+                continue
+            round_id = int(row.get("round_id", 0))
+            action_rows_by_round.setdefault(round_id, []).append(row)
+
+        round_rows = list(round_rows_by_id.values())
         round_rows.sort(key=lambda row: int(row.get("round_id", 0)))
         for round_row in round_rows:
             round_id = int(round_row.get("round_id", 0))
             if round_id in yielded:
                 continue
-            round_actions = [row for row in action_rows_all if int(row.get("round_id", 0)) == round_id]
+            round_actions = action_rows_by_round.get(round_id, [])
             yielded.add(round_id)
             yield _build_payload(round_row, round_actions, summary)
 
@@ -135,5 +188,6 @@ def tail_episode(
         if time.monotonic() - started >= follow_timeout_s:
             break
         time.sleep(0.25)
-        summary_rows = _read_jsonl(log_dir / "episode_summary.jsonl")
-        summary = next((row for row in summary_rows if row.get("episode_id") == episode_id), summary)
+        for row in _incremental_jsonl_rows(summary_path, summary_state):
+            if row.get("episode_id") == episode_id:
+                summary = row

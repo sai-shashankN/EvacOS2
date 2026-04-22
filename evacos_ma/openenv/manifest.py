@@ -5,7 +5,6 @@ Serializes to the YAML shape OpenEnv expects for this environment.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from evacos_ma.openenv import VERSION
@@ -25,7 +24,6 @@ MANIFEST: dict[str, Any] = {
     "tasks": _TASK_LIST,
     "action_schema_ref": "evacos_ma.schemas.multi_agent.ActionEnvelopeMA",
     "observation_schema_ref": "evacos_ma.schemas.multi_agent.RoleObservationMA",
-    "debug_state_enabled": is_debug_state_enabled(),
     "supported_tiers": ["easy", "medium", "hard", "brutal"],
     "agent_topology": {
         "orchestrator_count": 1,
@@ -40,3 +38,11 @@ MANIFEST: dict[str, Any] = {
         "metadata": "/openenv/metadata",
     },
 }
+
+
+def build_manifest() -> dict[str, Any]:
+    """Build a manifest view with runtime-sensitive fields evaluated now."""
+    return {
+        **MANIFEST,
+        "debug_state_enabled": is_debug_state_enabled(),
+    }

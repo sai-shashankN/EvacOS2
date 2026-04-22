@@ -206,6 +206,13 @@ def validate(instance: GeneratedInstance) -> ValidationReport:
         reasons.append(f"Oracle save rate {oracle_rate:.2%} is below 60% threshold")
 
     earliest_blockage_round = _find_earliest_blockage(building, events)
+    threshold = instance.config.min_playable_blockage_round
+    if earliest_blockage_round is not None and earliest_blockage_round <= threshold:
+        reasons.append(
+            f"Earliest blockage round {earliest_blockage_round} is at or below "
+            f"min_playable_blockage_round={threshold} "
+            "(instance is impossible before the policy can act)"
+        )
     paths = min_path_per_floor(building)
 
     return ValidationReport(

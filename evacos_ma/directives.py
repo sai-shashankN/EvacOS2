@@ -45,6 +45,20 @@ class DirectiveStore:
             if old_id in self._active:
                 del self._active[old_id]
 
+        if (
+            directive.directive_id in self._active
+            and directive.supersedes_directive_id_or_null != directive.directive_id
+        ):
+            outcome = DirectiveOutcome(
+                directive_id=directive.directive_id,
+                target_floor_id=_extract_floor_id(directive.target),
+                directive_type=directive.directive_type,
+                accepted=False,
+                outcome_summary="duplicate_directive_id",
+            )
+            self._outcomes.append(outcome)
+            return outcome
+
         self._active[directive.directive_id] = directive
         outcome = DirectiveOutcome(
             directive_id=directive.directive_id,

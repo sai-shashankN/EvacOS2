@@ -21,6 +21,16 @@ class ModelConfig(BaseModel):
     max_prompt_tokens: int = 3500
     max_completion_tokens: int = 256
 
+    @field_validator("dtype")
+    @classmethod
+    def dtype_must_be_known(cls, value: str) -> str:
+        allowed = {"bfloat16", "float16", "float32"}
+        if value not in allowed:
+            raise ValueError(
+                f"model.dtype must be one of {sorted(allowed)}; got {value!r}"
+            )
+        return value
+
 
 class LoRAConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -57,9 +67,9 @@ class GRPOConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     learning_rate: float = 5e-6
     kl_coef: float = 0.04
-    group_size: int = 4
     clip_range: float = 0.2
     num_train_epochs_per_step: int = 1
+    prefer_trl: bool = False
 
 
 class RewardConfig(BaseModel):
@@ -70,6 +80,16 @@ class RewardConfig(BaseModel):
     cap: float = 1.0
     eligible_token_ceiling: int = 160
     clip_normalized_to: float = 1.0
+
+    @field_validator("rationale_scaling")
+    @classmethod
+    def rationale_scaling_must_be_known(cls, value: str) -> str:
+        allowed = {"off", "linear_capped", "log_uncapped"}
+        if value not in allowed:
+            raise ValueError(
+                f"reward.rationale_scaling must be one of {sorted(allowed)}; got {value!r}"
+            )
+        return value
 
 
 class EvalConfig(BaseModel):
@@ -141,12 +161,11 @@ class TrainingConfig(BaseModel):
     seed: SeedConfig = Field(default_factory=SeedConfig)
 
     @model_validator(mode="after")
-    def group_size_divisibility(self) -> "TrainingConfig":
-        """GRPO group_size must divide episodes_per_step * 6 (5 floors + 1 orch)."""
-        total_samples = self.rollout.episodes_per_step * 6
-        if total_samples % self.grpo.group_size != 0:
+    def vllm_requires_unsloth_backend(self) -> "TrainingConfig":
+        if self.rollout.use_vllm and self.backend != "unsloth":
             raise ValueError(
-                f"grpo.group_size ({self.grpo.group_size}) must divide "
-                f"rollout.episodes_per_step * 6 ({total_samples})"
+                f"rollout.use_vllm=true requires backend='unsloth' "
+                f"(current backend={self.backend!r}); the HF backend has no vLLM path. "
+                f"Either set backend='unsloth' or leave rollout.use_vllm=false."
             )
         return self

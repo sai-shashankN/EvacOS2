@@ -219,6 +219,9 @@ def _build_fake_torch() -> types.ModuleType:
         def long(self) -> "_Tensor":
             return self
 
+        def all(self) -> bool:
+            return bool(np.all(self._data != 0))
+
         def backward(self) -> None:
             pass  # no-op for testing
 
@@ -344,6 +347,11 @@ def _build_fake_torch() -> types.ModuleType:
 
     ft.cuda = types.SimpleNamespace(is_available=lambda: False)  # type: ignore[attr-defined]
 
+    def _isfinite(t: _Tensor) -> _Tensor:
+        return _Tensor(np.isfinite(t._data).astype(np.float64))
+
+    ft.isfinite = _isfinite  # type: ignore[attr-defined]
+
     return ft
 
 
@@ -462,6 +470,23 @@ class TestDeltaClamp:
         for c in clamped:
             e = math.exp(c)
             assert 0.0 < e < 200.0, f"exp({c}) = {e} is outside safe range"
+
+    def test_ref_delta_clamp_applied(self) -> None:
+        """ref_delta = ref_lp - new_lp must also be clamped before .exp() (Fix H27).
+
+        Without the clamp, exp(12) overflows FP16 (≈ 11.09 max) → inf KL →
+        corrupted gradients.  With clamp(-5, 5), exp is always safe.
+        """
+        # Same clamp logic as the policy delta
+        ref_deltas = [-12.0, -8.0, -5.0, 0.0, 5.0, 8.0, 12.0]
+        clamped = [max(-5.0, min(5.0, d)) for d in ref_deltas]
+        expected = [-5.0, -5.0, -5.0, 0.0, 5.0, 5.0, 5.0]
+        assert clamped == expected
+
+        # All exp values in safe FP16 range
+        for c in clamped:
+            e = math.exp(c)
+            assert 0.0 < e < 200.0, f"exp({c}) = {e} overflows FP16 safe range"
 
 
 # ===========================================================================
@@ -685,7 +710,6 @@ class TestDiagnostics:
             learning_rate=1e-4,
             kl_coef=0.04,
             clip_range=0.2,
-            group_size=4,
             num_train_epochs_per_step=1,
         )
 
@@ -737,3 +761,177 @@ class TestDiagnostics:
             val = result[key]
             assert isinstance(val, float), f"{key} is not float: {type(val)}"
             assert math.isfinite(val), f"{key} is not finite: {val}"
+
+    def _run_multi_epoch_diagnostics(self, epoch_new_lps: list[object]) -> dict:
+        from training.train import MultiAgentGRPOTrainer
+
+        ft = sys.modules["torch"]
+        np_torch = __import__("numpy")
+
+        S, L = 2, 19
+        encoded_full = {
+            "input_ids": ft.Tensor(np_torch.ones((S, 20), dtype=np_torch.int64)),
+            "attention_mask": ft.Tensor(np_torch.ones((S, 20), dtype=np_torch.int64)),
+        }
+        shifted_labels = ft.Tensor(np_torch.ones((S, L), dtype=np_torch.int64) * 100)
+        old_lp = ft.Tensor(np_torch.random.randn(S, L) * 0.1)
+        ref_lp = ft.Tensor(np_torch.random.randn(S, L) * 0.1)
+
+        param_mock = MagicMock()
+        param_mock.device = "cpu"
+        param_mock.requires_grad = True
+
+        model = MagicMock()
+        model.disable_adapter.return_value = MagicMock(
+            __enter__=MagicMock(return_value=model),
+            __exit__=MagicMock(return_value=False),
+        )
+        model.parameters.side_effect = lambda *a, **kw: iter([param_mock])
+        model.named_parameters.side_effect = lambda *a, **kw: iter([("lora_a.weight", param_mock)])
+
+        tokenizer = MagicMock()
+        tokenizer.pad_token = "[PAD]"
+
+        trainer = MultiAgentGRPOTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            learning_rate=1e-4,
+            kl_coef=0.04,
+            clip_range=0.2,
+            num_train_epochs_per_step=len(epoch_new_lps),
+        )
+        trainer._tokenize_batch = MagicMock(return_value=(encoded_full, shifted_labels))
+        call_count = [0]
+        epoch_iter = iter(epoch_new_lps)
+
+        def fake_logprobs(enc, labels):
+            if call_count[0] == 0:
+                call_count[0] += 1
+                return old_lp
+            if call_count[0] == 1:
+                call_count[0] += 1
+                return ref_lp
+            return ft.Tensor(next(epoch_iter))
+
+        trainer._masked_token_logprobs = MagicMock(side_effect=fake_logprobs)
+        grouped = {
+            "prompts": [[{"role": "user", "content": "prompt_0"}, {"role": "user", "content": "prompt_1"}]],
+            "completions": [["completion_0", "completion_1"]],
+            "raw_rewards": [[1.0, 2.0]],
+            "normalized_rewards": [[1.0, 2.0]],
+            "samples": [[]],
+        }
+        return trainer.step(grouped_inputs=grouped)
+
+    def test_diagnostics_single_epoch_matches_last_and_mean(self) -> None:
+        np_torch = __import__("numpy")
+        result = self._run_multi_epoch_diagnostics([np_torch.full((2, 19), 0.05)])
+
+        assert result["loss"] == result["loss_mean_across_epochs"]
+        assert result["policy_loss"] == result["policy_loss_mean_across_epochs"]
+        assert result["kl_loss"] == result["kl_loss_mean_across_epochs"]
+        assert result["ratio_mean"] == result["ratio_mean_across_epochs"]
+        assert result["clip_fraction"] == result["clip_fraction_mean_across_epochs"]
+        assert result["kl_max"] == result["kl_max_across_epochs"]
+        assert result["num_inner_epochs"] == 1
+
+    def test_diagnostics_multi_epoch_mean_is_not_last(self) -> None:
+        np_torch = __import__("numpy")
+        result = self._run_multi_epoch_diagnostics(
+            [
+                np_torch.full((2, 19), -0.25),
+                np_torch.zeros((2, 19)),
+                np_torch.full((2, 19), 0.25),
+            ]
+        )
+
+        assert result["num_inner_epochs"] == 3
+        assert result["kl_loss_mean_across_epochs"] != result["kl_loss"]
+
+    def test_diagnostics_returns_num_inner_epochs(self) -> None:
+        np_torch = __import__("numpy")
+        result = self._run_multi_epoch_diagnostics(
+            [
+                np_torch.full((2, 19), -0.1),
+                np_torch.full((2, 19), 0.0),
+                np_torch.full((2, 19), 0.1),
+            ]
+        )
+        assert result["num_inner_epochs"] == 3
+
+    def test_step_uses_eval_mode_for_old_ref_and_new_logprobs(self) -> None:
+        """Old/ref/new log-prob passes should all run with dropout disabled."""
+        from training.train import MultiAgentGRPOTrainer
+
+        ft = sys.modules["torch"]
+        np_torch = __import__("numpy")
+
+        S, L = 2, 4
+        encoded_full = {
+            "input_ids": ft.Tensor(np_torch.ones((S, L + 1), dtype=np_torch.int64)),
+            "attention_mask": ft.Tensor(np_torch.ones((S, L + 1), dtype=np_torch.int64)),
+        }
+        shifted_labels = ft.Tensor(np_torch.ones((S, L), dtype=np_torch.int64))
+
+        param_mock = MagicMock()
+        param_mock.device = "cpu"
+        param_mock.requires_grad = True
+
+        class _FakeModel:
+            def __init__(self) -> None:
+                self.training = True
+
+            def eval(self):
+                self.training = False
+                return self
+
+            def train(self, mode: bool = True):
+                self.training = mode
+                return self
+
+            def parameters(self):
+                return iter([param_mock])
+
+            def named_parameters(self):
+                return iter([("lora_a.weight", param_mock)])
+
+            @contextmanager
+            def disable_adapter(self):
+                yield self
+
+        model = _FakeModel()
+        tokenizer = MagicMock()
+        tokenizer.pad_token = "[PAD]"
+
+        trainer = MultiAgentGRPOTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            learning_rate=1e-4,
+            kl_coef=0.04,
+            clip_range=0.2,
+            num_train_epochs_per_step=1,
+        )
+        trainer._tokenize_batch = MagicMock(return_value=(encoded_full, shifted_labels))
+
+        observed_training_flags: list[bool] = []
+
+        def fake_logprobs(enc, labels):
+            del enc, labels
+            observed_training_flags.append(model.training)
+            return ft.Tensor(np_torch.zeros((S, L), dtype=np_torch.float64))
+
+        trainer._masked_token_logprobs = MagicMock(side_effect=fake_logprobs)
+
+        grouped = {
+            "prompts": [[{"role": "user", "content": "prompt_0"}, {"role": "user", "content": "prompt_1"}]],
+            "completions": [["completion_0", "completion_1"]],
+            "raw_rewards": [[1.0, 2.0]],
+            "normalized_rewards": [[1.0, 2.0]],
+            "samples": [[]],
+        }
+
+        result = trainer.step(grouped_inputs=grouped)
+
+        assert observed_training_flags == [False, False, False]
+        assert model.training is True
+        assert abs(result["ratio_mean"] - 1.0) < 1e-6

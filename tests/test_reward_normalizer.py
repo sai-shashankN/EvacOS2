@@ -6,8 +6,9 @@ Heavy-dep-free.
 import json
 import math
 
+from evacos_ma.reward_pipeline import RewardPipeline
 from training.reward import RewardNormalizer, normalize_per_role
-from evacos_ma.schemas.rewards import RoleReward, RewardBreakdown, RewardsByRole
+from evacos_ma.schemas.rewards import RoleReward, RewardsByRole
 
 
 class TestWelfordNormalization:
@@ -57,6 +58,47 @@ class TestWelfordNormalization:
 
 
 class TestNormalizePerRole:
+    def test_normalize_per_role_normalizes_before_update(self):
+        n = RewardNormalizer()
+        n.load_snapshot(
+            {
+                "orchestrator:easy": {"count": 40, "mean": 0.5, "m2": 20.0},
+                "floor_agent:easy": {"count": 40, "mean": 0.0, "m2": 20.0},
+            }
+        )
+        rewards = RewardsByRole(
+            orchestrator=RoleReward(raw=1.0, normalized=0.0),
+            floors={"floor_0_agent": RoleReward(raw=0.0, normalized=0.0)},
+        )
+
+        normalized = normalize_per_role(rewards, "easy", n, update=True)
+
+        expected = max(-1.0, min(1.0, (1.0 - 0.5) / math.sqrt(20.0 / 40.0)))
+        assert normalized["orchestrator"] == expected
+        snapshot = n.snapshot()
+        assert snapshot["orchestrator:easy"]["count"] == 41
+        assert snapshot["orchestrator:easy"]["mean"] != 0.5
+
+    def test_normalize_per_role_eval_mode_does_not_update(self):
+        n = RewardNormalizer()
+        n.load_snapshot(
+            {
+                "orchestrator:easy": {"count": 40, "mean": 0.5, "m2": 20.0},
+                "floor_agent:easy": {"count": 40, "mean": 0.0, "m2": 20.0},
+            }
+        )
+        rewards = RewardsByRole(
+            orchestrator=RoleReward(raw=1.0, normalized=0.0),
+            floors={"floor_0_agent": RoleReward(raw=0.0, normalized=0.0)},
+        )
+
+        snapshot_before = n.snapshot()
+        normalized = normalize_per_role(rewards, "easy", n, update=False)
+
+        expected = max(-1.0, min(1.0, (1.0 - 0.5) / math.sqrt(20.0 / 40.0)))
+        assert normalized["orchestrator"] == expected
+        assert n.snapshot() == snapshot_before
+
     def test_update_false_does_not_change_state(self):
         """update=False in normalize_per_role does not change internal state."""
         n = RewardNormalizer()
@@ -79,3 +121,24 @@ class TestNormalizePerRole:
 
         snap_after = n.snapshot()
         assert snap_before == snap_after
+
+    def test_training_normalizer_scope_differs_from_env_reward_pipeline(self):
+        pipeline = RewardPipeline()
+        pipeline.observe(1.0, "easy")
+        pipeline.observe(2.0, "hard")
+
+        n = RewardNormalizer()
+        rewards = RewardsByRole(
+            orchestrator=RoleReward(raw=1.0, normalized=0.0),
+            floors={
+                "floor_0_agent": RoleReward(raw=0.4, normalized=0.0),
+                "floor_1_agent": RoleReward(raw=0.2, normalized=0.0),
+            },
+        )
+        normalize_per_role(rewards, "easy", n, update=True)
+
+        assert set(pipeline.snapshot()) == {"easy", "hard"}
+        snapshot = n.snapshot()
+        assert set(snapshot) == {"floor_agent:easy", "orchestrator:easy"}
+        assert snapshot["floor_agent:easy"]["count"] == 2
+        assert "floor_0_agent:easy" not in snapshot

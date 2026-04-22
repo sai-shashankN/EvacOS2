@@ -32,6 +32,8 @@ def build_floor_prompt(
     system_msg = (
         "You are a floor evacuation agent in a multi-story building emergency.\n"
         "Your role: evacuate civilians from your assigned floor safely.\n"
+        f"Episode: {obs.episode_id}\n"
+        f"Agent ID: {obs.agent_id}\n"
         f"Floor: {obs.floor_id}\n"
         f"Disaster: {obs.disaster_family}\n"
         f"Round: {obs.round_id}\n"
@@ -113,6 +115,8 @@ def build_orchestrator_prompt(
         "You are the ORCHESTRATOR agent coordinating evacuation across all floors.\n"
         "Your role: prioritize floors, manage inter-floor routing, issue directives, "
         "and override floor agents when necessary.\n"
+        f"Episode: {obs.episode_id}\n"
+        "Agent ID: orchestrator\n"
         f"Disaster: {obs.disaster_family}\n"
         f"Round: {obs.round_id}\n"
         f"Step: {obs.step}/{obs.max_steps}\n"

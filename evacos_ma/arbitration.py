@@ -204,7 +204,7 @@ class Arbitrator:
                         "agent_id": loser.agent_id,
                         "action_id": loser.action_id,
                         "action_type": loser.action_type.value,
-                        "reason": "elevator_reserved",
+                        "reason": "elevator_capacity",
                         "resource_id": elevator_id,
                     }
                 )

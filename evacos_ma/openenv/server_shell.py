@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from evacos_ma.openenv import VERSION
 from evacos_ma.openenv.debug import is_debug_state_enabled
-from evacos_ma.openenv.manifest import MANIFEST
+from evacos_ma.openenv.manifest import build_manifest
 from evacos_ma.schemas.multi_agent import (
     ActionBundleMA,
     AgentRole,
@@ -185,11 +185,12 @@ def schema() -> SchemaResponseMA:
 
 @router.get("/metadata", response_model=MetadataResponseMA)
 def metadata() -> MetadataResponseMA:
+    manifest = build_manifest()
     return MetadataResponseMA(
-        name=MANIFEST["env_name"],
-        description=MANIFEST["description"],
-        version=MANIFEST["version"],
-        manifest=MANIFEST,
+        name=manifest["env_name"],
+        description=manifest["description"],
+        version=manifest["version"],
+        manifest=manifest,
     )
 
 

@@ -28,6 +28,25 @@ _METRICS_COLUMNS: list[str] = [
     "override_win_rate",
     "rationale_bonus_mean",
     "episodes_seen",
+    # Trainer diagnostics (merged from MultiAgentGRPOTrainer.step return)
+    "loss",
+    "policy_loss",
+    "kl_loss",
+    "ratio_mean",
+    "ratio_std",
+    "clip_fraction",
+    "kl_max",
+    "mask_coverage",
+    "mean_advantage",
+    "advantage_std",
+    "loss_mean_across_epochs",
+    "policy_loss_mean_across_epochs",
+    "kl_loss_mean_across_epochs",
+    "ratio_mean_across_epochs",
+    "ratio_std_mean_across_epochs",
+    "clip_fraction_mean_across_epochs",
+    "kl_max_across_epochs",
+    "num_inner_epochs",
 ]
 
 

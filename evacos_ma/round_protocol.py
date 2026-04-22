@@ -56,6 +56,9 @@ class RoundResult:
         "round_events",
         "override_applied",
         "counterfactual_deltas",
+        "apply_deltas",
+        "directive_issued_count",
+        "directive_addressed_count",
     )
 
     def __init__(
@@ -67,6 +70,9 @@ class RoundResult:
         round_events: list[dict[str, Any]],
         override_applied: dict[str, str] | None = None,
         counterfactual_deltas: dict[str, float] | None = None,
+        apply_deltas: dict[str, dict[str, int]] | None = None,
+        directive_issued_count: int = 0,
+        directive_addressed_count: int = 0,
     ) -> None:
         self.accepted_actions = accepted_actions
         self.rejected_actions = rejected_actions
@@ -75,6 +81,9 @@ class RoundResult:
         self.round_events = round_events
         self.override_applied = override_applied or {}
         self.counterfactual_deltas = counterfactual_deltas or {}
+        self.apply_deltas = apply_deltas or {}
+        self.directive_issued_count = directive_issued_count
+        self.directive_addressed_count = directive_addressed_count
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +177,36 @@ def _room_risk(room: Any) -> float:
     )
 
 
+def _lookup_stairwell_for_action(stairwell_lookup: dict[str, Any], action: ActionEnvelopeMA) -> Any | None:
+    stairwell_id = action.arguments.get("stairwell_id", "")
+    if stairwell_id:
+        return stairwell_lookup.get(stairwell_id)
+
+    source_floor = action.arguments.get("source_floor_id")
+    target_floor = action.arguments.get("target_floor_id")
+    if source_floor is None or target_floor is None:
+        return None
+
+    for stairwell in stairwell_lookup.values():
+        floor_ids = set(getattr(stairwell, "floor_ids", []))
+        if source_floor in floor_ids and target_floor in floor_ids:
+            return stairwell
+    return None
+
+
+def _lookup_elevator_for_action(env: Any, ep_copy: Any, action: ActionEnvelopeMA) -> Any | None:
+    elevator_lookup = env._elevator_lookup(ep_copy.building)
+    elevator_id = action.arguments.get("elevator_id", "")
+    if elevator_id:
+        return elevator_lookup.get(elevator_id)
+
+    target_floor = action.arguments.get("target_floor_id")
+    for elevator in elevator_lookup.values():
+        if target_floor is None or target_floor in getattr(elevator, "floor_ids", []):
+            return elevator
+    return None
+
+
 def _apply_counterfactual_action(
     env: Any,
     ep_copy: Any,
@@ -222,14 +261,36 @@ def _apply_counterfactual_action(
 
     if action.action_type == ActionTypeMA.open_exit:
         exit_obj = exit_lookup.get(action.arguments.get("exit_id", ""))
-        if exit_obj is not None and not exit_obj.blocked:
+        if exit_obj is not None:
+            exit_obj.blocked = False
+            _increment_counter(ep_copy.civilians_saved, "mobile")
+        return
+
+    if action.action_type == ActionTypeMA.route_between_floors:
+        stairwell = _lookup_stairwell_for_action(stairwell_lookup, action)
+        if stairwell is None or getattr(stairwell, "blocked", False):
+            _increment_counter(ep_copy.civilians_lost, "mobile")
+        else:
+            _increment_counter(ep_copy.civilians_saved, "mobile")
+        return
+
+    if action.action_type == ActionTypeMA.call_elevator:
+        elevator = _lookup_elevator_for_action(env, ep_copy, action)
+        if (
+            elevator is not None
+            and getattr(elevator, "operational", True)
+            and not getattr(elevator, "blocked", False)
+            and not getattr(elevator, "disabled", False)
+        ):
             _increment_counter(ep_copy.civilians_saved, "mobile")
         return
 
     if action.action_type == ActionTypeMA.lockdown_room:
         room = room_lookup.get(action.arguments.get("room_id", ""))
-        if room is not None and _room_risk(room) >= 1.0 and room.occupancy.total > 0:
-            _increment_counter(ep_copy.civilians_saved, "mobile")
+        if room is not None:
+            room.accessible = False
+            if _room_risk(room) >= 1.0 and room.occupancy.total > 0:
+                _increment_counter(ep_copy.civilians_saved, "mobile")
         return
 
 
@@ -314,6 +375,8 @@ class RoundProtocol:
 
         # --- Step 2: process directives ---
         rejections: list[dict[str, Any]] = []
+        directive_issued_count = 0
+        directive_addressed_count = 0
 
         if orchestrator_action is not None and orchestrator_action.action_type == ActionTypeMA.broadcast_directive:
             directive_data = orchestrator_action.arguments.get("directive")
@@ -330,7 +393,10 @@ class RoundProtocol:
                     orchestrator_action = None
                 else:
                     directive_store.issue(directive)
-                    self._mark_addressed_handoffs_for_directive(handoff_store, directive)
+                    directive_issued_count += 1
+                    directive_addressed_count += self._mark_addressed_handoffs_for_directive(
+                        handoff_store, directive,
+                    )
 
         # Tick directives for expiration
         directive_store.tick(round_id)
@@ -378,32 +444,44 @@ class RoundProtocol:
             try:
                 replacement_type = ActionTypeMA(replacement_type_str)
             except ValueError:
-                replacement_type = ActionTypeMA.wait
+                rejections.append({
+                    "agent_id": orchestrator_action.agent_id,
+                    "action_id": orchestrator_action.action_id,
+                    "action_type": orchestrator_action.action_type.value,
+                    "reason": f"invalid_override_replacement_type: {replacement_type_str!r}",
+                })
+            else:
+                if target_agent not in validated_floor_actions:
+                    rejections.append({
+                        "agent_id": orchestrator_action.agent_id,
+                        "action_id": orchestrator_action.action_id,
+                        "action_type": orchestrator_action.action_type.value,
+                        "reason": f"invalid_override_target: {target_agent}",
+                    })
+                else:
+                    original_action = validated_floor_actions[target_agent]
 
-            if target_agent in validated_floor_actions:
-                original_action = validated_floor_actions[target_agent]
+                    # Counterfactual scoring
+                    replacement_action = ActionEnvelopeMA(
+                        episode_id=ep.episode_id,
+                        round_id=round_id,
+                        agent_id=target_agent,
+                        action_id=f"override_{orchestrator_action.action_id}",
+                        action_type=replacement_type,
+                        arguments=replacement_args,
+                    )
 
-                # Counterfactual scoring
-                replacement_action = ActionEnvelopeMA(
-                    episode_id=ep.episode_id,
-                    round_id=round_id,
-                    agent_id=target_agent,
-                    action_id=f"override_{orchestrator_action.action_id}",
-                    action_type=replacement_type,
-                    arguments=replacement_args,
-                )
+                    cfd = _compute_counterfactual_delta(
+                        env, ep, original_action, replacement_action, horizon=3,
+                    )
+                    counterfactual_deltas[target_agent] = cfd
 
-                cfd = _compute_counterfactual_delta(
-                    env, ep, original_action, replacement_action, horizon=3,
-                )
-                counterfactual_deltas[target_agent] = cfd
+                    # Replace the floor's action
+                    validated_floor_actions[target_agent] = replacement_action
+                    override_targets[target_agent] = replacement_action
+                    override_applied[target_agent] = orchestrator_action.arguments.get("rationale", "orchestrator_override")
 
-                # Replace the floor's action
-                validated_floor_actions[target_agent] = replacement_action
-                override_targets[target_agent] = replacement_action
-                override_applied[target_agent] = orchestrator_action.arguments.get("rationale", "orchestrator_override")
-
-                self._mark_addressed_handoffs_for_floor(handoff_store, target_agent)
+                    self._mark_addressed_handoffs_for_floor(handoff_store, target_agent)
 
         # --- Step 5: record handoff escalations ---
         for agent_id, action in list(validated_floor_actions.items()):
@@ -445,7 +523,7 @@ class RoundProtocol:
         all_rejections = rejections + arb_result.rejections
 
         # --- Step 8: apply accepted actions atomically ---
-        self._apply(env, ep, arb_result.accepted)
+        apply_deltas = self._apply(env, ep, arb_result.accepted)
 
         # --- Step 9: emit ---
         return RoundResult(
@@ -456,37 +534,58 @@ class RoundProtocol:
             round_events=[],
             override_applied=override_applied,
             counterfactual_deltas=counterfactual_deltas,
+            apply_deltas=apply_deltas,
+            directive_issued_count=directive_issued_count,
+            directive_addressed_count=directive_addressed_count,
         )
 
-    def _apply(self, env: Any, ep: Any, accepted: list[ActionEnvelopeMA]) -> None:
+    def _apply(self, env: Any, ep: Any, accepted: list[ActionEnvelopeMA]) -> dict[str, dict[str, int]]:
         """Apply accepted actions to the episode state.
 
-        For Phase 5 we handle a subset of action effects:
-        - wait: no-op
-        - scout, predict_state: already handled via Phase 4 helpers before run_round
-        - lockdown_room: add to ep.blocked_routes equivalent
-        - Other actions: stored in action log but don't mutate building state yet
-          (full effect application is Phase 6+).
+        Reuses the counterfactual action effect model on live episode state so
+        arbitration and real mutation stay aligned.
         """
+        per_agent: dict[str, dict[str, int]] = {}
+        if not accepted:
+            return per_agent
+
+        seed = _counterfactual_seed(ep.episode_id, ep.step, "_apply")
+        rng = random.Random(seed)
         for action in accepted:
-            # Record the action for audit
-            pass  # The env's step() call handles the actual building mutation
+            pre_saved = ep.civilians_saved.total
+            pre_lost = ep.civilians_lost.total
+            _apply_counterfactual_action(env, ep, action, rng)
+            post_saved = ep.civilians_saved.total
+            post_lost = ep.civilians_lost.total
+            if action.action_type == ActionTypeMA.lockdown_room:
+                room_id = action.arguments.get("room_id", "")
+                engine = env._engines.get(ep.episode_id)
+                if engine is not None and room_id:
+                    engine._room_accessibility[room_id] = False
+            entry = per_agent.setdefault(action.agent_id, {"saved": 0, "lost": 0})
+            entry["saved"] += post_saved - pre_saved
+            entry["lost"] += post_lost - pre_lost
+        return per_agent
 
     def _mark_addressed_handoffs_for_directive(
         self,
         handoff_store: list[dict[str, Any]],
         directive: Directive,
-    ) -> None:
+    ) -> int:
+        addressed = 0
         for handoff in handoff_store:
             if handoff.get("addressed"):
                 continue
             if directive.target == "all":
                 handoff["addressed"] = True
+                addressed += 1
                 continue
             floor_id = handoff.get("floor_id", "")
             agent_id = handoff.get("agent_id", "")
             if directive.target in {floor_id, agent_id}:
                 handoff["addressed"] = True
+                addressed += 1
+        return addressed
 
     def _mark_addressed_handoffs_for_floor(
         self,

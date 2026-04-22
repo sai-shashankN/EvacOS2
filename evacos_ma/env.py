@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import random
+import re
 import time
 import uuid
 from collections import deque
@@ -88,6 +90,16 @@ from evacos_ma.permissions import action_mask_for_role
 from evacos_ma.round_protocol import RoundProtocol
 from evacos_ma.task_registry import get_task
 
+_DEFAULT_ROLLOUT_REWARD_CONFIG: dict[str, float | str] = {
+    "rationale_scaling": "linear_capped",
+    "alpha": 0.01,
+    "beta": 0.25,
+    "cap": 1.0,
+    "eligible_token_ceiling": 160,
+    "clip_normalized_to": 1.0,
+}
+_RATIONALE_TOKEN_RE = re.compile(r"[A-Za-z0-9']+")
+
 
 def _clone_occupancy(occupancy: Occupancy) -> Occupancy:
     return Occupancy(
@@ -119,6 +131,24 @@ def _occupancy_leq(left: Occupancy, right: Occupancy) -> bool:
         and left.injured <= right.injured
         and left.mobility_impaired <= right.mobility_impaired
     )
+
+
+def _normalize_rationale_tokens(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return [match.group(0).lower() for match in _RATIONALE_TOKEN_RE.finditer(text)]
+
+
+def _has_repeated_ngram(tokens: list[str], *, size: int, max_occurrences: int) -> bool:
+    if len(tokens) < size:
+        return False
+    counts: dict[tuple[str, ...], int] = {}
+    for idx in range(len(tokens) - size + 1):
+        ngram = tuple(tokens[idx : idx + size])
+        counts[ngram] = counts.get(ngram, 0) + 1
+        if counts[ngram] > max_occurrences:
+            return True
+    return False
 
 
 def _occupancy_delta(before: Occupancy, after: Occupancy) -> Occupancy:
@@ -205,8 +235,34 @@ class EvacEnvironment:
         self._ma_recent_floor_actions: dict[str, list[dict[str, Any]]] = {}
         self._round_protocol = RoundProtocol()
 
-    def reset(self, task_id: str, seed: Optional[int] = None) -> tuple[str, Observation]:
+    def reset(
+        self,
+        task_id: str,
+        seed: Optional[int] = None,
+        procgen_tier: str | None = None,
+        procgen_disaster_family: DisasterType | None = None,
+        procgen_max_steps: int | None = None,
+    ) -> tuple[str, Observation]:
         """Initialize a new episode. Returns (episode_id, initial_observation)."""
+        if (
+            procgen_tier is not None
+            or procgen_disaster_family is not None
+            or procgen_max_steps is not None
+        ):
+            if procgen_tier is None or procgen_disaster_family is None:
+                raise ValueError(
+                    "procgen_tier and procgen_disaster_family are required when using procgen reset options"
+                )
+            episode_id, _ = self._reset_multi_agent_procgen(
+                task_id=task_id,
+                seed=seed if seed is not None else random.randint(0, 2_147_483_647),
+                procgen_tier=procgen_tier,
+                procgen_disaster_family=procgen_disaster_family,
+                procgen_max_steps=procgen_max_steps,
+            )
+            ep = self.get_internal_state(episode_id)
+            return episode_id, self._build_observation(ep)
+
         task = get_task(task_id).model_copy(deep=True)
         resolved_seed = seed if seed is not None else random.randint(0, 2_147_483_647)
         building = generate_building(task_id, resolved_seed)
@@ -403,6 +459,7 @@ class EvacEnvironment:
         seed: Optional[int] = None,
         procgen_tier: Optional[str] = None,
         procgen_disaster_family: Optional[DisasterType] = None,
+        procgen_max_steps: Optional[int] = None,
     ) -> tuple[str, ObservationsByRole]:
         """Initialize a multi-agent episode.
 
@@ -416,6 +473,7 @@ class EvacEnvironment:
                 seed=seed if seed is not None else random.randint(0, 2_147_483_647),
                 procgen_tier=procgen_tier,
                 procgen_disaster_family=procgen_disaster_family,
+                procgen_max_steps=procgen_max_steps,
             )
         episode_id, _ = self.reset(task_id, seed)
         ep = self.get_internal_state(episode_id)
@@ -432,6 +490,7 @@ class EvacEnvironment:
         seed: int,
         procgen_tier: str,
         procgen_disaster_family: DisasterType,
+        procgen_max_steps: Optional[int] = None,
     ) -> tuple[str, ObservationsByRole]:
         """Reset using the procedural generator."""
         from procgen.generator import generate_instance as pg_generate
@@ -459,7 +518,7 @@ class EvacEnvironment:
             building_profile="procgen",
             success_criteria="Evacuate civilians before routes are cut off.",
             goal=f"Evacuate all civilians from the procedurally generated {procgen_disaster_family.value} scenario.",
-            max_steps=80,
+            max_steps=80 if procgen_max_steps is None else int(procgen_max_steps),
             description=(
                 "Procedurally generated multi-agent evacuation scenario. "
                 "Tier/disaster metadata are sourced from procgen state, not task_registry."
@@ -582,6 +641,7 @@ class EvacEnvironment:
 
     def step_multi_agent(self, bundle: ActionBundleMA) -> StepResultMA:
         ep = self.get_internal_state(bundle.episode_id)
+        progress_start = ep.civilians_saved.total - ep.civilians_lost.total
         floor_components = {
             self._floor_agent_key(floor.floor_id): {}
             for floor in ep.building.floors
@@ -640,22 +700,6 @@ class EvacEnvironment:
                             }
                         )
 
-        # Advance the underlying simulation step (disaster engine, transit, etc.)
-        base_obs, _, done, base_info = self.step(
-            WaitAction(
-                episode_id=bundle.episode_id,
-                expected_step=ep.step,
-                action_type=ActionType.wait,
-            )
-        )
-        del base_obs
-
-        audit_rows = self._resolve_beliefs(ep)
-        for row in audit_rows:
-            predictor = row.predictor_agent_id
-            floor_components.setdefault(predictor, {})
-            floor_components[predictor]["floor_prediction"] = floor_components[predictor].get("floor_prediction", 0.0) + self._prediction_reward_component(ep, row.score or 0.0)
-
         # --- Phase 5: delegate to RoundProtocol ---
         round_result = self._round_protocol.run_round(
             env=self,
@@ -667,18 +711,135 @@ class EvacEnvironment:
             handoff_store=self._handoff_stores[bundle.episode_id],
         )
 
+        # Advance the underlying simulation step (disaster engine, transit, etc.)
+        base_obs, base_reward, done, base_info = self.step(
+            WaitAction(
+                episode_id=bundle.episode_id,
+                expected_step=ep.step,
+                action_type=ActionType.wait,
+            )
+        )
+        del base_obs
+        base_reward_scalar = float(
+            getattr(base_reward, "raw", getattr(base_reward, "total", base_reward))
+        )
+        progress_end = ep.civilians_saved.total - ep.civilians_lost.total
+        team_progress_delta = float(progress_end - progress_start)
+
+        audit_rows = self._resolve_beliefs(ep)
+        for row in audit_rows:
+            predictor = row.predictor_agent_id
+            floor_components.setdefault(predictor, {})
+            floor_components[predictor]["floor_prediction"] = floor_components[predictor].get("floor_prediction", 0.0) + self._prediction_reward_component(ep, row.score or 0.0)
+        reward_config = self._rollout_reward_config(ep)
+
         # Merge round protocol rejections with Phase 4 invalid actions
         all_invalid = invalid_actions + round_result.rejected_actions
 
         # Update override tracking
         self._override_last_round[bundle.episode_id] = round_result.override_applied
-        self._record_ma_floor_actions(bundle.episode_id, bundle.floor_actions, ep.step)
+        self._record_ma_floor_actions(
+            bundle.episode_id,
+            {
+                action.agent_id: action
+                for action in round_result.accepted_actions
+                if action.agent_id.startswith("floor_")
+            },
+            ep.step,
+        )
 
         # Compute orchestrator reward (oversight bonus)
+        weights = ep.task.reward_weights
         orchestrator_components: dict[str, float] = {}
         for agent_id, delta in round_result.counterfactual_deltas.items():
             if delta > 0:
                 orchestrator_components["oversight_bonus"] = orchestrator_components.get("oversight_bonus", 0.0) + delta
+        for agent_id, delta in round_result.apply_deltas.items():
+            if not agent_id.startswith("floor_"):
+                continue
+            fc = floor_components.setdefault(agent_id, {})
+            fc["floor_saved"] = fc.get("floor_saved", 0.0) + float(delta["saved"]) * weights.floor_saved
+            fc["floor_lost"] = fc.get("floor_lost", 0.0) + float(delta["lost"]) * weights.floor_lost
+        n_floors = max(1, len(ep.building.floors))
+        orchestrator_components["base_sim_reward"] = orchestrator_components.get(
+            "base_sim_reward", 0.0
+        ) + base_reward_scalar
+        orchestrator_components["team_progress_dense"] = orchestrator_components.get(
+            "team_progress_dense", 0.0
+        ) + team_progress_delta * weights.team_progress_dense_orchestrator
+        base_floor_share = base_reward_scalar / n_floors
+        for floor in ep.building.floors:
+            agent_id = f"floor_{floor.floor_id}_agent"
+            fc = floor_components.setdefault(agent_id, {})
+            fc["base_sim_reward_share"] = fc.get("base_sim_reward_share", 0.0) + base_floor_share
+            fc["team_progress_dense"] = fc.get("team_progress_dense", 0.0) + team_progress_delta * weights.team_progress_dense_floor
+
+        invalid_agents: dict[str, int] = {}
+        for row in invalid_actions:
+            aid = row.get("agent_id", "")
+            if aid.startswith("floor_"):
+                invalid_agents[aid] = invalid_agents.get(aid, 0) + 1
+        for rej in round_result.rejected_actions:
+            aid = rej.get("agent_id", "") if isinstance(rej, dict) else getattr(rej, "agent_id", "")
+            if aid.startswith("floor_"):
+                invalid_agents[aid] = invalid_agents.get(aid, 0) + 1
+        for aid, count in invalid_agents.items():
+            fc = floor_components.setdefault(aid, {})
+            fc["floor_invalid_action"] = fc.get("floor_invalid_action", 0.0) + count * weights.floor_invalid_action
+
+        capacity_contention = 0
+        for rej in round_result.rejected_actions:
+            reason = rej.get("reason", "") if isinstance(rej, dict) else getattr(rej, "reason", "")
+            if reason in ("stairwell_capacity", "elevator_capacity"):
+                capacity_contention += 1
+        orchestrator_components["coordination_bonus"] = orchestrator_components.get(
+            "coordination_bonus", 0.0
+        ) + float(capacity_contention) * weights.coordination_bonus
+
+        addressed = round_result.directive_addressed_count
+        issued = round_result.directive_issued_count
+        churn = max(0, issued - addressed)
+        orchestrator_components["directive_quality"] = orchestrator_components.get(
+            "directive_quality", 0.0
+        ) + (addressed - churn) * weights.directive_quality
+
+        if done:
+            orchestrator_components["total_saved_terminal"] = (
+                orchestrator_components.get("total_saved_terminal", 0.0)
+                + float(ep.civilians_saved.total) * weights.total_saved_terminal
+            )
+            orchestrator_components["total_lost_terminal"] = (
+                orchestrator_components.get("total_lost_terminal", 0.0)
+                + float(ep.civilians_lost.total) * weights.total_lost_terminal
+            )
+
+        orchestrator_bonus = self._orchestrator_rationale_bonus(
+            action=bundle.orchestrator_action,
+            counterfactual_deltas=round_result.counterfactual_deltas,
+            reward_config=reward_config,
+        )
+        if orchestrator_bonus != 0.0:
+            orchestrator_components["rationale_bonus"] = (
+                orchestrator_components.get("rationale_bonus", 0.0) + orchestrator_bonus
+            )
+
+        belief_scores_by_agent: dict[str, float] = {}
+        for row in audit_rows:
+            if not row.resolved or row.score is None:
+                continue
+            belief_scores_by_agent[row.predictor_agent_id] = max(
+                belief_scores_by_agent.get(row.predictor_agent_id, float("-inf")),
+                float(row.score),
+            )
+        for agent_id, action in sorted(bundle.floor_actions.items()):
+            floor_bonus = self._floor_rationale_bonus(
+                action=action,
+                belief_score=belief_scores_by_agent.get(agent_id, 0.0),
+                reward_config=reward_config,
+            )
+            if floor_bonus != 0.0:
+                fc = floor_components.setdefault(agent_id, {})
+                fc["rationale_bonus"] = fc.get("rationale_bonus", 0.0) + floor_bonus
 
         # Build observations (with populated action_mask, directive, override fields)
         observations = self._build_observations_by_role(ep)
@@ -1026,7 +1187,7 @@ class EvacEnvironment:
             ]
 
         elevator = self._elevator_lookup(ep.building).get(carrier_id or "")
-        transits: list[TransitGroup] = []
+        pending: list[tuple[Occupancy, int]] = []
         for cohort_name, count in pieces:
             if count <= 0:
                 continue
@@ -1048,6 +1209,10 @@ class EvacEnvironment:
                 if group_occupancy.total > elevator.capacity:
                     return False, f"Elevator {elevator.elevator_id} capacity exceeded", []
 
+            pending.append((group_occupancy, steps_remaining))
+
+        transits: list[TransitGroup] = []
+        for group_occupancy, steps_remaining in pending:
             _subtract_occupancy(source.occupancy, group_occupancy)
             incident_outcomes = self._pull_room_incident_outcomes(ep, source.room_id, group_occupancy.total)
             transits.append(
@@ -1148,8 +1313,22 @@ class EvacEnvironment:
             exit_obj = exit_lookup.get(transit.target_node_id)
             if exit_obj is not None and transit.steps_remaining <= 0:
                 if exit_obj.blocked:
-                    transit.steps_remaining = 0
-                    remaining.append(transit)
+                    source_room = room_lookup.get(transit.source_node_id)
+                    source_passable = (
+                        source_room is not None
+                        and source_room.accessible
+                        and source_room.hazard.passable
+                    )
+                    if source_passable:
+                        _add_occupancy(source_room.occupancy, transit.occupancy)
+                        self._push_room_incident_outcomes(
+                            ep,
+                            source_room.room_id,
+                            transit.incident_outcomes,
+                        )
+                    else:
+                        _add_occupancy(ep.civilians_lost, transit.occupancy)
+                        ep.resolved_incident_outcomes.deaths += transit.incident_outcomes.total
                     continue
                 _add_occupancy(ep.civilians_saved, transit.occupancy)
                 _add_incident_outcomes(ep.resolved_incident_outcomes, transit.incident_outcomes)
@@ -1453,7 +1632,7 @@ class EvacEnvironment:
                     known_civilian_count=sum(room.occupancy_mobile + room.occupancy_injured + room.occupancy_mobility_impaired for room in visible_rooms),
                     unknown_room_count=sum(1 for age in visibility_age_by_room.values() if age > 0),
                     hazard_severity=sum(room.hazard.severity for room in floor.rooms) / max(1, len(floor.rooms)),
-                    queue_pressure=0.0,
+                    queue_pressure=self._compute_queue_pressure(floor, ep),
                     exit_capacity_remaining=sum(1 for exit_obj in floor.exits if not exit_obj.blocked),
                     last_updated_round=ep.step,
                 )
@@ -1492,6 +1671,7 @@ class EvacEnvironment:
             for exit_obj in sorted(self._exit_lookup(ep.building).values(), key=lambda item: item.exit_id)
         ]
         belief_snapshot = ep.belief_store.snapshot() if ep.belief_store is not None else {}
+        cascade_hint = self._next_cascade_hint(ep)
         return OrchestratorObservationMA(
             episode_id=ep.episode_id,
             round_id=ep.step,
@@ -1520,6 +1700,7 @@ class EvacEnvironment:
                 for record in self._recent_floor_actions(ep)[:10]
             ],
             recent_directive_outcomes=self._get_directive_outcomes(ep),
+            cascade_hint=cascade_hint,
             unresolved_escalations=self._get_unresolved_escalations(ep),
             generator_config_hash=self._generator_config_hash(ep.task.task_id, ep.seed),
         )
@@ -1726,16 +1907,107 @@ class EvacEnvironment:
             ep.belief_audit_log.append(row.model_dump(mode="json"))
         return audit_rows
 
+    def _rollout_reward_config(self, ep: EpisodeStateInternal) -> dict[str, Any]:
+        payload: dict[str, Any] = dict(_DEFAULT_ROLLOUT_REWARD_CONFIG)
+        reward_config = ep.rollout_metadata.get("reward_config", {})
+        if isinstance(reward_config, dict):
+            payload.update(reward_config)
+        rationale_mode = ep.rollout_metadata.get("rationale_mode")
+        if rationale_mode is not None:
+            payload["rationale_scaling"] = rationale_mode
+        return payload
+
+    def _rationale_gate_passes(self, rationale: str | None) -> tuple[bool, int]:
+        tokens = _normalize_rationale_tokens(rationale)
+        raw_token_count = len(tokens)
+        if raw_token_count < 12:
+            return False, raw_token_count
+        lexical_diversity = len(set(tokens)) / raw_token_count
+        if lexical_diversity < 0.4:
+            return False, raw_token_count
+        if _has_repeated_ngram(tokens, size=4, max_occurrences=2):
+            return False, raw_token_count
+        return True, raw_token_count
+
+    def _scale_rationale_bonus(
+        self,
+        raw_eligible_token_count: int,
+        reward_config: dict[str, Any],
+    ) -> float:
+        rationale_scaling = str(
+            reward_config.get("rationale_scaling", _DEFAULT_ROLLOUT_REWARD_CONFIG["rationale_scaling"])
+        )
+        if rationale_scaling == "off":
+            return 0.0
+        eligible_tokens = min(
+            raw_eligible_token_count,
+            int(
+                reward_config.get(
+                    "eligible_token_ceiling",
+                    _DEFAULT_ROLLOUT_REWARD_CONFIG["eligible_token_ceiling"],
+                )
+            ),
+        )
+        if rationale_scaling == "linear_capped":
+            return min(
+                float(reward_config.get("alpha", _DEFAULT_ROLLOUT_REWARD_CONFIG["alpha"]))
+                * eligible_tokens,
+                float(reward_config.get("cap", _DEFAULT_ROLLOUT_REWARD_CONFIG["cap"])),
+            )
+        if rationale_scaling == "log_uncapped":
+            return float(reward_config.get("beta", _DEFAULT_ROLLOUT_REWARD_CONFIG["beta"])) * math.log(
+                1 + eligible_tokens
+            )
+        return 0.0
+
+    def _orchestrator_rationale_bonus(
+        self,
+        *,
+        action: ActionEnvelopeMA,
+        counterfactual_deltas: dict[str, float],
+        reward_config: dict[str, Any],
+    ) -> float:
+        if action.action_type != ActionTypeMA.override_floor_agent:
+            return 0.0
+        passes, raw_token_count = self._rationale_gate_passes(action.rationale)
+        if not passes:
+            return 0.0
+        target_agent_id = str(action.arguments.get("target_floor_agent_id", ""))
+        if counterfactual_deltas.get(target_agent_id, 0.0) <= 0.0:
+            return 0.0
+        return self._scale_rationale_bonus(raw_token_count, reward_config)
+
+    def _floor_rationale_bonus(
+        self,
+        *,
+        action: ActionEnvelopeMA,
+        belief_score: float,
+        reward_config: dict[str, Any],
+    ) -> float:
+        if action.action_type != ActionTypeMA.predict_state:
+            return 0.0
+        passes, raw_token_count = self._rationale_gate_passes(action.rationale)
+        if not passes or belief_score < 0.5:
+            return 0.0
+        return self._scale_rationale_bonus(raw_token_count, reward_config)
+
     def _build_role_reward(
         self,
         ep: EpisodeStateInternal,
         components: dict[str, float],
     ) -> RoleReward:
+        """Build a per-role reward envelope.
+
+        ``RoleReward.normalized`` is deprecated and intentionally identical to
+        ``raw``. Training-time advantages are computed from raw rewards via
+        group-mean-std in ``MultiAgentGRPOTrainer._compute_group_advantages``.
+        The field remains for trace/backwards-compatibility.
+        """
+        del ep
         raw = float(sum(components.values()))
-        normalized = max(-1.0, min(1.0, raw))
         return RoleReward(
             raw=raw,
-            normalized=normalized,
+            normalized=raw,
             breakdown=RewardBreakdown(**components),
         )
 
@@ -1771,6 +2043,56 @@ class EvacEnvironment:
             )
         if len(history) > 10:
             del history[:-10]
+
+    def _compute_queue_pressure(self, floor: Floor, ep: EpisodeStateInternal) -> float:
+        del ep
+        total_civilians = sum(room.occupancy.total for room in floor.rooms)
+        open_exits = sum(1 for exit_obj in floor.exits if not exit_obj.blocked)
+        open_stairwells = [
+            stairwell
+            for stairwell in floor.stairwells
+            if not getattr(stairwell, "blocked", False)
+        ]
+        outflow = open_exits * 10 + sum(
+            stairwell.capacity_per_step for stairwell in open_stairwells
+        )
+        if outflow <= 0:
+            return 1.0 if total_civilians > 0 else 0.0
+        return min(1.0, float(total_civilians) / float(outflow))
+
+    def _next_cascade_hint(self, ep: EpisodeStateInternal) -> dict[str, Any] | None:
+        upcoming_events = sorted(
+            (
+                event
+                for event in ep.scheduled_events
+                if not event.triggered and event.trigger_step >= ep.step
+            ),
+            key=lambda event: (event.trigger_step, event.event_id),
+        )
+        if not upcoming_events:
+            return None
+
+        event = upcoming_events[0]
+        room_lookup = self._room_lookup(ep.building)
+        floor_id = None
+        room_id = (
+            event.payload.get("origin_room_id")
+            or event.payload.get("room_id")
+            or event.target_id
+        )
+        room = room_lookup.get(room_id)
+        if room is not None:
+            floor_id = room.floor_id
+
+        hint = {
+            "event_id": event.event_id,
+            "next_cascade_round": event.trigger_step,
+            "type": event.event_type.value,
+            "target_id": event.target_id,
+        }
+        if floor_id is not None:
+            hint["floor"] = floor_id
+        return hint
 
     def _summarize_ma_action(self, action: ActionEnvelopeMA) -> str:
         target = (
