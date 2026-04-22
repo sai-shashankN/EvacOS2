@@ -44,7 +44,7 @@ class TestDisableAdapterIntegration:
             lora_alpha=32,
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
             bias="none",
-            use_gradient_checkpointing="unsloth",
+            use_gradient_checkpointing=True,
             random_state=42,
         )
         tokenizer.padding_side = "left"

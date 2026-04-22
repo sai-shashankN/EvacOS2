@@ -644,7 +644,11 @@ class UnslothPolicy:
                 lora_alpha=lora_alpha,
                 target_modules=list(lora_target_modules),
                 bias="none",
-                use_gradient_checkpointing="unsloth",
+                # The custom "unsloth" checkpointing path has triggered
+                # in-place autograd failures in our GRPO smoke runs on
+                # torch 2.8 / RTX 4090. Standard gradient checkpointing is
+                # slower, but stable and still memory-friendly.
+                use_gradient_checkpointing=True,
                 random_state=seed,
             )
 
