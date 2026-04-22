@@ -11,6 +11,8 @@ The remote training stack is sensitive to install order and import order:
 
 - `unsloth` should be installed after the baseline training deps
 - `vllm==0.10.2` should be installed last
+- `transformers==4.56.2` and `peft==0.19.1` are the tested-compatible pair
+  for the current Unsloth + vLLM setup
 - `unsloth` should be imported before `trl`, `transformers`, and `peft`
   when probing the environment
 
@@ -49,10 +51,10 @@ Use this order instead:
 
 ```bash
 pip uninstall -y transformers trl peft accelerate bitsandbytes vllm unsloth unsloth_zoo torchcodec >/dev/null 2>&1 || true
-pip install "torch" "transformers>=4.56,<5.0" "trl" "peft<0.18,>=0.13" "accelerate" "bitsandbytes" "datasets"
+pip install "torch" "transformers==4.56.2" "trl==0.24.0" "peft==0.19.1" "accelerate" "bitsandbytes" "datasets"
 pip install "pydantic>=2,<3" "fastapi>=0.115" "uvicorn>=0.30" "numpy>=1.26" "pyyaml" "nbformat" "wandb>=0.19"
 pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-pip install --no-deps "trl" "peft<0.18,>=0.13" "accelerate" "bitsandbytes"
+pip install --no-deps "trl==0.24.0" "peft==0.19.1" "accelerate" "bitsandbytes"
 pip install "vllm==0.10.2"
 pip install -e .
 ```
@@ -63,6 +65,9 @@ Notes:
   baseline training deps.
 - `vllm==0.10.2` is the pinned API surface expected by the current notebook and
   rollout path.
+- `transformers==4.56.2` and `peft==0.19.1` are the tested pair that avoids the
+  `HybridCache` import failure seen with `transformers==5.5.0` and
+  `peft==0.17.1`.
 - The checked-in notebook setup cell is the source of truth for this sequence.
 
 ## Warning-aware health check
@@ -153,3 +158,35 @@ whole venv.
 Check the warning-aware probe first.
 
 Rebuild only if the warning-aware probe still fails.
+
+If the existing env fails with:
+
+```text
+ImportError: cannot import name 'HybridCache' from 'transformers'
+```
+
+the smallest proven repair is:
+
+```bash
+pip install --upgrade "transformers==4.56.2" "peft==0.19.1"
+```
+
+Then rerun the warning-aware probe.
+
+## Optional SSH control path
+
+If you want to operate the box from the local machine instead of using the
+Jupyter terminal UI:
+
+```powershell
+$env:PATH += ";$env:APPDATA\Python\Python314\Scripts"
+vastai create ssh-key -y
+vastai attach ssh 35440032 $HOME\.ssh\id_ed25519.pub
+ssh -i $HOME\.ssh\id_ed25519 -p 40989 root@96.241.192.5
+```
+
+Replace the instance id, host, and port with the values from:
+
+```powershell
+vastai show instances --raw
+```
