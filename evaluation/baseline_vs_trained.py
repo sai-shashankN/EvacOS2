@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from curriculum.controller import EVAL_SEEDS
 from evacos_ma.models import DisasterType
-from evaluation._training_contract import StubPolicy, hf_policy_factory
+from evaluation._training_contract import RoleRoutedPolicy, StubPolicy, hf_policy_factory
 
 from .fixed_suite import (
     DEFAULT_DISASTER_FAMILIES,
@@ -28,15 +28,31 @@ class ComparisonResult(BaseModel):
     schema_version: str = SCHEMA_VERSION
 
 
-def _load_model_name(config_path: Path = Path("training/config.yaml")) -> str:
+def _load_model_config(config_path: Path = Path("training/config.yaml")) -> dict[str, str | bool]:
     try:
         import yaml
     except ModuleNotFoundError as exc:
         raise ImportError(
-            "PyYAML is required by evaluation.baseline_vs_trained._load_model_name()"
+            "PyYAML is required by evaluation.baseline_vs_trained._load_model_config()"
         ) from exc
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    return str(data.get("model", {}).get("base", "Qwen/Qwen2.5B-Instruct"))
+    model_cfg = data.get("model", {}) or {}
+    base = str(model_cfg.get("base", "Qwen/Qwen2.5-3B-Instruct"))
+    orchestrator_base = model_cfg.get("orchestrator_base")
+    floor_base = model_cfg.get("floor_base")
+    resolved_orchestrator = str(orchestrator_base or base)
+    resolved_floor = str(floor_base or base)
+    return {
+        "base": base,
+        "orchestrator": resolved_orchestrator,
+        "floor_agent": resolved_floor,
+        "split": resolved_orchestrator != resolved_floor,
+    }
+
+
+def _load_model_name(config_path: Path = Path("training/config.yaml")) -> str:
+    config = _load_model_config(config_path)
+    return str(config["orchestrator"])
 
 
 def _nan() -> float:
@@ -56,8 +72,32 @@ def _metric_rows(suite: FixedSuiteResult) -> dict[tuple[str, int, str, str, str]
 
 
 def _trained_factory(checkpoint: Path) -> Callable[[], object]:
-    model_name = _load_model_name()
-    return lambda: hf_policy_factory(model_name, lora_adapter_path=str(checkpoint))
+    model_cfg = _load_model_config()
+    if not bool(model_cfg["split"]):
+        model_name = str(model_cfg["orchestrator"])
+        return lambda: hf_policy_factory(model_name, lora_adapter_path=str(checkpoint))
+
+    orch_checkpoint = checkpoint / "orchestrator"
+    floor_checkpoint = checkpoint / "floor_agent"
+    if not orch_checkpoint.exists() or not floor_checkpoint.exists():
+        raise FileNotFoundError(
+            "Split-role trained comparison expects checkpoint/orchestrator and "
+            "checkpoint/floor_agent adapter directories."
+        )
+
+    def _factory() -> object:
+        return RoleRoutedPolicy(
+            orchestrator_policy=hf_policy_factory(
+                str(model_cfg["orchestrator"]),
+                lora_adapter_path=str(orch_checkpoint),
+            ),
+            floor_policy=hf_policy_factory(
+                str(model_cfg["floor_agent"]),
+                lora_adapter_path=str(floor_checkpoint),
+            ),
+        )
+
+    return _factory
 
 
 def run_comparison(

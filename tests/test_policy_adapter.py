@@ -9,7 +9,7 @@ import types
 
 import pytest
 
-from training.policy_adapter import StubPolicy, UnslothPolicy, parse_completion_to_action
+from training.policy_adapter import RoleRoutedPolicy, StubPolicy, UnslothPolicy, parse_completion_to_action
 
 
 class TestStubPolicy:
@@ -156,6 +156,40 @@ class TestUnslothGenerationTokenCapture:
             ("90,91", [90, 91]),
             ("92,93,94", [92, 93, 94]),
         ]
+
+
+class TestRoleRoutedPolicy:
+    def test_act_batch_routes_by_role_and_preserves_order(self):
+        class FakePolicy:
+            def __init__(self, label):
+                self.label = label
+                self.calls = []
+
+            def act_batch(self, prompts, agent_ids, roles):
+                self.calls.append((prompts, agent_ids, roles))
+                return [(f"{self.label}:{agent_id}", [idx]) for idx, agent_id in enumerate(agent_ids)]
+
+        orch = FakePolicy("orch")
+        floor = FakePolicy("floor")
+        policy = RoleRoutedPolicy(orchestrator_policy=orch, floor_policy=floor)
+
+        outputs = policy.act_batch(
+            prompts=[
+                [{"role": "user", "content": "o"}],
+                [{"role": "user", "content": "f1"}],
+                [{"role": "user", "content": "f2"}],
+            ],
+            agent_ids=["orchestrator", "floor_0_agent", "floor_1_agent"],
+            roles=["orchestrator", "floor_agent", "floor_agent"],
+        )
+
+        assert outputs == [
+            ("orch:orchestrator", [0]),
+            ("floor:floor_0_agent", [0]),
+            ("floor:floor_1_agent", [1]),
+        ]
+        assert len(orch.calls) == 1
+        assert len(floor.calls) == 1
 
 
 class TestParseCompletionToAction:

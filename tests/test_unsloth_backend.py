@@ -1,8 +1,8 @@
 """Tests for the Phase 7 Unsloth training backend.
 
 All tests MUST pass with the current Windows environment where neither
-``unsloth`` nor ``vllm`` is installed. The backend is additive and
-strictly opt-in via ``TrainingConfig.backend = "unsloth"``.
+``unsloth`` nor ``vllm`` is installed. The backend is the default serious
+training path, but these tests still run without the packages installed.
 """
 
 from __future__ import annotations
@@ -23,11 +23,11 @@ from training.policy_adapter import StubPolicy, UnslothPolicy, unsloth_policy_fa
 
 
 class TestConfigSchemaBackend:
-    def test_default_backend_is_hf(self):
+    def test_default_backend_is_unsloth_with_vllm_enabled(self):
         """Default backend is 'hf' — no silent regression for existing users."""
         config = TrainingConfig()
-        assert config.backend == "hf"
-        assert config.rollout.use_vllm is False
+        assert config.backend == "unsloth"
+        assert config.rollout.use_vllm is True
         assert config.unsloth_max_seq_length == 4096
         assert config.load_in_4bit is True
 
@@ -316,7 +316,7 @@ def _run_one_rollout_episode(policy, max_rounds=3):
 
 
 class TestRolloutFastPath:
-    def test_fallback_policy_without_act_batch_runs_cleanly(self, tmp_path, monkeypatch):
+    def test_fallback_policy_without_act_batch_runs_cleanly(self, monkeypatch):
         """Rollout must continue to work against the per-agent .act loop when
         no act_batch method is present. Regression check for Phase 7.
         """

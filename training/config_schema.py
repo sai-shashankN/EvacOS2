@@ -16,7 +16,9 @@ _EVAL_SEEDS_SET = frozenset({42, 123, 456, 789, 1024})
 
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    base: str = "Qwen/Qwen2.5-1.5B-Instruct"
+    base: str = "Qwen/Qwen2.5-3B-Instruct"
+    orchestrator_base: str | None = None
+    floor_base: str | None = None
     dtype: str = "bfloat16"
     max_prompt_tokens: int = 3500
     max_completion_tokens: int = 256
@@ -30,6 +32,24 @@ class ModelConfig(BaseModel):
                 f"model.dtype must be one of {sorted(allowed)}; got {value!r}"
             )
         return value
+
+    def resolved_base_for_role(self, role: Literal["orchestrator", "floor_agent"]) -> str:
+        if role == "orchestrator":
+            return self.orchestrator_base or self.base
+        if role == "floor_agent":
+            return self.floor_base or self.base
+        raise ValueError(f"Unknown role {role!r}")
+
+    def resolved_bases(self) -> dict[str, str]:
+        return {
+            "orchestrator": self.resolved_base_for_role("orchestrator"),
+            "floor_agent": self.resolved_base_for_role("floor_agent"),
+        }
+
+    @property
+    def uses_split_bases(self) -> bool:
+        resolved = self.resolved_bases()
+        return resolved["orchestrator"] != resolved["floor_agent"]
 
 
 class LoRAConfig(BaseModel):
@@ -47,7 +67,7 @@ class RolloutConfig(BaseModel):
     episodes_per_step: int = 4
     max_rounds_per_episode: int = 80
     seed_retry_limit: int = 1000
-    use_vllm: bool = False
+    use_vllm: bool = True
     disaster_families: list[str] = Field(
         default_factory=lambda: [
             "fire", "flood", "gas", "structural",
@@ -133,7 +153,7 @@ class TrainingConfig(BaseModel):
     # Backend selector for the training path.
     #   "hf"      — HuggingFace TRL + transformers + PEFT (default; Windows + Colab).
     #   "unsloth" — Unsloth quantized kernels; Colab/Linux+CUDA only. Opt-in.
-    backend: Literal["hf", "unsloth"] = "hf"
+    backend: Literal["hf", "unsloth"] = "unsloth"
     # Unsloth-specific knobs (ignored when backend == "hf").
     unsloth_max_seq_length: int = 4096
     load_in_4bit: bool = True

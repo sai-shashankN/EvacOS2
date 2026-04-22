@@ -8,6 +8,8 @@ If you are a fresh orchestrator session picking this repo up, read this file fir
 
 Phase 24 is ACCEPTED, the original repair campaign findings are effectively exhausted, and the post-campaign audit is complete.
 
+Post-campaign extension work is now underway for hackathon readiness and stronger training configs.
+
 Current accepted closeout artifacts:
 - Executor summary: `logs/phase24_summary.md`
 - Separate screening: `logs/phase24_codex_screening.md`
@@ -21,12 +23,24 @@ Current health read:
 - Phase 24 disposed of M5, M8, L1, and L2.
 - G1, G4, and G5 are closed.
 - C5 is refuted.
+- The OpenEnv shell is now wired to the live simulator instead of returning canned payloads.
+- Training config now supports role-specific model selection, the training/checkpoint path supports split-role execution, and the serious-training default is now Unsloth + vLLM.
 - The main remaining caveat is the known Windows `tmpdir` / `tmp_path` ACL issue affecting some pytest flows.
 
 Next step:
 - Read `logs/phase25_audit.md`.
-- It reports no substantive new product-level findings after an audit-time onboarding cleanup.
-- Treat the repo as broadly healthy and wait for new user-directed work, while keeping the Windows `tmpdir` / `tmp_path` ACL caveat in mind for future pytest runs.
+- Then read `HACKATHON.md` and `README.md` for the current public-facing project posture.
+- The active forward work is no longer repair-campaign triage; it is split-role training experimentation plus hackathon/demo packaging polish.
+- Current competitive target: participant submissions now look strongest when they compress their story into one fast README pass. Future work should optimize for "judge legibility" in addition to raw technical depth.
+- Near-term priority order:
+  1. make the public README instantly communicate why EvacOS2 is harder, more verifiable, and more realistic than simpler OpenEnv demos
+  2. keep the baseline-vs-trained evidence path obvious and runnable
+  3. emit a compact submission scorecard artifact so judges can understand the proof in one screen
+  4. tighten final demo/submission assets so the repo looks as strong as the underlying system actually is
+  5. keep `SUBMISSION_BRIEF.md` and the generated scorecard aligned so the static story and runtime evidence do not drift
+- Active execution plan now lives in `FINAL_PUSH_CHECKLIST.md`.
+- Current expected next live move: set up Vast.ai, run the first split-role training attempt, then generate trained submission artifacts from the saved checkpoint.
+- Keep the Windows `tmpdir` / `tmp_path` ACL caveat in mind for future pytest runs.
 
 ---
 
@@ -56,15 +70,16 @@ Do not skip these. The repo still carries campaign-specific process assumptions 
 
 Follow `AGENTS.md` for the active role split.
 
-Default setup:
-- This interface is the Claude-style orchestrator.
-- GLM 5.1 is the default primary executor via `python glm-exec.py`.
-- Codex gpt-5.4 is the reviewer / screener / escalation tier via `codex exec`.
+Current setup:
+- This interface is the Codex orchestrator.
+- Codex is also the primary executor.
+- Codex is also the reviewer / screener through a separate pass.
 
 Session-specific overrides from live user instruction take precedence over the default split.
 
 Rules:
-- Do not use `mcp__codex__*` review tools; use `codex exec` via shell when Codex is the chosen tier.
+- Do not rely on Claude or GLM for active work unless the user explicitly re-enables them.
+- Prefer shell-isolated `codex exec` or explicit Codex subagents when you need a clean boundary between executor and reviewer.
 - Archive every prompt in `Phase Prompts/` before dispatch.
 - Append executor-tier changes to `logs/fallback.log`.
 
@@ -95,6 +110,7 @@ This matters because earlier screenings produced false scope alarms when they us
 3. Read `logs/phase25_audit.md` if it exists.
 4. Check `Phase Prompts/README.md` for any newer archived prompt that changed the state after this handoff.
 5. If no new finding exists, do not restart the old campaign roadmap; wait for new user-directed work.
+6. If a live user instruction changes orchestration again, update `AGENTS.md` before continuing so the repo state stays truthful.
 
 ---
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from training import policy_adapter as _policy_adapter, reward as _reward, rollout as _rollout
 
 Policy = _policy_adapter.Policy
+RoleRoutedPolicy = _policy_adapter.RoleRoutedPolicy
 StubPolicy = _policy_adapter.StubPolicy
 hf_policy_factory = _policy_adapter.hf_policy_factory
 RewardNormalizer = _reward.RewardNormalizer
@@ -12,6 +13,7 @@ collect_batch = _rollout.collect_batch
 
 __all__ = [
     "Policy",
+    "RoleRoutedPolicy",
     "RewardNormalizer",
     "collect_batch",
     "StubPolicy",

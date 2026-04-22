@@ -1,8 +1,7 @@
-"""OpenEnv server shell for EvacOS-MA.
+"""OpenEnv server surface for EvacOS-MA.
 
-Stub FastAPI router that validates request/response types against the
-frozen MA schemas. Handlers return canned payloads that conform to the
-schema — they do NOT drive the simulator yet (Phase 3+).
+This router exposes the live multi-agent simulator through a small FastAPI
+surface that mirrors the OpenEnv-style reset / step / state flow.
 """
 
 from __future__ import annotations
@@ -12,6 +11,8 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
+from evacos_ma.env import EvacEnvironment
+from evacos_ma.models import DisasterType
 from evacos_ma.openenv import VERSION
 from evacos_ma.openenv.debug import is_debug_state_enabled
 from evacos_ma.openenv.manifest import build_manifest
@@ -30,6 +31,7 @@ from evacos_ma.schemas.multi_agent import (
 from evacos_ma.schemas.rewards import RewardBreakdown, RoleReward, RewardsByRole
 
 router = APIRouter(prefix="/openenv", tags=["openenv"])
+_OPENENV_ENV = EvacEnvironment()
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +42,8 @@ class ResetRequestMA(BaseModel):
     task_id: str = "task_1_fire_easy"
     seed: Optional[int] = None
     tier: str = "easy"
+    disaster_family: Optional[str] = None
+    max_steps: Optional[int] = None
 
 
 class OpenEnvResetResponse(BaseModel):
@@ -78,83 +82,19 @@ class HealthResponseMA(BaseModel):
     version: str
 
 
-# ---------------------------------------------------------------------------
-# Stub payload builders
-# ---------------------------------------------------------------------------
-
-_EPISODE_ID_STUB = "ep_stub_0001"
+def _empty_role_reward() -> RoleReward:
+    return RoleReward(raw=0.0, normalized=0.0, breakdown=RewardBreakdown())
 
 
-def _stub_floor_obs(agent_id: str, floor_id: str) -> dict[str, Any]:
-    return FloorAgentObservationMA(
-        episode_id=_EPISODE_ID_STUB,
-        round_id=0,
-        role=AgentRole.floor_agent,
-        agent_id=agent_id,
-        step=0,
-        max_steps=350,
-        seed=42,
-        tier=Tier.easy,
-        disaster_family="fire",
-        action_mask=[a.value for a in ActionTypeMA],
-        floor_id=floor_id,
-    ).model_dump()
-
-
-def _stub_orchestrator_obs() -> dict[str, Any]:
-    return OrchestratorObservationMA(
-        episode_id=_EPISODE_ID_STUB,
-        round_id=0,
-        role=AgentRole.orchestrator,
-        agent_id="orchestrator",
-        step=0,
-        max_steps=350,
-        seed=42,
-        tier=Tier.easy,
-        disaster_family="fire",
-        action_mask=[a.value for a in ActionTypeMA],
-    ).model_dump()
-
-
-def _stub_rewards() -> dict[str, Any]:
-    return RewardsByRole(
-        orchestrator=RoleReward(raw=0.0, normalized=0.0, breakdown=RewardBreakdown()),
-        floors={f"floor_{i}_agent": RoleReward(raw=0.0, normalized=0.0, breakdown=RewardBreakdown()) for i in range(5)},
-    ).model_dump()
-
-
-def _stub_step_result() -> StepResultMA:
+def _initial_step_result(observations: ObservationsByRole) -> StepResultMA:
     return StepResultMA(
-        observations_by_role=ObservationsByRole(
-            orchestrator=OrchestratorObservationMA(
-                episode_id=_EPISODE_ID_STUB,
-                round_id=0,
-                role=AgentRole.orchestrator,
-                agent_id="orchestrator",
-                step=0,
-                max_steps=350,
-                seed=42,
-                tier=Tier.easy,
-                disaster_family="fire",
-                action_mask=[a.value for a in ActionTypeMA],
-            ),
-            floors={f"floor_{i}_agent": FloorAgentObservationMA(
-                episode_id=_EPISODE_ID_STUB,
-                round_id=0,
-                role=AgentRole.floor_agent,
-                agent_id=f"floor_{i}_agent",
-                step=0,
-                max_steps=350,
-                seed=42,
-                tier=Tier.easy,
-                disaster_family="fire",
-                action_mask=[a.value for a in ActionTypeMA],
-                floor_id=f"floor_{i}",
-            ) for i in range(5)},
-        ),
+        observations_by_role=observations,
         rewards_by_role=RewardsByRole(
-            orchestrator=RoleReward(raw=0.0, normalized=0.0, breakdown=RewardBreakdown()),
-            floors={f"floor_{i}_agent": RoleReward(raw=0.0, normalized=0.0, breakdown=RewardBreakdown()) for i in range(5)},
+            orchestrator=_empty_role_reward(),
+            floors={
+                agent_id: _empty_role_reward()
+                for agent_id in sorted(observations.floors)
+            },
         ),
         done=False,
         done_reason=None,
@@ -162,6 +102,12 @@ def _stub_step_result() -> StepResultMA:
         round_events=[],
         info=StepResultInfo(),
     )
+
+
+def _http_exception_from_env_error(exc: ValueError) -> HTTPException:
+    detail = str(exc)
+    status_code = 404 if "Unknown episode_id" in detail else 400
+    return HTTPException(status_code=status_code, detail=detail)
 
 
 # ---------------------------------------------------------------------------
@@ -198,33 +144,73 @@ def metadata() -> MetadataResponseMA:
 def reset(req: ResetRequestMA = Body(default=None)) -> OpenEnvResetResponse:
     if req is None:
         req = ResetRequestMA()
-    sr = _stub_step_result()
-    sr.episode_id = req.episode_id if hasattr(req, 'episode_id') else _EPISODE_ID_STUB
-    return OpenEnvResetResponse(episode_id=_EPISODE_ID_STUB, step_result=sr)
+    try:
+        if req.disaster_family is not None:
+            observations = _OPENENV_ENV.reset_multi_agent(
+                task_id=req.task_id,
+                seed=req.seed,
+                procgen_tier=req.tier,
+                procgen_disaster_family=DisasterType(req.disaster_family),
+                procgen_max_steps=req.max_steps,
+            )
+        else:
+            observations = _OPENENV_ENV.reset_multi_agent(
+                task_id=req.task_id,
+                seed=req.seed,
+            )
+    except ValueError as exc:
+        raise _http_exception_from_env_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    episode_id, observations_by_role = observations
+    return OpenEnvResetResponse(
+        episode_id=episode_id,
+        step_result=_initial_step_result(observations_by_role),
+    )
 
 
 @router.post("/step", response_model=OpenEnvStepResponse)
 def step(bundle: ActionBundleMA) -> OpenEnvStepResponse:
-    # Validate the bundle parses correctly (it does via FastAPI dependency)
-    sr = _stub_step_result()
-    return OpenEnvStepResponse(step_result=sr)
+    try:
+        step_result = _OPENENV_ENV.step_multi_agent(bundle)
+    except ValueError as exc:
+        raise _http_exception_from_env_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return OpenEnvStepResponse(step_result=step_result)
 
 
 @router.get("/state", response_model=StateResponse)
 def state(episode_id: str = "") -> StateResponse:
+    try:
+        public_state = _OPENENV_ENV.state(episode_id)
+    except ValueError as exc:
+        raise _http_exception_from_env_error(exc) from exc
+
     resp = StateResponse(
-        episode_id=episode_id or _EPISODE_ID_STUB,
-        step=0,
-        done=False,
-        metadata={"version": VERSION},
+        episode_id=public_state.episode_id,
+        step=public_state.step,
+        done=public_state.done,
+        metadata={
+            "version": VERSION,
+            "task_id": public_state.task_id,
+            "termination_reason": public_state.termination_reason,
+            "blocked_route_ids": public_state.blocked_route_ids,
+        },
         full_state=None,
     )
     if is_debug_state_enabled():
+        internal_state = _OPENENV_ENV.get_internal_state(public_state.episode_id)
         resp.full_state = {
-            "episode_id": episode_id or _EPISODE_ID_STUB,
-            "building": {"floors": 5, "rooms_per_floor": 8},
-            "civilians": {"total": 60, "saved": 0, "lost": 0},
-            "hazards": [],
-            "rng_seed": 42,
+            "episode_id": internal_state.episode_id,
+            "step": internal_state.step,
+            "done": internal_state.done,
+            "termination_reason": internal_state.termination_reason,
+            "task": internal_state.task.model_dump(mode="json"),
+            "building": internal_state.building.model_dump(mode="json"),
+            "metrics": internal_state.metrics.model_dump(mode="json"),
+            "civilians_saved": internal_state.civilians_saved.model_dump(mode="json"),
+            "civilians_lost": internal_state.civilians_lost.model_dump(mode="json"),
         }
     return resp

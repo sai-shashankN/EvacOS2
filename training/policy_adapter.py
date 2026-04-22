@@ -37,6 +37,18 @@ logger = logging.getLogger(__name__)
 _PROMPT_TRUNCATION_WARNED = False
 
 
+def _as_policy_result(result: PolicyResult | str | object) -> PolicyResult:
+    if isinstance(result, tuple) and len(result) == 2:
+        text, token_ids = result
+        text_str = text if isinstance(text, str) else str(text)
+        if isinstance(token_ids, list):
+            return text_str, [int(token_id) for token_id in token_ids]
+        return text_str, []
+    if isinstance(result, str):
+        return result, []
+    return str(result), []
+
+
 def _call_tokenizer(tokenizer: Any, rendered: Any, **kwargs: Any) -> Any:
     try:
         return tokenizer(rendered, **kwargs)
@@ -97,6 +109,72 @@ class Policy(Protocol):
         role: str,
     ) -> PolicyResult | str:
         ...
+
+
+class RoleRoutedPolicy:
+    """Route generation to per-role policies while preserving batch order.
+
+    When the same policy instance backs both roles, callers should keep using
+    that shared instance directly so the rollout fast path stays at one
+    generate call per round. This wrapper exists for true split-role setups,
+    where the orchestrator and floor agents are intentionally backed by
+    different trainable models.
+    """
+
+    def __init__(self, *, orchestrator_policy: Policy, floor_policy: Policy) -> None:
+        self._role_policies = {
+            "orchestrator": orchestrator_policy,
+            "floor_agent": floor_policy,
+        }
+
+    def policy_for_role(self, role: str) -> Policy:
+        if role not in self._role_policies:
+            raise ValueError(f"Unknown role {role!r}")
+        return self._role_policies[role]
+
+    def act(
+        self,
+        prompt: list[dict[str, str]],
+        agent_id: str,
+        role: str,
+    ) -> PolicyResult | str:
+        policy = self.policy_for_role(role)
+        return policy.act(prompt, agent_id, role)
+
+    def act_batch(
+        self,
+        prompts: list[list[dict[str, str]]],
+        agent_ids: list[str],
+        roles: list[str],
+    ) -> list[PolicyResult]:
+        if not (len(prompts) == len(agent_ids) == len(roles)):
+            raise ValueError("prompts, agent_ids, and roles must have the same length")
+        if not prompts:
+            return []
+
+        grouped_indices: dict[str, list[int]] = {"orchestrator": [], "floor_agent": []}
+        for idx, role in enumerate(roles):
+            grouped_indices.setdefault(role, []).append(idx)
+
+        outputs: list[PolicyResult | None] = [None] * len(prompts)
+        for role, indices in grouped_indices.items():
+            if not indices:
+                continue
+            policy = self.policy_for_role(role)
+            role_prompts = [prompts[idx] for idx in indices]
+            role_agent_ids = [agent_ids[idx] for idx in indices]
+            role_roles = [roles[idx] for idx in indices]
+            if hasattr(policy, "act_batch"):
+                role_outputs = policy.act_batch(role_prompts, role_agent_ids, role_roles)  # type: ignore[attr-defined]
+            else:
+                role_outputs = [
+                    _as_policy_result(policy.act(prompt, aid, role_name))
+                    for prompt, aid, role_name in zip(role_prompts, role_agent_ids, role_roles, strict=True)
+                ]
+            for out_idx, original_idx in enumerate(indices):
+                outputs[original_idx] = role_outputs[out_idx]
+
+        return [output if output is not None else ("", []) for output in outputs]
 
 
 @dataclass

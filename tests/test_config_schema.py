@@ -24,6 +24,28 @@ class TestModelDtypeValidation:
             assert ModelConfig(dtype=dtype).dtype == dtype
 
 
+class TestRoleAwareModelConfig:
+    def test_model_config_defaults_to_shared_base_for_both_roles(self):
+        config = ModelConfig(base="shared-model")
+
+        assert config.resolved_base_for_role("orchestrator") == "shared-model"
+        assert config.resolved_base_for_role("floor_agent") == "shared-model"
+        assert config.uses_split_bases is False
+
+    def test_model_config_supports_role_specific_overrides(self):
+        config = ModelConfig(
+            base="shared-model",
+            orchestrator_base="big-orchestrator",
+            floor_base="small-floor",
+        )
+
+        assert config.resolved_bases() == {
+            "orchestrator": "big-orchestrator",
+            "floor_agent": "small-floor",
+        }
+        assert config.uses_split_bases is True
+
+
 class TestVllmBackendGate:
     def test_vllm_requires_unsloth_backend_rejects_hf(self):
         with pytest.raises(ValidationError) as excinfo:
@@ -43,6 +65,11 @@ class TestVllmBackendGate:
         assert config.backend == "hf"
         assert config.rollout.use_vllm is False
 
+    def test_training_config_defaults_to_unsloth_with_vllm_enabled(self):
+        config = TrainingConfig()
+        assert config.backend == "unsloth"
+        assert config.rollout.use_vllm is True
+
 
 class TestConfigContractRestoration:
     def test_training_config_rejects_legacy_grpo_group_size(self):
@@ -54,6 +81,10 @@ class TestConfigContractRestoration:
         raw = _load_yaml_config(Path("training/config.yaml"))
         config = TrainingConfig(**raw)
         assert config.reward.rationale_scaling == "linear_capped"
+        assert config.model.base == "Qwen/Qwen2.5-3B-Instruct"
+        assert config.model.uses_split_bases is False
+        assert config.backend == "unsloth"
+        assert config.rollout.use_vllm is True
 
     @pytest.mark.parametrize("value", ["off", "linear_capped", "log_uncapped"])
     def test_reward_config_accepts_known_rationale_scaling_values(self, value):
@@ -63,3 +94,18 @@ class TestConfigContractRestoration:
         with pytest.raises(ValidationError) as excinfo:
             RewardConfig(rationale_scaling="metadata_only")
         assert "rationale_scaling" in str(excinfo.value)
+
+    def test_training_config_allows_role_specific_model_declaration(self):
+        config = TrainingConfig(
+            model={
+                "base": "shared-model",
+                "orchestrator_base": "bigger-model",
+                "floor_base": "smaller-model",
+            }
+        )
+
+        assert config.model.uses_split_bases is True
+        assert config.model.resolved_bases() == {
+            "orchestrator": "bigger-model",
+            "floor_agent": "smaller-model",
+        }

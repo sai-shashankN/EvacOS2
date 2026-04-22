@@ -27,8 +27,11 @@ class CheckpointBundle:
     lora_weights_path: Path  # pointer to the adapter weights dir
     model_name: str
     config_hash: str  # sha256 of the resolved TrainingConfig JSON
+    role_lora_weights_paths: dict[str, Path] | None = None
+    role_model_names: dict[str, str] | None = None
     # Phase 12 fields — all default to None for backward compatibility
     optimizer_state: dict | None = None
+    role_optimizer_states: dict[str, dict] | None = None
     torch_rng_state: bytes | None = None  # pickled torch RNG state
     torch_cuda_rng_state: bytes | None = None  # pickled torch CUDA RNG state
     wandb_run_id: str | None = None
@@ -57,6 +60,12 @@ def save_checkpoint(
         "config_hash": bundle.config_hash,
         "lora_weights_path": str(bundle.lora_weights_path),
     }
+    if bundle.role_lora_weights_paths is not None:
+        meta["role_lora_weights_paths"] = {
+            role: str(path) for role, path in bundle.role_lora_weights_paths.items()
+        }
+    if bundle.role_model_names is not None:
+        meta["role_model_names"] = dict(bundle.role_model_names)
     if bundle.wandb_run_id is not None:
         meta["wandb_run_id"] = bundle.wandb_run_id
     if extras:
@@ -80,6 +89,17 @@ def save_checkpoint(
             )
             with open(ckpt_dir / "optimizer_state.pkl", "wb") as f:
                 pickle.dump(bundle.optimizer_state, f)
+    if bundle.role_optimizer_states is not None:
+        try:
+            import torch
+
+            torch.save(bundle.role_optimizer_states, ckpt_dir / "role_optimizer_states.pt")
+        except ImportError:
+            logger.debug(
+                "torch not importable — falling back to pickle for role_optimizer_states"
+            )
+            with open(ckpt_dir / "role_optimizer_states.pkl", "wb") as f:
+                pickle.dump(bundle.role_optimizer_states, f)
 
     # Phase 12: torch RNG state
     if bundle.torch_rng_state is not None:
@@ -174,6 +194,22 @@ def load_checkpoint(root: Path) -> CheckpointBundle | None:
     else:
         logger.debug("optimizer_state.pt not found in checkpoint; starting fresh")
 
+    role_optimizer_states: dict[str, dict] | None = None
+    role_opt_path = latest_dir / "role_optimizer_states.pt"
+    role_opt_pickle_path = latest_dir / "role_optimizer_states.pkl"
+    if role_opt_path.exists():
+        try:
+            import torch
+
+            role_optimizer_states = torch.load(role_opt_path, map_location="cpu", weights_only=False)
+        except ImportError:
+            logger.warning(
+                "torch not importable — role_optimizer_states.pt ignored"
+            )
+    elif role_opt_pickle_path.exists():
+        with open(role_opt_pickle_path, "rb") as f:
+            role_optimizer_states = pickle.load(f)
+
     # Phase 12: torch RNG state
     torch_rng_state: bytes | None = None
     torch_rng_path = latest_dir / "torch_rng_state.pkl"
@@ -206,7 +242,14 @@ def load_checkpoint(root: Path) -> CheckpointBundle | None:
         lora_weights_path=Path(meta["lora_weights_path"]),
         model_name=meta["model_name"],
         config_hash=meta["config_hash"],
+        role_lora_weights_paths={
+            role: Path(path)
+            for role, path in meta.get("role_lora_weights_paths", {}).items()
+        }
+        or None,
+        role_model_names=meta.get("role_model_names"),
         optimizer_state=optimizer_state,
+        role_optimizer_states=role_optimizer_states,
         torch_rng_state=torch_rng_state,
         torch_cuda_rng_state=torch_cuda_rng_state,
         wandb_run_id=wandb_run_id,

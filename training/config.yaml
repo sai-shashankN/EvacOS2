@@ -1,10 +1,14 @@
-backend: "hf"
+backend: "unsloth"
 # Hard cap on GRPO steps. Leave unset to run until SIGTERM/Ctrl+C.
 # max_steps: 100
 unsloth_max_seq_length: 4096
 load_in_4bit: true
 model:
-  base: "Qwen/Qwen2.5-1.5B-Instruct"
+  base: "Qwen/Qwen2.5-3B-Instruct"
+  # Leave role-specific overrides unset to preserve the current shared-model fast path.
+  # Later, you can split roles without changing code structure:
+  # orchestrator_base: "Qwen/Qwen2.5-7B-Instruct"
+  # floor_base: "Qwen/Qwen2.5-3B-Instruct"
   dtype: "bfloat16"
   max_prompt_tokens: 3500
   max_completion_tokens: 256
@@ -17,7 +21,7 @@ rollout:
   episodes_per_step: 4
   max_rounds_per_episode: 80
   seed_retry_limit: 1000
-  use_vllm: false
+  use_vllm: true
   disaster_families: ["fire", "flood", "gas", "structural", "active_threat", "multi_cascade"]
 grpo:
   learning_rate: 5.0e-6
@@ -45,14 +49,10 @@ metrics:
 seed:
   training_rng: 12345
 # ------------------------------------------------------------------------
-# Unsloth + vLLM backend (opt-in, Colab-T4-recommended) — uncomment to use.
-# Windows local dev MUST stay on backend: "hf" (unsloth is Linux+CUDA only).
+# Serious training default: Unsloth + vLLM on Linux/CUDA.
+# If you need Windows-only local code/test work, override locally with:
 #
-# backend: "unsloth"
-# unsloth_max_seq_length: 4096
-# load_in_4bit: true
+# backend: "hf"
 # rollout:
-#   use_vllm: true              # shared-weight vLLM rollout; 5-10x faster on T4
-#   episodes_per_step: 4
-#   max_rounds_per_episode: 80
+#   use_vllm: false
 # ------------------------------------------------------------------------

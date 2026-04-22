@@ -1,6 +1,6 @@
 # EvacOS-MA OpenEnv Package
 
-Provides the OpenEnv-compatible surface for the EvacOS-MA multi-agent evacuation benchmark.
+Provides the OpenEnv-compatible surface for the live EvacOS-MA multi-agent evacuation benchmark.
 
 ## Surface
 
@@ -9,7 +9,7 @@ Provides the OpenEnv-compatible surface for the EvacOS-MA multi-agent evacuation
 | `/openenv/health` | GET | — | `{status, version}` |
 | `/openenv/schema` | GET | — | JSON Schema for ActionBundleMA, observations, StepResultMA |
 | `/openenv/metadata` | GET | — | `{name, description, version, manifest}` |
-| `/openenv/reset` | POST | `{task_id, seed?, tier}` | `{episode_id, step_result}` |
+| `/openenv/reset` | POST | `{task_id, seed?, tier, disaster_family?, max_steps?}` | `{episode_id, step_result}` |
 | `/openenv/step` | POST | `ActionBundleMA` | `{step_result}` |
 | `/openenv/state` | GET | `?episode_id=` | metadata only, or full state if `EVACOS_DEBUG_STATE=true` |
 
@@ -26,6 +26,35 @@ print(resp["episode_id"])
 # from evacos_ma.schemas.multi_agent import ActionBundleMA
 # bundle = ActionBundleMA(...)
 # result = client.step(bundle)
+```
+
+## Local Server
+
+Run the API locally with:
+
+```bash
+uvicorn evacos_ma.api:app --host 0.0.0.0 --port 8000
+```
+
+The current implementation is backed by the real simulator, not a canned stub.
+
+## Procgen / Tiered Reset
+
+You can also drive procedural resets by passing both:
+
+- `tier`
+- `disaster_family`
+
+Example:
+
+```json
+{
+  "task_id": "openenv_procgen_fire",
+  "seed": 42,
+  "tier": "medium",
+  "disaster_family": "fire",
+  "max_steps": 80
+}
 ```
 
 ## Debug State

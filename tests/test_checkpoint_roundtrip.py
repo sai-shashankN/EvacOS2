@@ -67,6 +67,57 @@ class TestCheckpointRoundtrip:
         finally:
             shutil.rmtree(ckpt_root, ignore_errors=True)
 
+    def test_save_and_load_roundtrip_with_role_artifacts(self):
+        ckpt_root = _tmp_dir()
+        try:
+            rng = random.Random(7)
+            rng_state = pickle.dumps(rng.getstate())
+            lora_dir = ckpt_root / "ckpt_3" / "lora_adapter"
+            orch_dir = lora_dir / "orchestrator"
+            floor_dir = lora_dir / "floor_agent"
+            orch_dir.mkdir(parents=True)
+            floor_dir.mkdir(parents=True)
+            (orch_dir / "adapter_config.json").write_text("{}")
+            (floor_dir / "adapter_config.json").write_text("{}")
+
+            bundle = CheckpointBundle(
+                step=3,
+                wall_seconds_total=11.5,
+                curriculum_snapshot={"tier": "medium"},
+                normalizer_snapshot={"k": {"count": 1, "mean": 0.1, "m2": 0.0}},
+                rollout_rng_state=rng_state,
+                lora_weights_path=lora_dir,
+                model_name="orchestrator=big;floor_agent=small",
+                config_hash="sha256:split123456",
+                role_lora_weights_paths={
+                    "orchestrator": orch_dir,
+                    "floor_agent": floor_dir,
+                },
+                role_model_names={
+                    "orchestrator": "big-model",
+                    "floor_agent": "small-model",
+                },
+                role_optimizer_states={
+                    "orchestrator": {"state": {0: {"step": 1}}},
+                    "floor_agent": {"state": {1: {"step": 2}}},
+                },
+            )
+
+            saved_path = save_checkpoint(ckpt_root, bundle)
+            atomic_replace_latest(ckpt_root, saved_path)
+
+            loaded = load_checkpoint(ckpt_root)
+            assert loaded is not None
+            assert loaded.role_lora_weights_paths is not None
+            assert loaded.role_model_names == bundle.role_model_names
+            assert loaded.role_optimizer_states is not None
+            assert loaded.role_lora_weights_paths["orchestrator"] == orch_dir
+            assert loaded.role_lora_weights_paths["floor_agent"] == floor_dir
+            assert loaded.role_optimizer_states["orchestrator"]["state"][0]["step"] == 1
+            assert loaded.role_optimizer_states["floor_agent"]["state"][1]["step"] == 2
+        finally:
+            shutil.rmtree(ckpt_root, ignore_errors=True)
+
 
 class TestRotateCheckpoints:
     def test_rotate_keeps_highest_n(self):

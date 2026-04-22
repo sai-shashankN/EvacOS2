@@ -51,6 +51,21 @@ def _load_csv(path: Path) -> list[dict] | None:
         return list(csv.DictReader(handle))
 
 
+def _safe_mean(values: list[float]) -> float:
+    if not values:
+        return float("nan")
+    return float(np.mean(np.asarray(values, dtype=float)))
+
+
+def _safe_nanmean(values: list[float]) -> float:
+    if not values:
+        return float("nan")
+    arr = np.asarray(values, dtype=float)
+    if np.isnan(arr).all():
+        return float("nan")
+    return float(np.nanmean(arr))
+
+
 def make_reward_curve(base_dir: Path) -> Path | None:
     if not _ready():
         return None
@@ -89,11 +104,11 @@ def make_baseline_vs_trained_bar(base_dir: Path) -> Path | None:
         return None
     roles = sorted({row["role"] for row in metric_rows})
     baseline = [
-        np.mean([float(row["baseline"]) for row in metric_rows if row["role"] == role])
+        _safe_mean([float(row["baseline"]) for row in metric_rows if row["role"] == role])
         for role in roles
     ]
     trained = [
-        np.nanmean([float(row["trained"]) for row in metric_rows if row["role"] == role])
+        _safe_nanmean([float(row["trained"]) for row in metric_rows if row["role"] == role])
         for role in roles
     ]
     x = np.arange(len(roles))
@@ -126,11 +141,11 @@ def _line_metric_plot(base_dir: Path, metric: str, output_name: str, title: str)
         return None
     tiers = sorted({row["tier"] for row in metric_rows})
     baseline = [
-        np.mean([float(row["baseline"]) for row in metric_rows if row["tier"] == tier])
+        _safe_mean([float(row["baseline"]) for row in metric_rows if row["tier"] == tier])
         for tier in tiers
     ]
     trained = [
-        np.nanmean([float(row["trained"]) for row in metric_rows if row["tier"] == tier])
+        _safe_nanmean([float(row["trained"]) for row in metric_rows if row["tier"] == tier])
         for tier in tiers
     ]
     fig, ax = plt.subplots(figsize=(7, 4.5))
