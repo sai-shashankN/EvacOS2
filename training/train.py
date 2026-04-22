@@ -1214,13 +1214,24 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     reward_config = config.reward.model_dump(mode="python")
 
     if config.backend == "unsloth":
-        patch_transformers_cache_exports()
         try:
             # Import Unsloth before TRL / transformers / PEFT so its monkey
             # patches apply to the training stack as intended.
             import unsloth  # type: ignore  # noqa: F401
-        except ImportError:
-            pass
+        except ImportError as exc:
+            if "HybridCache" in str(exc):
+                import sys
+
+                patch_transformers_cache_exports()
+                for module_name in list(sys.modules):
+                    if module_name == "unsloth" or module_name.startswith("unsloth."):
+                        sys.modules.pop(module_name, None)
+                try:
+                    import unsloth  # type: ignore  # noqa: F401
+                except ImportError:
+                    pass
+            else:
+                pass
 
     patch_transformers_cache_exports()
 
