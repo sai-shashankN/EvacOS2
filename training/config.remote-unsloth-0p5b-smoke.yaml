@@ -1,0 +1,46 @@
+backend: "unsloth"
+# Diagnostic remote smoke for the current Unsloth backward issue.
+# This keeps vLLM out of the loop so we can isolate Unsloth training.
+unsloth_max_seq_length: 2048
+load_in_4bit: true
+model:
+  base: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "bfloat16"
+  max_prompt_tokens: 1024
+  max_completion_tokens: 32
+lora:
+  rank: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+rollout:
+  episodes_per_step: 1
+  max_rounds_per_episode: 1
+  seed_retry_limit: 100
+  use_vllm: false
+  disaster_families: ["fire"]
+grpo:
+  learning_rate: 5.0e-6
+  kl_coef: 0.04
+  clip_range: 0.2
+  num_train_epochs_per_step: 1
+reward:
+  rationale_scaling: "linear_capped"
+  alpha: 0.01
+  beta: 0.25
+  cap: 1.0
+  eligible_token_ceiling: 64
+  clip_normalized_to: 1.0
+eval:
+  every_steps: 25
+  tiers: ["easy"]
+  seeds: [42]
+checkpoint:
+  every_steps: 1
+  keep_last_n: 3
+  root_dir: "outputs/training/smoke-unsloth-0p5b"
+metrics:
+  csv_path: "outputs/training/smoke-unsloth-0p5b-metrics.csv"
+  jsonl_dir: "outputs/logs/smoke-unsloth-0p5b"
+seed:
+  training_rng: 12345

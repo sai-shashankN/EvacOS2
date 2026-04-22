@@ -794,7 +794,10 @@ class UnslothPolicy:
                     try:
                         from unsloth import FastLanguageModel  # type: ignore
 
-                        FastLanguageModel.for_training(self._model)
+                        FastLanguageModel.for_training(
+                            self._model,
+                            use_gradient_checkpointing=True,
+                        )
                     except Exception:
                         self._model.train()
                 else:

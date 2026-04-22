@@ -190,7 +190,10 @@ class MultiAgentGRPOTrainer:
         try:
             from unsloth import FastLanguageModel  # type: ignore
 
-            FastLanguageModel.for_training(self.model)
+            FastLanguageModel.for_training(
+                self.model,
+                use_gradient_checkpointing=True,
+            )
         except Exception:
             self.model.train()
 

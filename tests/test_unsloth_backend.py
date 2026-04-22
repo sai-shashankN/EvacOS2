@@ -90,7 +90,8 @@ class TestGenerationModeGuards:
                 model.eval()
 
             @staticmethod
-            def for_training(model):
+            def for_training(model, use_gradient_checkpointing=None):
+                assert use_gradient_checkpointing is True
                 model.train()
 
         fake_unsloth = types.ModuleType("unsloth")
@@ -170,7 +171,8 @@ class TestGenerationModeGuards:
                 model.eval()
 
             @staticmethod
-            def for_training(model):
+            def for_training(model, use_gradient_checkpointing=None):
+                assert use_gradient_checkpointing is True
                 model.train()
 
         fake_unsloth = types.ModuleType("unsloth")
