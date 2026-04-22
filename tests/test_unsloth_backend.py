@@ -153,6 +153,83 @@ class TestGenerationModeGuards:
         assert policy._model.generate_kwargs["do_sample"] is False
         assert "temperature" not in policy._model.generate_kwargs
 
+    def test_unsloth_hf_generate_recovers_from_right_padded_tokenizer(self, monkeypatch):
+        class _NoGrad:
+            def __enter__(self):
+                return None
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_torch = types.ModuleType("torch")
+        fake_torch.no_grad = lambda: _NoGrad()  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        class FakeFastLanguageModel:
+            @staticmethod
+            def for_inference(model):
+                model.eval()
+
+            @staticmethod
+            def for_training(model, use_gradient_checkpointing=None):
+                assert use_gradient_checkpointing is True
+                model.train()
+
+        fake_unsloth = types.ModuleType("unsloth")
+        fake_unsloth.FastLanguageModel = FakeFastLanguageModel  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "unsloth", fake_unsloth)
+
+        class FakeInputIds:
+            shape = (1, 2)
+
+        class FakeBatch(dict):
+            def to(self, device):
+                return self
+
+        class FakeTokenizer:
+            pad_token = None
+            eos_token = "<eos>"
+            pad_token_id = 0
+            padding_side = "right"
+
+            def __call__(self, rendered, return_tensors="pt", padding=True, truncation=False):
+                del rendered, return_tensors, padding, truncation
+                return FakeBatch({"input_ids": FakeInputIds()})
+
+            @staticmethod
+            def decode(generated, skip_special_tokens=True):
+                del skip_special_tokens
+                return " ".join(str(tok) for tok in generated)
+
+        class FakeModel:
+            def __init__(self):
+                self.training = True
+                self.device = "cpu"
+
+            def eval(self):
+                self.training = False
+                return self
+
+            def train(self, mode=True):
+                self.training = mode
+                return self
+
+            def generate(self, **kwargs):
+                assert kwargs["do_sample"] is False
+                return [[101, 102, 103, 104]]
+
+        policy = UnslothPolicy.__new__(UnslothPolicy)
+        policy._tokenizer = FakeTokenizer()
+        policy._model = FakeModel()
+        policy._max_new_tokens = 8
+        policy._max_prompt_tokens = 128
+        policy._temperature = 0.0
+
+        outputs = policy._hf_generate(["prompt"])
+
+        assert outputs == [("103 104", [103, 104])]
+        assert policy._tokenizer.padding_side == "left"
+
     def test_unsloth_hf_generate_passes_temperature_only_for_sampling(self, monkeypatch):
         class _NoGrad:
             def __enter__(self):

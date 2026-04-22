@@ -742,11 +742,10 @@ class UnslothPolicy:
         if getattr(tokenizer, "pad_token", None) is None:
             tokenizer.pad_token = tokenizer.eos_token
         original_padding_side = tokenizer.padding_side
-        tokenizer.padding_side = "left"
-        assert original_padding_side == "left", (
-            f"UnslothPolicy._hf_generate requires left-padded tokenizer; "
-            f"got {original_padding_side!r}"
-        )
+        if original_padding_side != "left":
+            # Training tokenization temporarily right-pads for label masking.
+            # Recover here instead of failing the rollout path.
+            tokenizer.padding_side = "left"
         max_prompt_tokens = getattr(self, "_max_prompt_tokens", 3500)
 
         _warn_once_if_prompt_truncated(
