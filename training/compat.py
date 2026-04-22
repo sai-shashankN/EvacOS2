@@ -33,6 +33,16 @@ def patch_transformers_cache_exports() -> None:
         cache_utils = None  # type: ignore[assignment]
 
     original_getattr = getattr(transformers, "__getattr__", None)
+    import_structure = getattr(transformers, "_import_structure", None)
+    export_all = getattr(transformers, "__all__", None)
+
+    if isinstance(import_structure, dict):
+        cache_exports = import_structure.setdefault("cache_utils", [])
+        if "HybridCache" not in cache_exports:
+            cache_exports.append("HybridCache")
+
+    if isinstance(export_all, list) and "HybridCache" not in export_all:
+        export_all.append("HybridCache")
 
     def _resolve_cache_symbol(symbol_name: str):
         replacement = None

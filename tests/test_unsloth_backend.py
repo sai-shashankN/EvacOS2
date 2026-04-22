@@ -622,6 +622,8 @@ class TestTransformersCompatShim:
         from training.compat import patch_transformers_cache_exports
 
         fake_transformers = types.ModuleType("transformers")
+        fake_transformers._import_structure = {"cache_utils": ["Cache"]}  # type: ignore[attr-defined]
+        fake_transformers.__all__ = ["Cache"]  # type: ignore[attr-defined]
 
         def _original_getattr(name):
             raise AttributeError(name)
@@ -637,6 +639,8 @@ class TestTransformersCompatShim:
             patch_transformers_cache_exports()
             resolved = fake_transformers.__getattr__("HybridCache")  # type: ignore[attr-defined]
             assert resolved is fake_transformers.HybridCache  # type: ignore[attr-defined]
+            assert "HybridCache" in fake_transformers._import_structure["cache_utils"]  # type: ignore[attr-defined]
+            assert "HybridCache" in fake_transformers.__all__  # type: ignore[attr-defined]
         finally:
             sys.modules.pop("transformers", None)
             for key, value in saved.items():
