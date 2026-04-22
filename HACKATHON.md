@@ -49,6 +49,7 @@ For serious training, prefer Linux/CUDA:
 1. keep the checked-in default `backend: "unsloth"` in [`training/config.yaml`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/training/config.yaml)
 2. keep the checked-in default `rollout.use_vllm: true`
 3. train with the notebook or `python -m training.train`
+4. for remote/Vast setup, follow [`REMOTE_GPU_SETUP.md`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/REMOTE_GPU_SETUP.md) so install order and warning-aware health checks stay consistent
 
 Current checked-in default:
 

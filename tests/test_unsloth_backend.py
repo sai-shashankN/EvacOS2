@@ -551,3 +551,41 @@ class TestVllmKwargsForCurrentGpu:
             assert helper() == {}
         finally:
             self._teardown(saved)
+
+
+class TestTransformersCompatShim:
+    def test_patch_transformers_cache_exports_backfills_hybridcache(self, monkeypatch):
+        import sys
+
+        from training.compat import patch_transformers_cache_exports
+
+        fake_transformers = types.ModuleType("transformers")
+        fake_cache_utils = types.ModuleType("transformers.cache_utils")
+
+        class FakeHybridCache:
+            pass
+
+        class FakeDynamicCache:
+            pass
+
+        fake_cache_utils.HybridCache = FakeHybridCache  # type: ignore[attr-defined]
+        fake_cache_utils.DynamicCache = FakeDynamicCache  # type: ignore[attr-defined]
+        fake_transformers.cache_utils = fake_cache_utils  # type: ignore[attr-defined]
+
+        saved: dict[str, object] = {}
+        for key in ("transformers", "transformers.cache_utils"):
+            if key in sys.modules:
+                saved[key] = sys.modules[key]
+
+        monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+        monkeypatch.setitem(sys.modules, "transformers.cache_utils", fake_cache_utils)
+        try:
+            assert not hasattr(fake_transformers, "HybridCache")
+            patch_transformers_cache_exports()
+            assert fake_transformers.HybridCache is FakeHybridCache  # type: ignore[attr-defined]
+            assert fake_transformers.DynamicCache is FakeDynamicCache  # type: ignore[attr-defined]
+        finally:
+            sys.modules.pop("transformers", None)
+            sys.modules.pop("transformers.cache_utils", None)
+            for key, value in saved.items():
+                sys.modules[key] = value

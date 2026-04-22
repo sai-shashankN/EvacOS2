@@ -23,6 +23,7 @@ Preflight:
 - [ ] Suitable Linux CUDA machine selected
 - [ ] Repo available on the remote box
 - [ ] Python environment created
+- [ ] Follow `REMOTE_GPU_SETUP.md` instead of ad-hoc package install order
 - [ ] CUDA-visible PyTorch / training stack verified
 - [ ] Hugging Face login/token available if model pulls require it
 - [ ] Output/checkpoint directory chosen on persistent storage

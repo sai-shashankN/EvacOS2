@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from training.compat import patch_transformers_cache_exports
 from training.config_schema import TrainingConfig
 from training.metrics import append_training_metrics_row
 
@@ -1210,12 +1211,15 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     reward_config = config.reward.model_dump(mode="python")
 
     if config.backend == "unsloth":
+        patch_transformers_cache_exports()
         try:
             # Import Unsloth before TRL / transformers / PEFT so its monkey
             # patches apply to the training stack as intended.
             import unsloth  # type: ignore  # noqa: F401
         except ImportError:
             pass
+
+    patch_transformers_cache_exports()
 
     try:
         import torch  # noqa: F401

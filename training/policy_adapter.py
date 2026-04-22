@@ -29,6 +29,7 @@ from evacos_ma.schemas.multi_agent import (
     ActionTypeMA,
     AgentRole,
 )
+from training.compat import patch_transformers_cache_exports
 
 PolicyResult = tuple[str, list[int]]
 
@@ -372,6 +373,8 @@ def hf_policy_factory(
 ) -> Policy:
     """Build an import-guarded transformers/peft-backed policy."""
 
+    patch_transformers_cache_exports()
+
     try:
         import torch  # noqa: F401
         from transformers import AutoModelForCausalLM, AutoTokenizer  # noqa: F401
@@ -512,6 +515,8 @@ def unsloth_policy_factory(
         detect it. Unsloth does not support Windows — local Windows dev should
         use ``hf_policy_factory`` instead.
     """
+
+    patch_transformers_cache_exports()
 
     try:
         from unsloth import FastLanguageModel  # type: ignore  # noqa: F401
