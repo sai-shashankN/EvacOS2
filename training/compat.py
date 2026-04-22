@@ -48,16 +48,20 @@ def patch_transformers_cache_exports() -> None:
             replacement = (
                 getattr(transformers, "DynamicCache", None)
                 or getattr(transformers, "Cache", None)
+                or type("HybridCache", (), {})
             )
         elif name == "EncoderDecoderCache":
             replacement = (
                 getattr(transformers, "Cache", None)
                 or getattr(transformers, "DynamicCache", None)
+                or type("EncoderDecoderCache", (), {})
             )
         elif name == "DynamicCache":
-            replacement = getattr(transformers, "Cache", None)
+            replacement = getattr(transformers, "Cache", None) or type(
+                "DynamicCache", (), {}
+            )
         elif name == "Cache":
-            replacement = object
+            replacement = type("Cache", (), {})
 
         if replacement is not None:
             setattr(transformers, name, replacement)
