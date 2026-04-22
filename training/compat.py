@@ -32,6 +32,49 @@ def patch_transformers_cache_exports() -> None:
     except Exception:
         cache_utils = None  # type: ignore[assignment]
 
+    original_getattr = getattr(transformers, "__getattr__", None)
+
+    def _resolve_cache_symbol(symbol_name: str):
+        replacement = None
+        if cache_utils is not None and hasattr(cache_utils, symbol_name):
+            replacement = getattr(cache_utils, symbol_name)
+        elif symbol_name == "HybridCache":
+            replacement = (
+                getattr(transformers, "DynamicCache", None)
+                or getattr(transformers, "Cache", None)
+                or type("HybridCache", (), {})
+            )
+        elif symbol_name == "EncoderDecoderCache":
+            replacement = (
+                getattr(transformers, "Cache", None)
+                or getattr(transformers, "DynamicCache", None)
+                or type("EncoderDecoderCache", (), {})
+            )
+        elif symbol_name == "DynamicCache":
+            replacement = getattr(transformers, "Cache", None) or type(
+                "DynamicCache", (), {}
+            )
+        elif symbol_name == "Cache":
+            replacement = type("Cache", (), {})
+        return replacement
+
+    def _patched_getattr(symbol_name: str):
+        if symbol_name in {
+            "Cache",
+            "DynamicCache",
+            "EncoderDecoderCache",
+            "HybridCache",
+        }:
+            replacement = _resolve_cache_symbol(symbol_name)
+            if replacement is not None:
+                setattr(transformers, symbol_name, replacement)
+                return replacement
+        if original_getattr is not None:
+            return original_getattr(symbol_name)
+        raise AttributeError(symbol_name)
+
+    setattr(transformers, "__getattr__", _patched_getattr)
+
     for name in (
         "Cache",
         "DynamicCache",
@@ -41,27 +84,6 @@ def patch_transformers_cache_exports() -> None:
         if hasattr(transformers, name):
             continue
 
-        replacement = None
-        if cache_utils is not None and hasattr(cache_utils, name):
-            replacement = getattr(cache_utils, name)
-        elif name == "HybridCache":
-            replacement = (
-                getattr(transformers, "DynamicCache", None)
-                or getattr(transformers, "Cache", None)
-                or type("HybridCache", (), {})
-            )
-        elif name == "EncoderDecoderCache":
-            replacement = (
-                getattr(transformers, "Cache", None)
-                or getattr(transformers, "DynamicCache", None)
-                or type("EncoderDecoderCache", (), {})
-            )
-        elif name == "DynamicCache":
-            replacement = getattr(transformers, "Cache", None) or type(
-                "DynamicCache", (), {}
-            )
-        elif name == "Cache":
-            replacement = type("Cache", (), {})
-
+        replacement = _resolve_cache_symbol(name)
         if replacement is not None:
             setattr(transformers, name, replacement)

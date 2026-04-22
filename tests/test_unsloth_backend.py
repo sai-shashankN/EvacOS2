@@ -615,3 +615,29 @@ class TestTransformersCompatShim:
             sys.modules.pop("transformers", None)
             for key, value in saved.items():
                 sys.modules[key] = value
+
+    def test_patch_transformers_cache_exports_wraps_lazy_getattr(self, monkeypatch):
+        import sys
+
+        from training.compat import patch_transformers_cache_exports
+
+        fake_transformers = types.ModuleType("transformers")
+
+        def _original_getattr(name):
+            raise AttributeError(name)
+
+        fake_transformers.__getattr__ = _original_getattr  # type: ignore[attr-defined]
+
+        saved: dict[str, object] = {}
+        if "transformers" in sys.modules:
+            saved["transformers"] = sys.modules["transformers"]
+
+        monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+        try:
+            patch_transformers_cache_exports()
+            resolved = fake_transformers.__getattr__("HybridCache")  # type: ignore[attr-defined]
+            assert resolved is fake_transformers.HybridCache  # type: ignore[attr-defined]
+        finally:
+            sys.modules.pop("transformers", None)
+            for key, value in saved.items():
+                sys.modules[key] = value
