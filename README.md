@@ -1,114 +1,190 @@
 # EvacOS2
 
-EvacOS2 is an OpenEnv-style multi-agent evacuation RL system where a central orchestrator and floor agents must coordinate under pressure inside a deterministic building evacuation simulator. The repo combines a real environment, verifier-style rewards, GRPO-style post-training, and a judge-friendly evaluation/demo path.
+**Hierarchical multi-agent evacuation benchmark with a deterministic simulator, GRPO-style post-training, and judge-ready evidence artifacts.**
 
-For the fastest high-level submission read, start with [SUBMISSION_BRIEF.md](/C:/Users/LENOVO/Specializations/Competitions/Scaler/SUBMISSION_BRIEF.md).
+For the fastest submission overview, start with [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md).
 
-## Why this stands out
+## Judge-Fast Summary
 
-- Multi-agent, not single-turn: one orchestrator coordinates multiple floor agents across repeated rounds.
-- Long-horizon, not toy horizon: the policy must sustain good decisions over many simulator steps rather than solve a one-shot classification task.
-- Verifiable, not vibe-scored: rewards and evaluation are programmatic, with fixed-suite and baseline-vs-trained comparison support.
-- Real environment loop, not prompt wrapping: `/openenv/reset`, `/openenv/step`, and `/openenv/state` hit the live simulator.
-- Role-aware training path: the repo supports both shared-model training and split-role setups such as `7B orchestrator + 3B floor agents`.
+| Aspect | Detail |
+|---|---|
+| **Domain** | Emergency building evacuation under uncertainty, constrained exits, and evolving hazards |
+| **Topology** | `1` orchestrator agent + `5` floor agents |
+| **Interface** | OpenEnv-compatible live endpoints backed by the simulator |
+| **Endpoints** | `/openenv/reset`, `/openenv/step`, `/openenv/state`, `/openenv/schema`, `/openenv/health`, `/openenv/metadata` |
+| **Difficulty tiers** | `easy`, `medium`, `hard`, `brutal` |
+| **Training** | Unsloth + LoRA + GRPO-style training, with shared-model and split-role support |
+| **Evaluation** | Fixed-suite verification, baseline-vs-trained comparison, scorecards, and plots |
+| **Validated stronger configs** | `7B` single-model smoke, `7B + vLLM` smoke, `7B/3B` split-role smoke |
+| **Metrics support** | Aggregate diagnostics plus per-role diagnostics such as `orchestrator_loss` and `floor_agent_loss` |
 
-## Judge-Fast Facts
+**Bottom line:** real simulator, real training loop, real evaluation pipeline. This is not a prompt wrapper or a config-only stub.
 
-- Core challenge: coordinated evacuation under uncertainty, constrained exits, and evolving hazards
-- Environment shape: deterministic simulator with multi-agent rounds and role-specific actions
-- RL stack: GRPO-style rollout/training with role-aware policy routing
-- Default training base: `Qwen/Qwen2.5-3B-Instruct`
-- Upgrade path: role-specific model overrides via `model.orchestrator_base` and `model.floor_base`
-- Demo proof path: fixed-suite baseline, fixed-suite trained run, then live OpenEnv interaction
+## Validated Evidence
 
-## What is in this repo
+| Component | Configuration | Status | Evidence |
+|---|---|---|---|
+| Environment + OpenEnv shell | Deterministic evacuation simulator with `1+5` agent topology | Validated | [openenv.yaml](openenv.yaml), [evacos_ma/](evacos_ma) |
+| Shared-model training | `Qwen/Qwen2.5-3B-Instruct` | Checked in | [training/config.yaml](training/config.yaml) |
+| Stronger single-model lane | `Qwen/Qwen2.5-7B-Instruct` | Smoke validated on stronger hardware | [training/](training) |
+| vLLM lane | `7B + vLLM` | Smoke validated on stronger hardware | [training/](training) |
+| Split-role lane | `7B` orchestrator / `3B` floor agents | Smoke validated on stronger hardware | [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml) |
+| Split-role metrics | Aggregate + per-role CSV diagnostics | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
+| Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoints.py](training/checkpoints.py) |
+| Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
 
-- `evacos_ma/`: core simulator, multi-agent orchestration, reward plumbing, and OpenEnv-facing API
-- `training/`: rollout collection, GRPO training loop, policy adapters, checkpointing, and backend integration
-- `evaluation/`: fixed-suite verification, rationale sweeps, and baseline-vs-trained comparison helpers
-- `notebooks/train_evacos_ma.ipynb`: end-to-end notebook for smoke runs, training, resume, and evaluation
-- `dashboard/`: local demo dashboard for rollout and reward inspection
-- `demo/`: presentation/story assets that sit alongside the executable demo surfaces
+## Why It Matters
 
-## Current technical shape
+Most OpenEnv-style submissions stop at one layer: a simulator, a training loop, or an evaluation stub. EvacOS2 closes the loop end to end:
 
-- Environment first, not just fine-tuning: the simulator and multi-agent round protocol are the core product.
-- Verifiable rewards: reward shaping, belief audit scoring, counterfactual/oversight signals, and fixed-suite evaluation are all programmatic.
-- TRL-style RL training: the repo uses a GRPO-family loop with role-aware grouping.
-- OpenEnv surface: `/openenv/reset`, `/openenv/step`, and `/openenv/state` now hit the live simulator rather than a canned stub.
+1. deterministic multi-agent environment
+2. role-aware GRPO-style training
+3. checkpointing and resume
+4. baseline-vs-trained evaluation
+5. judge-consumable scorecards and plots
 
-## Three-minute proof
+## Architecture
 
-If you want the fastest end-to-end evidence path:
+```mermaid
+graph LR
+    subgraph "Deterministic Simulator"
+        O["Orchestrator"]
+        F1["Floor Agent 1"]
+        F2["Floor Agent 2"]
+        F3["Floor Agent 3"]
+        F4["Floor Agent 4"]
+        F5["Floor Agent 5"]
+        O --> F1
+        O --> F2
+        O --> F3
+        O --> F4
+        O --> F5
+    end
 
-1. Build a baseline-only evidence bundle:
+    subgraph "OpenEnv API"
+        R["/reset"]
+        P["/step"]
+        S["/state"]
+        C["/schema"]
+        H["/health"]
+        M["/metadata"]
+    end
+
+    subgraph "Training Stack"
+        U["Unsloth Backend"]
+        G["GRPO Trainer"]
+        L["LoRA Adapters"]
+        U --> G --> L
+    end
+
+    subgraph "Evaluation"
+        FS["Fixed Suite"]
+        BVT["Baseline vs Trained"]
+        SC["Scorecards + Plots"]
+        FS --> BVT --> SC
+    end
+
+    O --> P
+    F1 --> P
+    F2 --> P
+    F3 --> P
+    F4 --> P
+    F5 --> P
+    P --> G
+    L --> BVT
+```
+
+## Fastest Proof Path
+
+1. Read [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md)
+2. Inspect the OpenEnv contract in [openenv.yaml](openenv.yaml)
+3. Build a baseline evidence bundle:
 
    ```bash
    python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline
    ```
 
-2. Build a trained comparison bundle:
+4. Build a trained comparison bundle once you have a checkpoint:
 
    ```bash
-   python -m evaluation.demo_bundle --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter --output-dir outputs/demo_bundle
+   python -m evaluation.demo_bundle \
+     --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter \
+     --output-dir outputs/demo_bundle
    ```
 
-3. Open the generated summary markdown and CSV, then show one live interaction through the OpenEnv API or dashboard.
+5. Inspect the checked-in split-role bridge config:
+   [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml)
 
-This gives a compact baseline -> trained -> live-environment story without needing to inspect the full codebase first.
-The bundle now also emits `submission_scorecard.md` and `submission_scorecard.json` so the first thing a judge sees can be a one-page headline artifact instead of raw logs.
+## OpenEnv Surface
 
-## Training setup
+The public environment contract is described in [openenv.yaml](openenv.yaml).
 
-The recommended serious training path is:
+Key endpoints:
 
-1. Train on Linux/CUDA with the checked-in default: `backend: "unsloth"` and `rollout.use_vllm: true`.
-2. Use the notebook or `training/train.py` flow for smoke runs, checkpointed training, resume, and eval.
-3. If you must do Windows-only local code/test work, override locally to the `hf` backend.
-4. Use fixed-suite and baseline-vs-trained outputs as the primary before/after evidence.
+- `/openenv/reset`
+- `/openenv/step`
+- `/openenv/state`
+- `/openenv/schema`
+- `/openenv/health`
+- `/openenv/metadata`
 
-The checked-in default base model is currently:
+This is wired to the live simulator in [evacos_ma/](evacos_ma), not a canned response layer.
 
-- shared model: `Qwen/Qwen2.5-3B-Instruct`
+## Repository Map
 
-The config is now role-ready:
+| Path | Purpose |
+|---|---|
+| [evacos_ma/](evacos_ma) | Simulator, schemas, reward interfaces, OpenEnv server code |
+| [training/](training) | Rollout collection, policy adapters, GRPO trainer, checkpoints, backend integration |
+| [evaluation/](evaluation) | Fixed-suite verification, comparison helpers, scorecards, plots, demo bundle |
+| [dashboard/](dashboard) | Local inspection and demo UI |
+| [demo/](demo) | Presentation and story assets |
+| [notebooks/train_evacos_ma.ipynb](notebooks/train_evacos_ma.ipynb) | End-to-end notebook flow |
 
-- `model.base` is the shared default
-- `model.orchestrator_base` can later override only the orchestrator
-- `model.floor_base` can later override floor agents
+## Training Modes
 
-If both roles resolve to the same base, the repo preserves the current shared-model fast path.
-If the roles resolve to different bases, the training/eval stack now routes orchestrator and floor-agent work through separate role-specific policies.
+### 1. Shared-model default
 
-## Evaluation and demo path
+Default checked-in path:
 
-- Fixed verification: [`evaluation/fixed_suite.py`](evaluation/fixed_suite.py)
-- Before/after comparison: [`evaluation/baseline_vs_trained.py`](evaluation/baseline_vs_trained.py)
-- Bundle builder: [`evaluation/demo_bundle.py`](evaluation/demo_bundle.py)
-- Local API/demo surface: [`evacos_ma/openenv/server_shell.py`](evacos_ma/openenv/server_shell.py) and `dashboard/`
-- Presentation assets: `demo/`
+- base model: `Qwen/Qwen2.5-3B-Instruct`
+- config entrypoint: [training/config.yaml](training/config.yaml)
 
-A strong demo flow for this repo is:
+### 2. Stronger single-model lane
 
-1. run baseline fixed-suite
-2. run trained fixed-suite
-3. build the bundle with `python -m evaluation.demo_bundle`
-4. show the same scenario through the dashboard or OpenEnv surface
+Validated smoke lane:
 
-The key submission claim is not just that the model can emit plausible actions. It is that we can measure whether coordinated evacuation behavior actually improved.
+- `7B` single-model
+- `7B + vLLM`
 
-For the hackathon-facing checklist and deployment flow, see [`HACKATHON.md`](HACKATHON.md).
+### 3. Split-role lane
+
+Checked-in split bridge config:
+
+- [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml)
+
+Resolved topology:
+
+- orchestrator: `Qwen/Qwen2.5-7B-Instruct`
+- floor agents: `Qwen/Qwen2.5-3B-Instruct`
+
+## Evaluation And Evidence
+
+Key files:
+
+- fixed-suite evaluation: [evaluation/fixed_suite.py](evaluation/fixed_suite.py)
+- baseline-vs-trained comparison: [evaluation/baseline_vs_trained.py](evaluation/baseline_vs_trained.py)
+- bundle builder: [evaluation/demo_bundle.py](evaluation/demo_bundle.py)
+- plot generation: [evaluation/plots.py](evaluation/plots.py)
+
+The bundle path emits:
+
+- `baseline_vs_trained.csv`
+- `demo_bundle_summary.md`
+- `submission_scorecard.md`
+- `submission_scorecard.json`
+- plots generated from the run's actual metrics CSV
 
 ## Secrets
 
-Copy `.env.example` to `.env` and fill in only the values you need locally. The real `.env` file is gitignored.
-
-## Status
-
-The repo is beyond the original baseline bootstrap state:
-
-- the repair campaign is complete
-- the OpenEnv shell is wired to the real environment
-- evaluation surfaces are in place
-- split-role training support is in place for stronger orchestrator-vs-floor experiments
-- the biggest remaining hackathon work is packaging polish: public docs, demo narrative, and Space deployment clarity
+Copy [.env.example](.env.example) to `.env` and fill only the local values you need. The real `.env` is gitignored.
