@@ -38,16 +38,21 @@ def _load_model_config(config_path: Path = Path("training/config.yaml")) -> dict
         ) from exc
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     model_cfg = data.get("model", {}) or {}
+    roles_cfg = data.get("roles", {}) or {}
     base = str(model_cfg.get("base", "Qwen/Qwen2.5-3B-Instruct"))
     orchestrator_base = model_cfg.get("orchestrator_base")
     floor_base = model_cfg.get("floor_base")
     resolved_orchestrator = str(orchestrator_base or base)
     resolved_floor = str(floor_base or base)
+    orchestrator_policy = str(roles_cfg.get("orchestrator_policy", "model"))
+    split = resolved_orchestrator != resolved_floor
     return {
         "base": base,
         "orchestrator": resolved_orchestrator,
         "floor_agent": resolved_floor,
-        "split": resolved_orchestrator != resolved_floor,
+        "split": split,
+        "role_routed": split or orchestrator_policy != "model",
+        "orchestrator_policy": orchestrator_policy,
     }
 
 
@@ -77,16 +82,21 @@ def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool
     if meta_path is None:
         return None
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    orchestrator_policy = str(meta.get("orchestrator_policy") or "model")
     role_model_names = meta.get("role_model_names")
     if isinstance(role_model_names, dict):
-        orchestrator = str(role_model_names.get("orchestrator") or "")
-        floor = str(role_model_names.get("floor_agent") or "")
+        fallback_model_name = str(meta.get("model_name") or "Qwen/Qwen2.5-3B-Instruct")
+        orchestrator = str(role_model_names.get("orchestrator") or fallback_model_name)
+        floor = str(role_model_names.get("floor_agent") or fallback_model_name)
         if orchestrator and floor:
+            split = orchestrator != floor
             return {
                 "base": orchestrator,
                 "orchestrator": orchestrator,
                 "floor_agent": floor,
-                "split": orchestrator != floor,
+                "split": split,
+                "role_routed": split or orchestrator_policy != "model",
+                "orchestrator_policy": orchestrator_policy,
             }
     model_name = str(meta.get("model_name") or "Qwen/Qwen2.5-3B-Instruct")
     return {
@@ -94,6 +104,8 @@ def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool
         "orchestrator": model_name,
         "floor_agent": model_name,
         "split": False,
+        "role_routed": orchestrator_policy != "model",
+        "orchestrator_policy": orchestrator_policy,
     }
 
 
@@ -125,12 +137,32 @@ def _trained_factory(
 ) -> Callable[[], object]:
     adapter_root = _adapter_root(checkpoint)
     model_cfg = _load_model_config_from_checkpoint(checkpoint) or _load_model_config(config_path)
-    if not bool(model_cfg["split"]):
+    if not bool(model_cfg.get("role_routed", model_cfg["split"])):
         model_name = str(model_cfg["orchestrator"])
         return lambda: hf_policy_factory(model_name, lora_adapter_path=str(adapter_root))
 
-    orch_checkpoint = adapter_root / "orchestrator"
     floor_checkpoint = adapter_root / "floor_agent"
+    orchestrator_policy = str(model_cfg.get("orchestrator_policy") or "model")
+
+    if orchestrator_policy == "stub":
+        if not floor_checkpoint.exists():
+            raise FileNotFoundError(
+                "Floor-specialist trained comparison expects checkpoint/floor_agent "
+                "adapter directory when orchestrator_policy='stub'."
+            )
+
+        def _floor_specialist_factory() -> object:
+            return RoleRoutedPolicy(
+                orchestrator_policy=StubPolicy(seed=0),
+                floor_policy=hf_policy_factory(
+                    str(model_cfg["floor_agent"]),
+                    lora_adapter_path=str(floor_checkpoint),
+                ),
+            )
+
+        return _floor_specialist_factory
+
+    orch_checkpoint = adapter_root / "orchestrator"
     if not orch_checkpoint.exists() or not floor_checkpoint.exists():
         raise FileNotFoundError(
             "Split-role trained comparison expects checkpoint/orchestrator and "

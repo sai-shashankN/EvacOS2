@@ -119,6 +119,49 @@ class TestCheckpointRoundtrip:
         finally:
             shutil.rmtree(ckpt_root, ignore_errors=True)
 
+    def test_save_and_load_roundtrip_with_floor_only_role_artifacts(self):
+        ckpt_root = _tmp_dir()
+        try:
+            rng = random.Random(13)
+            rng_state = pickle.dumps(rng.getstate())
+            lora_dir = ckpt_root / "ckpt_4" / "lora_adapter"
+            floor_dir = lora_dir / "floor_agent"
+            floor_dir.mkdir(parents=True)
+            (floor_dir / "adapter_config.json").write_text("{}")
+
+            bundle = CheckpointBundle(
+                step=4,
+                wall_seconds_total=7.5,
+                curriculum_snapshot={"tier": "easy"},
+                normalizer_snapshot={"k": {"count": 2, "mean": 0.2, "m2": 0.1}},
+                rollout_rng_state=rng_state,
+                lora_weights_path=lora_dir,
+                model_name="Qwen/Qwen2.5-3B-Instruct",
+                config_hash="sha256:flooronly123",
+                role_lora_weights_paths={"floor_agent": floor_dir},
+                role_model_names={
+                    "orchestrator": "Qwen/Qwen2.5-3B-Instruct",
+                    "floor_agent": "Qwen/Qwen2.5-3B-Instruct",
+                },
+                orchestrator_policy="stub",
+                role_optimizer_states={"floor_agent": {"state": {1: {"step": 9}}}},
+            )
+
+            saved_path = save_checkpoint(ckpt_root, bundle)
+            atomic_replace_latest(ckpt_root, saved_path)
+
+            loaded = load_checkpoint(ckpt_root)
+            assert loaded is not None
+            assert loaded.role_lora_weights_paths == {"floor_agent": floor_dir}
+            assert loaded.role_model_names == {
+                "orchestrator": "Qwen/Qwen2.5-3B-Instruct",
+                "floor_agent": "Qwen/Qwen2.5-3B-Instruct",
+            }
+            assert loaded.orchestrator_policy == "stub"
+            assert loaded.role_optimizer_states == {"floor_agent": {"state": {1: {"step": 9}}}}
+        finally:
+            shutil.rmtree(ckpt_root, ignore_errors=True)
+
 
 class TestRotateCheckpoints:
     def test_rotate_keeps_highest_n(self):

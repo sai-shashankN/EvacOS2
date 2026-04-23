@@ -47,3 +47,52 @@ def test_specialist_configs_use_distinct_output_paths():
         )
 
     assert len(paths) == len(set(paths))
+
+
+@pytest.mark.parametrize(
+    ("family", "config_path"),
+    [
+        ("fire", Path("training/config.remote-unsloth-3b-fire-floor-specialist.yaml")),
+        ("flood", Path("training/config.remote-unsloth-3b-flood-floor-specialist.yaml")),
+        ("gas", Path("training/config.remote-unsloth-3b-gas-floor-specialist.yaml")),
+    ],
+)
+def test_floor_specialist_configs_use_stub_orchestrator_and_only_3b_floor_policy(
+    family: str,
+    config_path: Path,
+):
+    raw = _load_yaml_config(config_path)
+    config = TrainingConfig(**raw)
+
+    assert config.backend == "unsloth"
+    assert config.roles.trainable == ["floor_agent"]
+    assert config.roles.orchestrator_policy == "stub"
+    assert config.uses_role_routed_policy is True
+    assert config.model.uses_split_bases is False
+    assert config.model.base == "Qwen/Qwen2.5-3B-Instruct"
+    assert config.model.orchestrator_base is None
+    assert config.model.floor_base is None
+    assert config.model.resolved_base_for_role("floor_agent") == "Qwen/Qwen2.5-3B-Instruct"
+    assert config.rollout.use_vllm is False
+    assert config.rollout.disaster_families == [family]
+    assert family in config.checkpoint.root_dir
+    assert family in config.metrics.csv_path
+    assert family in config.metrics.jsonl_dir
+
+
+def test_floor_specialist_configs_use_distinct_output_paths():
+    paths = []
+    for family in ("fire", "flood", "gas"):
+        raw = _load_yaml_config(
+            Path(f"training/config.remote-unsloth-3b-{family}-floor-specialist.yaml")
+        )
+        config = TrainingConfig(**raw)
+        paths.extend(
+            [
+                config.checkpoint.root_dir,
+                config.metrics.csv_path,
+                config.metrics.jsonl_dir,
+            ]
+        )
+
+    assert len(paths) == len(set(paths))

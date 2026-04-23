@@ -1,0 +1,49 @@
+backend: "unsloth"
+# Gas-only floor-specialist lane: deterministic stub orchestrator, trainable 3B floor policy only.
+max_steps: 100
+unsloth_max_seq_length: 2048
+load_in_4bit: true
+model:
+  base: "Qwen/Qwen2.5-3B-Instruct"
+  dtype: "bfloat16"
+  max_prompt_tokens: 1024
+  max_completion_tokens: 128
+roles:
+  trainable: ["floor_agent"]
+  orchestrator_policy: "stub"
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+rollout:
+  episodes_per_step: 1
+  max_rounds_per_episode: 4
+  seed_retry_limit: 200
+  use_vllm: false
+  disaster_families: ["gas"]
+grpo:
+  learning_rate: 5.0e-6
+  kl_coef: 0.04
+  clip_range: 0.2
+  num_train_epochs_per_step: 1
+reward:
+  rationale_scaling: "linear_capped"
+  alpha: 0.01
+  beta: 0.25
+  cap: 1.0
+  eligible_token_ceiling: 96
+  clip_normalized_to: 1.0
+eval:
+  every_steps: 20
+  tiers: ["easy"]
+  seeds: [42, 123]
+checkpoint:
+  every_steps: 5
+  keep_last_n: 5
+  root_dir: "outputs/training/remote-unsloth-3b-gas-floor-specialist"
+metrics:
+  csv_path: "outputs/training/remote-unsloth-3b-gas-floor-specialist-metrics.csv"
+  jsonl_dir: "outputs/logs/remote-unsloth-3b-gas-floor-specialist"
+seed:
+  training_rng: 12345

@@ -181,3 +181,73 @@ def test_trained_factory_prefers_checkpoint_metadata(monkeypatch) -> None:
         assert policy.floor_policy["adapter"] == str(floor)
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_trained_factory_rebuilds_floor_only_stub_orchestrator_checkpoint(
+    monkeypatch,
+) -> None:
+    tmp_path = _tmp_dir()
+    ckpt_dir = tmp_path / "latest"
+    adapter_root = ckpt_dir / "lora_adapter"
+    floor = adapter_root / "floor_agent"
+    try:
+        floor.mkdir(parents=True)
+        (ckpt_dir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "model_name": "Qwen/Qwen2.5-3B-Instruct",
+                    "role_model_names": {
+                        "orchestrator": "Qwen/Qwen2.5-3B-Instruct",
+                        "floor_agent": "Qwen/Qwen2.5-3B-Instruct",
+                    },
+                    "orchestrator_policy": "stub",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        sys.modules.pop("evaluation.baseline_vs_trained", None)
+        module = importlib.import_module("evaluation.baseline_vs_trained")
+
+        monkeypatch.setattr(
+            module,
+            "_load_model_config",
+            lambda config_path=Path("training/config.yaml"): (_ for _ in ()).throw(
+                AssertionError("should not load config")
+            ),
+        )
+
+        captured: list[tuple[str, str | None, dict[str, object]]] = []
+
+        class FakeRoleRoutedPolicy:
+            def __init__(self, *, orchestrator_policy, floor_policy):
+                self.orchestrator_policy = orchestrator_policy
+                self.floor_policy = floor_policy
+
+        class FakeStubPolicy:
+            def __init__(self, seed=0):
+                self.seed = seed
+
+        def _fake_factory(model_name, *, lora_adapter_path=None, **kwargs):
+            captured.append((model_name, lora_adapter_path, kwargs))
+            return {"model_name": model_name, "adapter": lora_adapter_path}
+
+        monkeypatch.setattr(module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+        monkeypatch.setattr(module, "StubPolicy", FakeStubPolicy)
+        monkeypatch.setattr(module, "hf_policy_factory", _fake_factory)
+
+        policy = module._trained_factory(ckpt_dir)()
+
+        assert isinstance(policy.orchestrator_policy, FakeStubPolicy)
+        assert policy.orchestrator_policy.seed == 0
+        assert policy.floor_policy["model_name"] == "Qwen/Qwen2.5-3B-Instruct"
+        assert policy.floor_policy["adapter"] == str(floor)
+        assert captured == [
+            (
+                "Qwen/Qwen2.5-3B-Instruct",
+                str(floor),
+                {},
+            )
+        ]
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)

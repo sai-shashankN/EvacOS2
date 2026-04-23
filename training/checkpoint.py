@@ -29,6 +29,7 @@ class CheckpointBundle:
     config_hash: str  # sha256 of the resolved TrainingConfig JSON
     role_lora_weights_paths: dict[str, Path] | None = None
     role_model_names: dict[str, str] | None = None
+    orchestrator_policy: str | None = None
     # Phase 12 fields — all default to None for backward compatibility
     optimizer_state: dict | None = None
     role_optimizer_states: dict[str, dict] | None = None
@@ -180,6 +181,8 @@ def save_checkpoint(
         }
     if bundle.role_model_names is not None:
         meta["role_model_names"] = dict(bundle.role_model_names)
+    if bundle.orchestrator_policy is not None:
+        meta["orchestrator_policy"] = bundle.orchestrator_policy
     if bundle.wandb_run_id is not None:
         meta["wandb_run_id"] = bundle.wandb_run_id
     if extras:
@@ -371,6 +374,7 @@ def load_checkpoint(root: Path) -> CheckpointBundle | None:
         }
         or None,
         role_model_names=meta.get("role_model_names"),
+        orchestrator_policy=meta.get("orchestrator_policy"),
         optimizer_state=optimizer_state,
         role_optimizer_states=role_optimizer_states,
         torch_rng_state=torch_rng_state,

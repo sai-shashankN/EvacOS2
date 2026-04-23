@@ -29,7 +29,8 @@
 | Stronger single-model lane | `Qwen/Qwen2.5-7B-Instruct` | Smoke validated on stronger hardware | [training/](training) |
 | vLLM lane | `7B + vLLM` | Smoke validated on stronger hardware | [training/](training) |
 | Split-role lane | `7B` orchestrator / `3B` floor agents | Smoke validated on stronger hardware | [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml) |
-| Disaster specialist lanes | `7B/3B` split-role configs scoped to `fire`, `flood`, or `gas` | Implemented / ready to run | [training/config.remote-unsloth-7b3b-fire-specialist.yaml](training/config.remote-unsloth-7b3b-fire-specialist.yaml), [training/config.remote-unsloth-7b3b-flood-specialist.yaml](training/config.remote-unsloth-7b3b-flood-specialist.yaml), [training/config.remote-unsloth-7b3b-gas-specialist.yaml](training/config.remote-unsloth-7b3b-gas-specialist.yaml) |
+| Split-role disaster specialist lanes | `7B/3B` configs scoped to `fire`, `flood`, or `gas` | Implemented / ready to run | [training/config.remote-unsloth-7b3b-fire-specialist.yaml](training/config.remote-unsloth-7b3b-fire-specialist.yaml), [training/config.remote-unsloth-7b3b-flood-specialist.yaml](training/config.remote-unsloth-7b3b-flood-specialist.yaml), [training/config.remote-unsloth-7b3b-gas-specialist.yaml](training/config.remote-unsloth-7b3b-gas-specialist.yaml) |
+| Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / no-download preflight validated | [training/config.remote-unsloth-3b-fire-floor-specialist.yaml](training/config.remote-unsloth-3b-fire-floor-specialist.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist.yaml](training/config.remote-unsloth-3b-flood-floor-specialist.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist.yaml](training/config.remote-unsloth-3b-gas-floor-specialist.yaml) |
 | Specialist routing | Deterministic single-disaster router with generalist fallback for mixed/cascade scenarios | Implemented | [training/scope_router.py](training/scope_router.py) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
@@ -105,7 +106,8 @@ graph LR
 EvacOS2 supports two complementary training stories:
 
 - **Generalist bridge:** the existing `7B/3B` split-role config samples `fire`, `flood`, and `gas` episodes in one run. This is the most ambitious setting because the same policy stack must learn cross-disaster behavior.
-- **Specialist lanes:** the new fire/flood/gas configs keep the same `7B` orchestrator and `3B` floor-agent topology, but restrict rollouts to one disaster family. These runs should be easier to optimize and can be launched in parallel on separate GPUs.
+- **Split-role specialist lanes:** the `7B/3B` fire/flood/gas configs keep the same hierarchy but restrict rollouts to one disaster family. These are useful when we want the orchestrator and floor agents to adapt together inside one disaster mode.
+- **Floor-only specialist lanes:** the `3B` fire/flood/gas configs use a deterministic stub orchestrator and train only the floor-agent policy. These are cheaper parallel lanes for quickly learning local fire, flood, and gas evacuation behavior before a later shared orchestrator is trained against the frozen specialists.
 
 [training/scope_router.py](training/scope_router.py) is a deterministic routing helper for placing in front of trained specialist checkpoints: it maps single-family scenarios to the matching specialist lane and falls back to the generalist for unknown, mixed, structural, active-threat, or cascade cases. The fixed-suite evaluator records the selected route for each episode and can pass it to a scope-aware policy factory. That gives the demo a clean story without overclaiming specialist training: fast local floor agents handle immediate routing, the stronger orchestrator handles slower global coordination, and the scope layer decides which disaster-specific policy lane to use once those checkpoints are trained.
 
@@ -204,11 +206,17 @@ The strongest checked-in split bridge is [training/config.remote-unsloth-7b3b-sp
 - floor agents: `Qwen/Qwen2.5-3B-Instruct`
 - disaster mix: `fire`, `flood`, `gas`
 
-Specialist variants use the same model topology but one disaster family per run:
+Split-role specialist variants keep the `7B/3B` topology but use one disaster family per run:
 
 - fire: [training/config.remote-unsloth-7b3b-fire-specialist.yaml](training/config.remote-unsloth-7b3b-fire-specialist.yaml)
 - flood: [training/config.remote-unsloth-7b3b-flood-specialist.yaml](training/config.remote-unsloth-7b3b-flood-specialist.yaml)
 - gas: [training/config.remote-unsloth-7b3b-gas-specialist.yaml](training/config.remote-unsloth-7b3b-gas-specialist.yaml)
+
+Floor-only `3B` specialist variants use a deterministic stub orchestrator and train only the floor-agent adapter:
+
+- fire: [training/config.remote-unsloth-3b-fire-floor-specialist.yaml](training/config.remote-unsloth-3b-fire-floor-specialist.yaml)
+- flood: [training/config.remote-unsloth-3b-flood-floor-specialist.yaml](training/config.remote-unsloth-3b-flood-floor-specialist.yaml)
+- gas: [training/config.remote-unsloth-3b-gas-floor-specialist.yaml](training/config.remote-unsloth-3b-gas-floor-specialist.yaml)
 
 Validated stronger lanes include:
 

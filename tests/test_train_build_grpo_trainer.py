@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import os
+import random
+import shutil
+import tempfile
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +21,17 @@ class FakeProjectTrainer:
 class MockTRLTrainerModelOnly:
     def __init__(self, model):
         self.model = model
+
+
+def _tmp_dir() -> Path:
+    path = Path(
+        os.path.join(
+            tempfile.gettempdir(),
+            f"evacos_train_test_{os.getpid()}_{random.randint(0, 99999)}",
+        )
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _make_policy():
@@ -87,6 +103,171 @@ def test_split_policy_builds_dual_role_trainer(monkeypatch):
     assert trainer._role_trainers["floor_agent"].kwargs["model"] == "floor-model"
     assert trainer._role_trainers["orchestrator"].kwargs["optimizer_state"] == {"state": "orch"}
     assert trainer._role_trainers["floor_agent"].kwargs["optimizer_state"] == {"state": "floor"}
+
+
+def test_floor_only_stub_orchestrator_builds_floor_trainer_only(monkeypatch):
+    config = TrainingConfig(
+        roles={
+            "trainable": ["floor_agent"],
+            "orchestrator_policy": "stub",
+        }
+    )
+    monkeypatch.setattr(train_mod, "MultiAgentGRPOTrainer", FakeProjectTrainer)
+
+    policy = SimpleNamespace(
+        _role_policies={
+            "orchestrator": SimpleNamespace(),
+            "floor_agent": SimpleNamespace(_model="floor-model", _tokenizer="floor-tokenizer"),
+        }
+    )
+
+    trainer = train_mod._build_grpo_trainer(
+        GRPOTrainer=MockTRLTrainerModelOnly,
+        policy=policy,
+        config=config,
+        role_optimizer_states={"floor_agent": {"state": "floor-only"}},
+    )
+
+    assert isinstance(trainer, train_mod.DualRoleGRPOTrainer)
+    assert set(trainer._role_trainers) == {"floor_agent"}
+    assert trainer._role_trainers["floor_agent"].kwargs["model"] == "floor-model"
+    assert trainer._role_trainers["floor_agent"].kwargs["optimizer_state"] == {
+        "state": "floor-only"
+    }
+
+
+def test_dual_role_trainer_skips_untrainable_role_groups() -> None:
+    floor_calls: list[dict[str, list[list[object]]]] = []
+
+    class RecorderTrainer:
+        def step(self, *, grouped_inputs):
+            floor_calls.append(grouped_inputs)
+            return {"loss": 1.5}
+
+    trainer = train_mod.DualRoleGRPOTrainer(role_trainers={"floor_agent": RecorderTrainer()})
+    orchestrator_sample = SimpleNamespace(role="orchestrator")
+    floor_sample = SimpleNamespace(role="floor_agent")
+    grouped_inputs = {
+        "prompts": [[["orch"]], [["floor"]]],
+        "completions": [["orch-completion"], ["floor-completion"]],
+        "completion_token_ids": [[None], [None]],
+        "raw_rewards": [[0.1], [0.2]],
+        "normalized_rewards": [[0.1], [0.2]],
+        "samples": [[orchestrator_sample], [floor_sample]],
+    }
+
+    diagnostics = trainer.step(grouped_inputs=grouped_inputs)
+
+    assert len(floor_calls) == 1
+    assert floor_calls[0]["samples"] == [[floor_sample]]
+    assert "orchestrator_sample_groups" not in diagnostics
+    assert diagnostics["floor_agent_sample_groups"] == 1
+    assert diagnostics["floor_agent_loss"] == 1.5
+
+
+def test_build_policy_uses_stub_orchestrator_without_loading_orchestrator_model(
+    monkeypatch,
+):
+    config = TrainingConfig(
+        roles={
+            "trainable": ["floor_agent"],
+            "orchestrator_policy": "stub",
+        },
+        rollout={"use_vllm": False},
+    )
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    import training.policy_adapter as policy_module
+
+    class FakeRoleRoutedPolicy:
+        def __init__(self, *, orchestrator_policy, floor_policy):
+            self.orchestrator_policy = orchestrator_policy
+            self.floor_policy = floor_policy
+
+    class FakeStubPolicy:
+        def __init__(self, seed=0):
+            self.seed = seed
+
+    def fake_unsloth_policy_factory(model_name, **kwargs):
+        captured.append((model_name, kwargs))
+        return {"model_name": model_name, "adapter": kwargs.get("lora_adapter_path")}
+
+    monkeypatch.setattr(policy_module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+    monkeypatch.setattr(policy_module, "StubPolicy", FakeStubPolicy)
+    monkeypatch.setattr(policy_module, "unsloth_policy_factory", fake_unsloth_policy_factory)
+
+    policy = train_mod._build_policy(config, None, LoraConfig=SimpleNamespace)
+
+    assert isinstance(policy.orchestrator_policy, FakeStubPolicy)
+    assert policy.orchestrator_policy.seed == config.seed.training_rng
+    assert len(captured) == 1
+    assert captured[0][0] == "Qwen/Qwen2.5-3B-Instruct"
+    assert policy.floor_policy["model_name"] == "Qwen/Qwen2.5-3B-Instruct"
+
+
+def test_build_policy_resumes_floor_only_role_adapter(monkeypatch):
+    tmp_dir = _tmp_dir()
+    try:
+        adapter_root = tmp_dir / "lora_adapter"
+        floor_dir = adapter_root / "floor_agent"
+        floor_dir.mkdir(parents=True)
+
+        config = TrainingConfig(
+            roles={
+                "trainable": ["floor_agent"],
+                "orchestrator_policy": "stub",
+            },
+            rollout={"use_vllm": False},
+        )
+        bundle = SimpleNamespace(
+            lora_weights_path=adapter_root,
+            role_lora_weights_paths={"floor_agent": floor_dir},
+        )
+        captured: list[tuple[str, dict[str, object]]] = []
+
+        import training.policy_adapter as policy_module
+
+        class FakeRoleRoutedPolicy:
+            def __init__(self, *, orchestrator_policy, floor_policy):
+                self.orchestrator_policy = orchestrator_policy
+                self.floor_policy = floor_policy
+
+        class FakeStubPolicy:
+            def __init__(self, seed=0):
+                self.seed = seed
+
+        def fake_unsloth_policy_factory(model_name, **kwargs):
+            captured.append((model_name, kwargs))
+            return {"model_name": model_name, "adapter": kwargs.get("lora_adapter_path")}
+
+        monkeypatch.setattr(policy_module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+        monkeypatch.setattr(policy_module, "StubPolicy", FakeStubPolicy)
+        monkeypatch.setattr(policy_module, "unsloth_policy_factory", fake_unsloth_policy_factory)
+
+        policy = train_mod._build_policy(config, bundle, LoraConfig=SimpleNamespace)
+
+        assert isinstance(policy.orchestrator_policy, FakeStubPolicy)
+        assert len(captured) == 1
+        assert captured[0][1]["lora_adapter_path"] == str(floor_dir)
+        assert policy.floor_policy["adapter"] == str(floor_dir)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_checkpoint_role_metadata_includes_floor_only_specialist() -> None:
+    config = TrainingConfig(
+        roles={
+            "trainable": ["floor_agent"],
+            "orchestrator_policy": "stub",
+        },
+        rollout={"use_vllm": False},
+    )
+
+    assert train_mod._checkpoint_role_model_names(config) == {
+        "orchestrator": "Qwen/Qwen2.5-3B-Instruct",
+        "floor_agent": "Qwen/Qwen2.5-3B-Instruct",
+    }
+    assert train_mod._checkpoint_orchestrator_policy(config) == "stub"
 
 
 def test_merge_trainer_diagnostics_keeps_single_model_fields() -> None:

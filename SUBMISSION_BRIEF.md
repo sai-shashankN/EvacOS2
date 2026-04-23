@@ -8,7 +8,7 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 - More realistic than toy environments: the task is operational coordination under uncertainty, not just label prediction.
 - More verifiable than judge-only scoring: rewards and evaluation are programmatic, with fixed-suite and baseline-vs-trained comparison support.
 - More extensible than a one-model demo: the training stack supports both shared-role and split-role model configurations.
-- More practical than a single monolith: the architecture can train fire/flood/gas specialists while a scope router falls back to the generalist for mixed or cascading incidents.
+- More practical than a single monolith: the architecture can train fire/flood/gas specialists, including cheap `3B` floor-only lanes, while a scope router falls back to the generalist for mixed or cascading incidents.
 
 ## What judges can verify quickly
 
@@ -30,7 +30,7 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 - Real environment loop, not prompt wrapping
 - Multi-agent coordination, not single-policy one-shot response
 - Hierarchical model allocation: stronger orchestrator for long-horizon coordination, faster floor agents for local response
-- Specialist-ready disaster routing: fire/flood/gas lanes can be trained independently and selected deterministically
+- Specialist-ready disaster routing: fire/flood/gas lanes can be trained independently, including `3B` floor-only local-response specialists, and selected deterministically
 - Baseline-vs-trained evidence, not anecdotal samples only
 - Reward-hacking safeguards, not one loose scalar reward
 

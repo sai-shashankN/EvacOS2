@@ -12,6 +12,49 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # EVAL_SEEDS from curriculum — used for validation
 _EVAL_SEEDS_SET = frozenset({42, 123, 456, 789, 1024})
+_ROLE_NAMES = ("orchestrator", "floor_agent")
+RoleName = Literal["orchestrator", "floor_agent"]
+
+
+class RolesConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    trainable: list[RoleName] = Field(
+        default_factory=lambda: ["orchestrator", "floor_agent"]
+    )
+    orchestrator_policy: Literal["model", "stub"] = "model"
+
+    @field_validator("trainable")
+    @classmethod
+    def trainable_roles_must_be_nonempty_and_unique(
+        cls,
+        value: list[RoleName],
+    ) -> list[RoleName]:
+        if not value:
+            raise ValueError("roles.trainable must contain at least one role")
+        duplicates = [
+            role
+            for index, role in enumerate(value)
+            if role in value[:index]
+        ]
+        if duplicates:
+            raise ValueError(
+                f"roles.trainable contains duplicate roles: {sorted(set(duplicates))!r}"
+            )
+        return value
+
+    @property
+    def trainable_set(self) -> set[RoleName]:
+        return set(self.trainable)
+
+    def is_trainable(self, role: RoleName) -> bool:
+        return role in self.trainable_set
+
+    def policy_for_role(self, role: RoleName) -> Literal["model", "stub"]:
+        if role == "orchestrator":
+            return self.orchestrator_policy
+        if role == "floor_agent":
+            return "model"
+        raise ValueError(f"Unknown role {role!r}")
 
 
 class ModelConfig(BaseModel):
@@ -171,6 +214,7 @@ class TrainingConfig(BaseModel):
         return v
 
     model: ModelConfig = Field(default_factory=ModelConfig)
+    roles: RolesConfig = Field(default_factory=RolesConfig)
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     rollout: RolloutConfig = Field(default_factory=RolloutConfig)
     grpo: GRPOConfig = Field(default_factory=GRPOConfig)
@@ -180,6 +224,20 @@ class TrainingConfig(BaseModel):
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     seed: SeedConfig = Field(default_factory=SeedConfig)
 
+    @property
+    def trainable_roles(self) -> tuple[RoleName, ...]:
+        return tuple(self.roles.trainable)
+
+    def is_role_trainable(self, role: RoleName) -> bool:
+        return self.roles.is_trainable(role)
+
+    def policy_for_role(self, role: RoleName) -> Literal["model", "stub"]:
+        return self.roles.policy_for_role(role)
+
+    @property
+    def uses_role_routed_policy(self) -> bool:
+        return self.model.uses_split_bases or self.roles.orchestrator_policy != "model"
+
     @model_validator(mode="after")
     def vllm_requires_unsloth_backend(self) -> "TrainingConfig":
         if self.rollout.use_vllm and self.backend != "unsloth":
@@ -187,5 +245,20 @@ class TrainingConfig(BaseModel):
                 f"rollout.use_vllm=true requires backend='unsloth' "
                 f"(current backend={self.backend!r}); the HF backend has no vLLM path. "
                 f"Either set backend='unsloth' or leave rollout.use_vllm=false."
+            )
+        trainable_roles = self.roles.trainable_set
+        if self.roles.orchestrator_policy == "stub" and "orchestrator" in trainable_roles:
+            raise ValueError(
+                "roles.orchestrator_policy='stub' is incompatible with "
+                "roles.trainable including 'orchestrator'"
+            )
+        if (
+            trainable_roles != set(_ROLE_NAMES)
+            and self.roles.orchestrator_policy != "stub"
+        ):
+            raise ValueError(
+                "Selective roles.trainable currently requires "
+                "roles.orchestrator_policy='stub'; model-backed selective-role "
+                "training is not supported yet."
             )
         return self

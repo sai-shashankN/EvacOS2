@@ -46,6 +46,43 @@ class TestRoleAwareModelConfig:
         assert config.uses_split_bases is True
 
 
+class TestRoleSelectionConfig:
+    def test_training_config_defaults_to_both_trainable_roles(self):
+        config = TrainingConfig()
+
+        assert config.roles.trainable == ["orchestrator", "floor_agent"]
+        assert config.roles.orchestrator_policy == "model"
+        assert config.uses_role_routed_policy is False
+
+    def test_training_config_allows_floor_only_stub_orchestrator_mode(self):
+        config = TrainingConfig(
+            roles={
+                "trainable": ["floor_agent"],
+                "orchestrator_policy": "stub",
+            }
+        )
+
+        assert config.trainable_roles == ("floor_agent",)
+        assert config.policy_for_role("orchestrator") == "stub"
+        assert config.policy_for_role("floor_agent") == "model"
+        assert config.uses_role_routed_policy is True
+
+    def test_training_config_rejects_trainable_stub_orchestrator(self):
+        with pytest.raises(ValidationError) as excinfo:
+            TrainingConfig(
+                roles={
+                    "trainable": ["orchestrator", "floor_agent"],
+                    "orchestrator_policy": "stub",
+                }
+            )
+        assert "orchestrator_policy='stub'" in str(excinfo.value)
+
+    def test_training_config_rejects_selective_model_backed_training(self):
+        with pytest.raises(ValidationError) as excinfo:
+            TrainingConfig(roles={"trainable": ["floor_agent"]})
+        assert "Selective roles.trainable currently requires" in str(excinfo.value)
+
+
 class TestVllmBackendGate:
     def test_vllm_requires_unsloth_backend_rejects_hf(self):
         with pytest.raises(ValidationError) as excinfo:

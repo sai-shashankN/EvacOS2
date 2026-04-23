@@ -210,6 +210,30 @@ def _resolved_role_model_names(config: TrainingConfig) -> dict[str, str]:
     return config.model.resolved_bases()
 
 
+def _checkpoint_role_model_names(config: TrainingConfig) -> dict[str, str] | None:
+    if not config.uses_role_routed_policy:
+        return None
+    return _resolved_role_model_names(config)
+
+
+def _checkpoint_orchestrator_policy(config: TrainingConfig) -> str | None:
+    if not config.uses_role_routed_policy:
+        return None
+    return config.policy_for_role("orchestrator")
+
+
+def _role_uses_model_policy(config: TrainingConfig, role: str) -> bool:
+    return config.policy_for_role(role) == "model"
+
+
+def _model_backed_trainable_roles(config: TrainingConfig) -> tuple[str, ...]:
+    return tuple(
+        role
+        for role in config.trainable_roles
+        if _role_uses_model_policy(config, role)
+    )
+
+
 def _resolved_model_name_tag(config: TrainingConfig) -> str:
     resolved = _resolved_role_model_names(config)
     if resolved["orchestrator"] == resolved["floor_agent"]:
@@ -838,13 +862,22 @@ class MultiAgentGRPOTrainer:
 
 
 class DualRoleGRPOTrainer:
-    """Wrapper that trains orchestrator and floor policies independently."""
+    """Wrapper that trains the available role-specific policies independently."""
 
-    def __init__(self, *, orchestrator_trainer: Any, floor_trainer: Any) -> None:
-        self._role_trainers = {
-            "orchestrator": orchestrator_trainer,
-            "floor_agent": floor_trainer,
-        }
+    def __init__(
+        self,
+        *,
+        orchestrator_trainer: Any | None = None,
+        floor_trainer: Any | None = None,
+        role_trainers: dict[str, Any] | None = None,
+    ) -> None:
+        self._role_trainers: dict[str, Any] = dict(role_trainers or {})
+        if orchestrator_trainer is not None:
+            self._role_trainers["orchestrator"] = orchestrator_trainer
+        if floor_trainer is not None:
+            self._role_trainers["floor_agent"] = floor_trainer
+        if not self._role_trainers:
+            raise ValueError("DualRoleGRPOTrainer requires at least one role trainer")
 
     def trainer_for_role(self, role: str) -> Any:
         if role not in self._role_trainers:
@@ -855,6 +888,8 @@ class DualRoleGRPOTrainer:
         diagnostics: dict[str, Any] = {}
         split_inputs = _split_grouped_inputs_by_role(grouped_inputs)
         for role, role_inputs in split_inputs.items():
+            if role not in self._role_trainers:
+                continue
             if not role_inputs["samples"]:
                 continue
             trainer = self.trainer_for_role(role)
@@ -864,6 +899,31 @@ class DualRoleGRPOTrainer:
                 {f"{role}_{key}": value for key, value in role_diag.items()}
             )
         return diagnostics
+
+
+def _build_role_trainer(
+    *,
+    role: str,
+    role_policy: Any,
+    config: TrainingConfig,
+    optimizer_state: dict | None = None,
+) -> Any:
+    model = _extract_trainer_model(role_policy)
+    tokenizer = _extract_trainer_tokenizer(role_policy)
+    if model is None or tokenizer is None:
+        raise RuntimeError(
+            f"Trainable role {role!r} does not expose model/tokenizer handles "
+            "required by MultiAgentGRPOTrainer."
+        )
+    return MultiAgentGRPOTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        learning_rate=config.grpo.learning_rate,
+        kl_coef=config.grpo.kl_coef,
+        clip_range=config.grpo.clip_range,
+        num_train_epochs_per_step=config.grpo.num_train_epochs_per_step,
+        optimizer_state=optimizer_state,
+    )
 
 
 def _build_grpo_trainer(
@@ -878,28 +938,19 @@ def _build_grpo_trainer(
 
     role_policies = getattr(policy, "_role_policies", None)
     if role_policies is not None:
-        orchestrator_trainer = MultiAgentGRPOTrainer(
-            model=_extract_trainer_model(role_policies["orchestrator"]),
-            tokenizer=_extract_trainer_tokenizer(role_policies["orchestrator"]),
-            learning_rate=config.grpo.learning_rate,
-            kl_coef=config.grpo.kl_coef,
-            clip_range=config.grpo.clip_range,
-            num_train_epochs_per_step=config.grpo.num_train_epochs_per_step,
-            optimizer_state=(role_optimizer_states or {}).get("orchestrator"),
-        )
-        floor_trainer = MultiAgentGRPOTrainer(
-            model=_extract_trainer_model(role_policies["floor_agent"]),
-            tokenizer=_extract_trainer_tokenizer(role_policies["floor_agent"]),
-            learning_rate=config.grpo.learning_rate,
-            kl_coef=config.grpo.kl_coef,
-            clip_range=config.grpo.clip_range,
-            num_train_epochs_per_step=config.grpo.num_train_epochs_per_step,
-            optimizer_state=(role_optimizer_states or {}).get("floor_agent"),
-        )
-        return DualRoleGRPOTrainer(
-            orchestrator_trainer=orchestrator_trainer,
-            floor_trainer=floor_trainer,
-        )
+        role_trainers: dict[str, Any] = {}
+        for role in config.trainable_roles:
+            if role not in role_policies:
+                raise RuntimeError(
+                    f"Policy is missing the trainable role {role!r}; cannot build GRPO trainer."
+                )
+            role_trainers[role] = _build_role_trainer(
+                role=role,
+                role_policy=role_policies[role],
+                config=config,
+                optimizer_state=(role_optimizer_states or {}).get(role),
+            )
+        return DualRoleGRPOTrainer(role_trainers=role_trainers)
 
     trainer_model = _extract_trainer_model(policy)
     tokenizer = _extract_trainer_tokenizer(policy)
@@ -1220,23 +1271,36 @@ def _build_policy(
                         f"{path!s} but that directory does not exist."
                     )
                 role_lora_adapter_paths[role] = str(path)
-        elif config.model.uses_split_bases:
-            for role in ("orchestrator", "floor_agent"):
+        elif config.uses_role_routed_policy:
+            for role in _model_backed_trainable_roles(config):
                 role_dir = bundle.lora_weights_path / role
-                if not role_dir.exists():
-                    raise RuntimeError(
-                        f"Checkpoint bundle expected split-role adapter at {role_dir!s} "
-                        f"for role {role!r}, but that directory does not exist."
-                    )
-                role_lora_adapter_paths[role] = str(role_dir)
+                if role_dir.exists():
+                    role_lora_adapter_paths[role] = str(role_dir)
+
+        missing_role_paths = [
+            role
+            for role in _model_backed_trainable_roles(config)
+            if role not in role_lora_adapter_paths
+        ]
+        if config.uses_role_routed_policy and missing_role_paths:
+            raise RuntimeError(
+                "Checkpoint bundle is missing adapter weights for trainable role(s): "
+                f"{missing_role_paths!r}"
+            )
 
     backend = config.backend
     if backend == "unsloth":
-        from training.policy_adapter import RoleRoutedPolicy, unsloth_policy_factory
+        from training.policy_adapter import (
+            RoleRoutedPolicy,
+            StubPolicy,
+            unsloth_policy_factory,
+        )
 
-        if config.model.uses_split_bases:
-            return RoleRoutedPolicy(
-                orchestrator_policy=unsloth_policy_factory(
+        if config.uses_role_routed_policy:
+            if config.policy_for_role("orchestrator") == "stub":
+                orchestrator_policy = StubPolicy(seed=config.seed.training_rng)
+            else:
+                orchestrator_policy = unsloth_policy_factory(
                     resolved_models["orchestrator"],
                     lora_adapter_path=role_lora_adapter_paths.get("orchestrator"),
                     lora_r=config.lora.rank,
@@ -1250,7 +1314,9 @@ def _build_policy(
                     max_new_tokens=config.model.max_completion_tokens,
                     temperature=0.0,
                     seed=config.seed.training_rng,
-                ),
+                )
+            return RoleRoutedPolicy(
+                orchestrator_policy=orchestrator_policy,
                 floor_policy=unsloth_policy_factory(
                     resolved_models["floor_agent"],
                     lora_adapter_path=role_lora_adapter_paths.get("floor_agent"),
@@ -1284,7 +1350,7 @@ def _build_policy(
             seed=config.seed.training_rng,
         )
     if backend == "hf":
-        from training.policy_adapter import RoleRoutedPolicy, hf_policy_factory
+        from training.policy_adapter import RoleRoutedPolicy, StubPolicy, hf_policy_factory
 
         peft_config = None
         if lora_adapter_path is None:
@@ -1295,24 +1361,34 @@ def _build_policy(
                 lora_dropout=config.lora.dropout,
             )
 
-        if config.model.uses_split_bases:
+        if config.uses_role_routed_policy:
             orchestrator_peft = None
             floor_peft = None
-            if not role_lora_adapter_paths:
+            if (
+                config.is_role_trainable("orchestrator")
+                and config.policy_for_role("orchestrator") == "model"
+                and role_lora_adapter_paths.get("orchestrator") is None
+            ):
                 orchestrator_peft = LoraConfig(
                     r=config.lora.rank,
                     lora_alpha=config.lora.alpha,
                     target_modules=list(config.lora.target_modules),
                     lora_dropout=config.lora.dropout,
                 )
+            if (
+                config.is_role_trainable("floor_agent")
+                and role_lora_adapter_paths.get("floor_agent") is None
+            ):
                 floor_peft = LoraConfig(
                     r=config.lora.rank,
                     lora_alpha=config.lora.alpha,
                     target_modules=list(config.lora.target_modules),
                     lora_dropout=config.lora.dropout,
                 )
-            return RoleRoutedPolicy(
-                orchestrator_policy=hf_policy_factory(
+            if config.policy_for_role("orchestrator") == "stub":
+                orchestrator_policy = StubPolicy(seed=config.seed.training_rng)
+            else:
+                orchestrator_policy = hf_policy_factory(
                     resolved_models["orchestrator"],
                     lora_adapter_path=role_lora_adapter_paths.get("orchestrator"),
                     peft_config=orchestrator_peft,
@@ -1320,7 +1396,9 @@ def _build_policy(
                     max_prompt_tokens=config.model.max_prompt_tokens,
                     max_new_tokens=config.model.max_completion_tokens,
                     do_sample=False,
-                ),
+                )
+            return RoleRoutedPolicy(
+                orchestrator_policy=orchestrator_policy,
                 floor_policy=hf_policy_factory(
                     resolved_models["floor_agent"],
                     lora_adapter_path=role_lora_adapter_paths.get("floor_agent"),
@@ -1510,7 +1588,8 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
         optimizer_state=bundle.optimizer_state if bundle is not None else None,
         role_optimizer_states=bundle.role_optimizer_states if bundle is not None else None,
     )
-    role_model_names = _resolved_role_model_names(config)
+    checkpoint_role_model_names = _checkpoint_role_model_names(config)
+    checkpoint_orchestrator_policy = _checkpoint_orchestrator_policy(config)
     model_name = _resolved_model_name_tag(config)
     config_hash = _config_hash(config)
     disaster_families = [DisasterType(item) for item in config.rollout.disaster_families]
@@ -1561,7 +1640,8 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             model_name=model_name,
             config_hash=config_hash,
             role_lora_weights_paths=role_adapter_paths,
-            role_model_names=role_model_names if config.model.uses_split_bases else None,
+            role_model_names=checkpoint_role_model_names,
+            orchestrator_policy=checkpoint_orchestrator_policy,
             optimizer_state=optimizer_state,
             role_optimizer_states=role_optimizer_states,
             torch_rng_state=torch_rng_bytes,
