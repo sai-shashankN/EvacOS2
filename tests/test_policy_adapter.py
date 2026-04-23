@@ -205,6 +205,58 @@ class TestParseCompletionToAction:
         assert action is None
         assert reason == "invalid_json"
 
+    def test_prose_wrapped_json_is_salvaged(self):
+        completion = """I think the best move is:
+
+        {
+          "episode_id": "ep1",
+          "round_id": 0,
+          "agent_id": "orchestrator",
+          "action_id": "a1",
+          "action_type": "wait",
+          "arguments": {}
+        }
+        """
+
+        action, reason = parse_completion_to_action(
+            completion,
+            "orchestrator",
+            "orchestrator",
+            "ep1",
+            0,
+        )
+
+        assert reason == "ok"
+        assert action is not None
+        assert action.action_type.value == "wait"
+
+    def test_fenced_json_is_salvaged(self):
+        completion = """Sure, here is the action:
+
+        ```json
+        {
+          "episode_id": "ep1",
+          "round_id": 0,
+          "agent_id": "floor_0_agent",
+          "action_id": "a2",
+          "action_type": "wait",
+          "arguments": {}
+        }
+        ```
+        """
+
+        action, reason = parse_completion_to_action(
+            completion,
+            "floor_0_agent",
+            "floor_agent",
+            "ep1",
+            0,
+        )
+
+        assert reason == "ok"
+        assert action is not None
+        assert action.agent_id == "floor_0_agent"
+
     def test_role_forbidden_floor_broadcast_directive(self):
         """parse_completion_to_action returns (None, 'role_forbidden') when a floor agent
         emits broadcast_directive."""

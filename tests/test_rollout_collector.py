@@ -369,6 +369,53 @@ class TestParseFallback:
         # Every sample should be present (no crash)
         assert len(result.samples) == result.num_rounds * 6
 
+    def test_action_trace_captures_parse_status_and_completion_text(self):
+        """action_trace should preserve the raw completion plus parser reason for diagnosis."""
+
+        class MixedPolicy:
+            def act(self, prompt, agent_id, role):
+                del prompt
+                if role == "orchestrator":
+                    return """Action:
+                    {
+                      "episode_id": "ep_trace",
+                      "round_id": 0,
+                      "agent_id": "orchestrator",
+                      "action_id": "orch_wait",
+                      "action_type": "wait",
+                      "arguments": {}
+                    }
+                    """
+                return "THIS IS NOT VALID JSON !!!"
+
+        env = _make_env()
+        logs_dir = _tmp_logs_dir()
+        try:
+            collect_episode(
+                env,
+                MixedPolicy(),
+                seed=31,
+                tier="easy",
+                disaster_family=DisasterType.fire,
+                max_rounds=1,
+                jsonl_dir=logs_dir,
+            )
+            rows = [
+                json.loads(line)
+                for line in (logs_dir / "action_trace.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+            orch_row = next(row for row in rows if row["agent_id"] == "orchestrator")
+            floor_row = next(row for row in rows if row["agent_id"] != "orchestrator")
+
+            assert orch_row["parse_status"] == "ok"
+            assert "\"action_type\": \"wait\"" in orch_row["completion_text"]
+            assert floor_row["parse_status"] == "invalid_json"
+            assert floor_row["completion_text"] == "THIS IS NOT VALID JSON !!!"
+        finally:
+            shutil.rmtree(logs_dir, ignore_errors=True)
+
 
 class TestCiviliansSavedLost:
     def test_episode_summary_has_real_civilian_counts(self):

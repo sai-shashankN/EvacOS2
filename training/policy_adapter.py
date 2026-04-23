@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence, runtime_checkable
 
@@ -36,6 +37,7 @@ PolicyResult = tuple[str, list[int]]
 logger = logging.getLogger(__name__)
 
 _PROMPT_TRUNCATION_WARNED = False
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 
 
 def _as_policy_result(result: PolicyResult | str | object) -> PolicyResult:
@@ -99,6 +101,66 @@ def _warn_once_if_prompt_truncated(
             max_prompt_tokens,
         )
         _PROMPT_TRUNCATION_WARNED = True
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    """Return the first balanced JSON object found in text, if any."""
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1]
+
+    return None
+
+
+def _json_payload_candidates(completion_text: str) -> list[str]:
+    """Yield likely JSON payloads from a model completion, in priority order."""
+    stripped = completion_text.strip()
+    if not stripped:
+        return []
+
+    candidates: list[str] = []
+
+    def _append(candidate: str | None) -> None:
+        if candidate is None:
+            return
+        normalized = candidate.strip()
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    _append(stripped)
+
+    fenced_blocks = _JSON_FENCE_RE.findall(stripped)
+    for block in fenced_blocks:
+        _append(block)
+
+    _append(_extract_first_json_object(stripped))
+    for block in fenced_blocks:
+        _append(_extract_first_json_object(block))
+
+    return candidates
 
 
 @runtime_checkable
@@ -329,18 +391,14 @@ def parse_completion_to_action(
     expected_episode_id: str,
     expected_round_id: int,
 ) -> tuple[ActionEnvelopeMA | None, str]:
-    text = completion_text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-
-    try:
-        payload = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
+    payload: Any | None = None
+    for candidate in _json_payload_candidates(completion_text):
+        try:
+            payload = json.loads(candidate)
+            break
+        except (json.JSONDecodeError, ValueError):
+            continue
+    if payload is None:
         return None, "invalid_json"
 
     try:

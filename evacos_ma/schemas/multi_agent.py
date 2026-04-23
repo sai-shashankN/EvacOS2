@@ -564,6 +564,8 @@ class ActionTraceRow(TraceRowCommon):
     arguments: dict[str, Any] = Field(default_factory=dict)
     valid: bool = True
     rejection_reason: Optional[str] = None
+    parse_status: Optional[str] = None
+    completion_text: Optional[str] = None
 
 
 class RewardTraceRow(TraceRowCommon):

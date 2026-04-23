@@ -859,8 +859,113 @@ class TestDiagnostics:
         )
         assert result["num_inner_epochs"] == 3
 
-    def test_step_uses_eval_mode_for_old_ref_and_new_logprobs(self) -> None:
-        """Old/ref/new log-prob passes should all run with dropout disabled."""
+    def test_trainer_init_disables_dropout_modules_without_eval_mode(self) -> None:
+        """Dropout should be zeroed without relying on model.eval()."""
+        from training.train import MultiAgentGRPOTrainer
+
+        param_mock = MagicMock()
+        param_mock.device = "cpu"
+        param_mock.requires_grad = True
+
+        class FakeDropout:
+            def __init__(self, p: float) -> None:
+                self.p = p
+
+        class _FakeModel:
+            def __init__(self) -> None:
+                self.training = True
+                self._dropout = FakeDropout(0.25)
+
+            def eval(self):
+                self.training = False
+                return self
+
+            def train(self, mode: bool = True):
+                self.training = mode
+                return self
+
+            def parameters(self):
+                return iter([param_mock])
+
+            def named_parameters(self):
+                return iter([("lora_a.weight", param_mock)])
+
+            def modules(self):
+                return iter([self, self._dropout])
+
+            @contextmanager
+            def disable_adapter(self):
+                yield self
+
+        model = _FakeModel()
+        tokenizer = MagicMock()
+        tokenizer.pad_token = "[PAD]"
+
+        trainer = MultiAgentGRPOTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            learning_rate=1e-4,
+            kl_coef=0.04,
+            clip_range=0.2,
+            num_train_epochs_per_step=1,
+        )
+        assert model._dropout.p == 0.0
+        assert model.training is True
+
+    def test_trainer_init_reenables_gradient_checkpointing_when_available(self) -> None:
+        """Checkpoint reloads should re-arm gradient checkpointing hooks."""
+        from training.train import MultiAgentGRPOTrainer
+
+        param_mock = MagicMock()
+        param_mock.device = "cpu"
+        param_mock.requires_grad = True
+
+        class _FakeModel:
+            def __init__(self) -> None:
+                self.training = True
+                self.gradient_checkpointing_enable_calls = 0
+
+            def eval(self):
+                self.training = False
+                return self
+
+            def train(self, mode: bool = True):
+                self.training = mode
+                return self
+
+            def gradient_checkpointing_enable(self):
+                self.gradient_checkpointing_enable_calls += 1
+
+            def parameters(self):
+                return iter([param_mock])
+
+            def named_parameters(self):
+                return iter([("lora_a.weight", param_mock)])
+
+            def modules(self):
+                return iter([self])
+
+            @contextmanager
+            def disable_adapter(self):
+                yield self
+
+        model = _FakeModel()
+        tokenizer = MagicMock()
+        tokenizer.pad_token = "[PAD]"
+
+        MultiAgentGRPOTrainer(
+            model=model,
+            tokenizer=tokenizer,
+            learning_rate=1e-4,
+            kl_coef=0.04,
+            clip_range=0.2,
+            num_train_epochs_per_step=1,
+        )
+
+        assert model.gradient_checkpointing_enable_calls == 1
+
+    def test_step_keeps_training_mode_for_old_ref_and_new_logprobs(self) -> None:
+        """Unsloth backward requires the GRPO loss path to stay in train mode."""
         from training.train import MultiAgentGRPOTrainer
 
         ft = sys.modules["torch"]
@@ -894,6 +999,9 @@ class TestDiagnostics:
 
             def named_parameters(self):
                 return iter([("lora_a.weight", param_mock)])
+
+            def modules(self):
+                return iter([self])
 
             @contextmanager
             def disable_adapter(self):
@@ -932,6 +1040,6 @@ class TestDiagnostics:
 
         result = trainer.step(grouped_inputs=grouped)
 
-        assert observed_training_flags == [False, False, False]
+        assert observed_training_flags == [True, True, True]
         assert model.training is True
         assert abs(result["ratio_mean"] - 1.0) < 1e-6

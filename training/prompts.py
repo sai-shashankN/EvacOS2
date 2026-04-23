@@ -87,10 +87,11 @@ def build_floor_prompt(
 
     response_format = (
         "\n### Response format\n"
-        "Respond with a SINGLE JSON object matching ActionEnvelopeMA. No prose, no code fences.\n"
+        "Respond with a SINGLE compact JSON object matching ActionEnvelopeMA. "
+        "No prose, no markdown, no code fences, and keep it on one line.\n"
         "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
-        "action_type (one of the allowed actions), arguments (dict), "
-        "rationale (optional string), client_metadata (optional dict).\n"
+        "action_type (one of the allowed actions), arguments (dict).\n"
+        "Optional keys: rationale, client_metadata. Omit optional keys unless they are needed.\n"
         f"Prompt template version: {version}"
     )
 
@@ -172,10 +173,11 @@ def build_orchestrator_prompt(
 
     response_format = (
         "\n### Response format\n"
-        "Respond with a SINGLE JSON object matching ActionEnvelopeMA. No prose, no code fences.\n"
+        "Respond with a SINGLE compact JSON object matching ActionEnvelopeMA. "
+        "No prose, no markdown, no code fences, and keep it on one line.\n"
         "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
-        "action_type (one of the allowed actions), arguments (dict), "
-        "rationale (optional string), client_metadata (optional dict).\n"
+        "action_type (one of the allowed actions), arguments (dict).\n"
+        "Optional keys: rationale, client_metadata. Omit optional keys unless they are needed.\n"
         f"Prompt template version: {version}"
     )
 

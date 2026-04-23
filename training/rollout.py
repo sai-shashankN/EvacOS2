@@ -223,6 +223,7 @@ def _emit_round_artifacts(
     reward_rows: list[tuple[str, float, float, dict]],
     belief_rows: list[dict],
     rationale_rows: list[dict],
+    completion_rows: dict[str, dict[str, object]],
 ) -> None:
     per_floor_civilians, per_floor_hazard_severity = _build_round_state_payload(env, episode_id)
     round_id = int(common.get("round_id", 0))
@@ -258,6 +259,7 @@ def _emit_round_artifacts(
     for agent_id, action in [("orchestrator", orchestrator_action), *sorted(floor_actions.items())]:
         parsed = action.model_dump(mode="json")
         valid = "fallback_reason" not in parsed
+        completion_row = completion_rows.get(agent_id, {})
         write_trace_row(
             jsonl_dir / "action_trace.jsonl",
             {
@@ -268,6 +270,8 @@ def _emit_round_artifacts(
                 "arguments": action.arguments,
                 "valid": valid,
                 "rejection_reason": parsed.get("fallback_reason"),
+                "parse_status": completion_row.get("parse_status"),
+                "completion_text": completion_row.get("completion_text"),
             },
         )
 
@@ -385,7 +389,8 @@ def collect_episode(
                 floor_completions = {aid: result[0] for aid, result in floor_results.items()}
                 floor_completion_ids = {aid: result[1] for aid, result in floor_results.items()}
 
-            orch_action, _ = parse_completion_to_action(
+            orch_parse_status = "ok"
+            orch_action, orch_parse_status = parse_completion_to_action(
                 orch_completion,
                 "orchestrator",
                 "orchestrator",
@@ -398,10 +403,11 @@ def collect_episode(
 
             floor_actions: dict[str, ActionEnvelopeMA] = {}
             floor_payloads: dict[str, tuple[str, list[dict[str, str]]]] = {}
+            floor_parse_statuses: dict[str, str] = {}
             for agent_id in floor_ids:
                 floor_prompt = floor_prompts[agent_id]
                 floor_completion = floor_completions[agent_id]
-                floor_action, _ = parse_completion_to_action(
+                floor_action, floor_parse_status = parse_completion_to_action(
                     floor_completion,
                     agent_id,
                     "floor_agent",
@@ -413,6 +419,7 @@ def collect_episode(
                     floor_action.fallback_reason = "parse_error"
                 floor_actions[agent_id] = floor_action
                 floor_payloads[agent_id] = (floor_completion, floor_prompt)
+                floor_parse_statuses[agent_id] = floor_parse_status
 
             result = env.step_multi_agent(
                 ActionBundleMA(
@@ -580,6 +587,19 @@ def collect_episode(
                 reward_rows=reward_rows,
                 belief_rows=belief_rows,
                 rationale_rows=rationale_rows,
+                completion_rows={
+                    "orchestrator": {
+                        "completion_text": orch_completion,
+                        "parse_status": orch_parse_status,
+                    },
+                    **{
+                        agent_id: {
+                            "completion_text": floor_payloads[agent_id][0],
+                            "parse_status": floor_parse_statuses[agent_id],
+                        }
+                        for agent_id in floor_ids
+                    },
+                },
             )
 
             obs_by_role = result.observations_by_role

@@ -136,6 +136,52 @@ def _extract_trainer_tokenizer(policy: Any) -> Any:
     return getattr(policy, "_tokenizer", None)
 
 
+def _disable_dropout_modules(model: Any) -> None:
+    """Disable dropout without forcing the full model into eval mode.
+
+    Unsloth's training kernels can fail backward when the GRPO loss path runs
+    under ``model.eval()``. For stable ratios we still want dropout off, so we
+    zero module dropout probabilities once and keep the model in training mode.
+    """
+    modules = getattr(model, "modules", None)
+    if modules is None:
+        return
+
+    for module in modules():
+        dropout_p = getattr(module, "p", None)
+        if dropout_p is None:
+            continue
+        module_name = type(module).__name__.lower()
+        if "dropout" in module_name:
+            try:
+                module.p = 0.0
+            except Exception:
+                continue
+
+
+def _enable_gradient_checkpointing_if_available(model: Any) -> None:
+    """Re-arm gradient checkpointing hooks after Unsloth / adapter reloads."""
+    seen: set[int] = set()
+    for candidate in (model, getattr(model, "model", None)):
+        if candidate is None:
+            continue
+        candidate_id = id(candidate)
+        if candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+
+        enable = getattr(candidate, "gradient_checkpointing_enable", None)
+        if not callable(enable):
+            continue
+        try:
+            enable()
+        except TypeError:
+            try:
+                enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+            except TypeError:
+                continue
+
+
 def _resolved_role_model_names(config: TrainingConfig) -> dict[str, str]:
     return config.model.resolved_bases()
 
@@ -196,6 +242,8 @@ class MultiAgentGRPOTrainer:
             )
         except Exception:
             self.model.train()
+        _enable_gradient_checkpointing_if_available(self.model)
+        _disable_dropout_modules(self.model)
 
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
         if not trainable_params:
@@ -545,13 +593,11 @@ class MultiAgentGRPOTrainer:
         completion_mask = (shifted_labels != -100).float()  # (S, L-1)
         self._step_counter += 1
 
-        # Fix H3/H28: keep model in eval mode for ALL forward passes so that
-        # dropout is disabled and old_lp/new_lp/ref_lp are computed under the
-        # same deterministic regime.  Gradients still flow via requires_grad
-        # on LoRA parameters — eval mode only disables dropout/batchnorm
-        # running-stats, which is exactly what we want for stable ratios.
+        # Keep the model on the training path for Unsloth compatibility.
+        # Dropout was already zeroed in __init__, so old/ref/new log-probs are
+        # still computed deterministically without switching to eval mode.
         previous_training_mode = self.model.training
-        self.model.eval()
+        self.model.train()
         try:
 
         # --- 1. Old log-probs: frozen, captured ONCE -----------------------
