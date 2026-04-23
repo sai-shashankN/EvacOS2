@@ -51,6 +51,17 @@ def _load_csv(path: Path) -> list[dict] | None:
         return list(csv.DictReader(handle))
 
 
+def _resolve_training_metrics_path(base_dir: Path, metrics_path: Path | None = None) -> Path:
+    if metrics_path is not None:
+        return metrics_path
+
+    default_candidate = Path("outputs/training/metrics.csv")
+    base_dir_candidate = base_dir.parent / "training" / "metrics.csv"
+    if base_dir_candidate.exists():
+        return base_dir_candidate
+    return default_candidate
+
+
 def _safe_mean(values: list[float]) -> float:
     if not values:
         return float("nan")
@@ -66,11 +77,10 @@ def _safe_nanmean(values: list[float]) -> float:
     return float(np.nanmean(arr))
 
 
-def make_reward_curve(base_dir: Path) -> Path | None:
+def make_reward_curve(base_dir: Path, *, metrics_path: Path | None = None) -> Path | None:
     if not _ready():
         return None
-    metrics_path = Path("outputs/training/metrics.csv")
-    rows = _load_csv(metrics_path)
+    rows = _load_csv(_resolve_training_metrics_path(base_dir, metrics_path))
     if not rows:
         return None
     output = base_dir / "plots" / "reward_curve.png"
@@ -232,9 +242,9 @@ def make_rollout_wall_clock_histogram(base_dir: Path) -> Path | None:
     return output
 
 
-def make_all_plots(base_dir: Path) -> list[Path | None]:
+def make_all_plots(base_dir: Path, *, metrics_path: Path | None = None) -> list[Path | None]:
     return [
-        make_reward_curve(base_dir),
+        make_reward_curve(base_dir, metrics_path=metrics_path),
         make_baseline_vs_trained_bar(base_dir),
         make_invalid_action_rate_plot(base_dir),
         make_override_win_rate_plot(base_dir),

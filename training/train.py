@@ -20,6 +20,30 @@ from training.compat import patch_transformers_cache_exports
 from training.config_schema import TrainingConfig
 from training.metrics import append_training_metrics_row
 
+_TRAINER_DIAGNOSTIC_KEYS: tuple[str, ...] = (
+    "loss",
+    "policy_loss",
+    "kl_loss",
+    "ratio_mean",
+    "ratio_std",
+    "clip_fraction",
+    "kl_max",
+    "mask_coverage",
+    "mean_advantage",
+    "advantage_std",
+    "loss_mean_across_epochs",
+    "policy_loss_mean_across_epochs",
+    "kl_loss_mean_across_epochs",
+    "ratio_mean_across_epochs",
+    "ratio_std_mean_across_epochs",
+    "clip_fraction_mean_across_epochs",
+    "kl_max_across_epochs",
+    "num_inner_epochs",
+)
+_ROLE_DIAGNOSTIC_ROLES: tuple[str, ...] = ("orchestrator", "floor_agent")
+_TRAINER_DIAGNOSTIC_MAX_KEYS: frozenset[str] = frozenset({"kl_max", "kl_max_across_epochs"})
+_TRAINER_DIAGNOSTIC_INT_KEYS: frozenset[str] = frozenset({"num_inner_epochs"})
+
 
 def _load_yaml_config(config_path: Path) -> dict:
     """Load a YAML config file without requiring PyYAML at import time."""
@@ -194,6 +218,64 @@ def _resolved_model_name_tag(config: TrainingConfig) -> str:
         f"orchestrator={resolved['orchestrator']};"
         f"floor_agent={resolved['floor_agent']}"
     )
+
+
+def _merge_trainer_diagnostics_into_metrics(
+    metrics_row: dict[str, Any],
+    trainer_diagnostics: dict[str, Any],
+) -> None:
+    """Copy trainer diagnostics into the metrics row.
+
+    Split-role runs emit per-role diagnostics like ``orchestrator_loss`` and
+    ``floor_agent_loss``. For plotting compatibility we also synthesize the
+    canonical aggregate keys (``loss``, ``ratio_mean``, etc.) from those
+    per-role values while preserving the role-specific columns.
+    """
+
+    if not trainer_diagnostics:
+        return
+
+    for role in _ROLE_DIAGNOSTIC_ROLES:
+        sample_key = f"{role}_sample_groups"
+        if sample_key in trainer_diagnostics:
+            metrics_row[sample_key] = trainer_diagnostics[sample_key]
+
+    role_weights: dict[str, float] = {}
+    for role in _ROLE_DIAGNOSTIC_ROLES:
+        weight = trainer_diagnostics.get(f"{role}_sample_groups")
+        if isinstance(weight, (int, float)) and weight > 0:
+            role_weights[role] = float(weight)
+
+    for key in _TRAINER_DIAGNOSTIC_KEYS:
+        if key in trainer_diagnostics:
+            metrics_row[key] = trainer_diagnostics[key]
+            continue
+
+        role_values: list[tuple[str, float]] = []
+        for role in _ROLE_DIAGNOSTIC_ROLES:
+            role_key = f"{role}_{key}"
+            if role_key in trainer_diagnostics:
+                value = trainer_diagnostics[role_key]
+                metrics_row[role_key] = value
+                if isinstance(value, (int, float)):
+                    role_values.append((role, float(value)))
+
+        if not role_values:
+            continue
+
+        if key in _TRAINER_DIAGNOSTIC_MAX_KEYS:
+            metrics_row[key] = max(value for _, value in role_values)
+            continue
+
+        if key in _TRAINER_DIAGNOSTIC_INT_KEYS:
+            metrics_row[key] = int(max(value for _, value in role_values))
+            continue
+
+        total_weight = sum(role_weights.get(role, 1.0) for role, _ in role_values)
+        weighted_total = sum(
+            value * role_weights.get(role, 1.0) for role, value in role_values
+        )
+        metrics_row[key] = weighted_total / max(total_weight, 1.0)
 
 
 class MultiAgentGRPOTrainer:
@@ -1495,18 +1577,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 **rollout_metrics,
                 "episodes_seen": (step + 1) * config.rollout.episodes_per_step,
             }
-            # Merge trainer diagnostics (loss, kl, ratio stats, etc.)
-            for _diag_key in (
-                "loss", "policy_loss", "kl_loss",
-                "ratio_mean", "ratio_std", "clip_fraction",
-                "kl_max", "mask_coverage", "mean_advantage", "advantage_std",
-                "loss_mean_across_epochs", "policy_loss_mean_across_epochs",
-                "kl_loss_mean_across_epochs", "ratio_mean_across_epochs",
-                "ratio_std_mean_across_epochs", "clip_fraction_mean_across_epochs",
-                "kl_max_across_epochs", "num_inner_epochs",
-            ):
-                if _diag_key in trainer_diagnostics:
-                    metrics_row[_diag_key] = trainer_diagnostics[_diag_key]
+            _merge_trainer_diagnostics_into_metrics(metrics_row, trainer_diagnostics)
             append_training_metrics_row(metrics_path, metrics_row)
             if wandb_run is not None:
                 wandb_run.log(metrics_row, step=step)

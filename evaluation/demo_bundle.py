@@ -297,6 +297,7 @@ def build_demo_bundle(
     rationale_mode: str = "linear_capped",
     output_dir: Path = Path("outputs/demo_bundle"),
     skip_trained: bool = False,
+    training_metrics_path: Path | None = None,
     trained_normalizer_snapshot: dict | None = None,
 ) -> DemoBundleResult:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -310,7 +311,11 @@ def build_demo_bundle(
         skip_trained=skip_trained,
         trained_normalizer_snapshot=trained_normalizer_snapshot,
     )
-    plot_paths = [path for path in make_all_plots(output_dir) if path is not None]
+    plot_paths = [
+        path
+        for path in make_all_plots(output_dir, metrics_path=training_metrics_path)
+        if path is not None
+    ]
     baseline_payload = _load_json(comparison.baseline_json)
     trained_payload = _load_json(comparison.trained_json)
     summary_md = _write_summary_markdown(
@@ -363,6 +368,12 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip trained comparison and build a baseline-only bundle.",
     )
+    parser.add_argument(
+        "--training-metrics-path",
+        type=Path,
+        default=None,
+        help="Optional path to the training metrics CSV for reward-curve plotting.",
+    )
     return parser.parse_args()
 
 
@@ -373,6 +384,7 @@ def main() -> None:
         output_dir=args.output_dir,
         rationale_mode=args.rationale_mode,
         skip_trained=args.skip_trained,
+        training_metrics_path=args.training_metrics_path,
     )
     print(result.scorecard_md)
     print(result.summary_md)

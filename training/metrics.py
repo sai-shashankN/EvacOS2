@@ -14,21 +14,7 @@ from pathlib import Path
 # CSV training metrics
 # ---------------------------------------------------------------------------
 
-# Canonical column order for metrics.csv
-_METRICS_COLUMNS: list[str] = [
-    "step",
-    "wall_seconds",
-    "tier_mix",
-    "mean_raw_reward_orch",
-    "mean_raw_reward_floor",
-    "mean_norm_reward_orch",
-    "mean_norm_reward_floor",
-    "invalid_action_rate",
-    "override_rate",
-    "override_win_rate",
-    "rationale_bonus_mean",
-    "episodes_seen",
-    # Trainer diagnostics (merged from MultiAgentGRPOTrainer.step return)
+_TRAINER_DIAGNOSTIC_COLUMNS: list[str] = [
     "loss",
     "policy_loss",
     "kl_loss",
@@ -47,6 +33,34 @@ _METRICS_COLUMNS: list[str] = [
     "clip_fraction_mean_across_epochs",
     "kl_max_across_epochs",
     "num_inner_epochs",
+]
+
+_ROLE_DIAGNOSTIC_COLUMNS: list[str] = []
+for _role in ("orchestrator", "floor_agent"):
+    _ROLE_DIAGNOSTIC_COLUMNS.append(f"{_role}_sample_groups")
+    _ROLE_DIAGNOSTIC_COLUMNS.extend(
+        f"{_role}_{column}" for column in _TRAINER_DIAGNOSTIC_COLUMNS
+    )
+
+
+# Canonical column order for metrics.csv
+_METRICS_COLUMNS: list[str] = [
+    "step",
+    "wall_seconds",
+    "tier_mix",
+    "mean_raw_reward_orch",
+    "mean_raw_reward_floor",
+    "mean_norm_reward_orch",
+    "mean_norm_reward_floor",
+    "invalid_action_rate",
+    "override_rate",
+    "override_win_rate",
+    "rationale_bonus_mean",
+    "episodes_seen",
+    # Trainer diagnostics (merged from MultiAgentGRPOTrainer.step return)
+    *_TRAINER_DIAGNOSTIC_COLUMNS,
+    # Split-role trainer diagnostics (kept alongside aggregate fields).
+    *_ROLE_DIAGNOSTIC_COLUMNS,
 ]
 
 
