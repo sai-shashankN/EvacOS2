@@ -8,6 +8,7 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 - More realistic than toy environments: the task is operational coordination under uncertainty, not just label prediction.
 - More verifiable than judge-only scoring: rewards and evaluation are programmatic, with fixed-suite and baseline-vs-trained comparison support.
 - More extensible than a one-model demo: the training stack supports both shared-role and split-role model configurations.
+- More practical than a single monolith: the architecture can train fire/flood/gas specialists while a scope router falls back to the generalist for mixed or cascading incidents.
 
 ## What judges can verify quickly
 
@@ -28,6 +29,8 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 
 - Real environment loop, not prompt wrapping
 - Multi-agent coordination, not single-policy one-shot response
+- Hierarchical model allocation: stronger orchestrator for long-horizon coordination, faster floor agents for local response
+- Specialist-ready disaster routing: fire/flood/gas lanes can be trained independently and selected deterministically
 - Baseline-vs-trained evidence, not anecdotal samples only
 - Reward-hacking safeguards, not one loose scalar reward
 
@@ -36,7 +39,8 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 1. Open `submission_scorecard.md`.
 2. Show the baseline-vs-trained delta summary.
 3. Explain the verifier-style reward stack and safeguards.
-4. Show one live OpenEnv interaction.
+4. Show the hierarchy: `7B` orchestrator, `3B` floor agents, and optional disaster-specialist routing.
+5. Show one live OpenEnv interaction.
 
 ## Repo landmarks
 
@@ -44,3 +48,4 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 - Hackathon runbook: [HACKATHON.md](/C:/Users/LENOVO/Specializations/Competitions/Scaler/HACKATHON.md)
 - Demo bundle builder: [evaluation/demo_bundle.py](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evaluation/demo_bundle.py)
 - Fixed-suite evaluation: [evaluation/fixed_suite.py](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evaluation/fixed_suite.py)
+- Scope router: [training/scope_router.py](/C:/Users/LENOVO/Specializations/Competitions/Scaler/training/scope_router.py)

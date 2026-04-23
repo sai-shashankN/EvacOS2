@@ -35,6 +35,8 @@ def test_run_fixed_suite_returns_single_episode():
         assert isinstance(result, FixedSuiteResult)
         assert len(result.episodes) == 1
         assert result.env_side_rationale_wired is True
+        assert result.episodes[0].scope_policy_key == "fire_specialist"
+        assert result.episodes[0].scope_route_reason == "single_family_fire"
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -198,5 +200,39 @@ def test_fixed_suite_traces_honor_output_dir(monkeypatch):
         assert (tmp_dir / "logs").exists()
         assert any((tmp_dir / "logs" / name).exists() for name in ("round_trace.jsonl", "action_trace.jsonl", "episode_summary.jsonl"))
         assert recorded["jsonl_dir"] != Path("outputs/logs")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_fixed_suite_can_use_scope_aware_policy_factory():
+    class ScopeAwareFactory:
+        def __init__(self) -> None:
+            self.decisions = []
+
+        def for_scope(self, decision):
+            self.decisions.append(decision)
+            return StubPolicy(seed=0)
+
+    factory = ScopeAwareFactory()
+    tmp_dir = _tmp_dir()
+    try:
+        result = run_fixed_suite(
+            factory,
+            tiers=("easy",),
+            seeds=(42,),
+            disaster_families=("fire", "gas"),
+            max_rounds=1,
+            label="scope",
+            output_dir=tmp_dir,
+        )
+
+        assert [decision.policy_key for decision in factory.decisions] == [
+            "fire_specialist",
+            "gas_specialist",
+        ]
+        assert [episode.scope_policy_key for episode in result.episodes] == [
+            "fire_specialist",
+            "gas_specialist",
+        ]
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

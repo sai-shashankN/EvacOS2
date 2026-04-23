@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from curriculum.controller import EVAL_SEEDS
 from evacos_ma.env import EvacEnvironment
 from evacos_ma.models import DisasterType
+from training.scope_router import ScopeDecision, route_scope
 
 from evaluation._training_contract import Policy, RewardNormalizer, collect_batch
 
@@ -67,6 +68,8 @@ class EpisodeResult(BaseModel):
     override_win_rate: float = 0.0
     raw_reward_by_role: dict[str, float] = Field(default_factory=dict)
     normalized_reward_by_role: dict[str, float] = Field(default_factory=dict)
+    scope_policy_key: str = "generalist"
+    scope_route_reason: str = "not_routed"
     schema_version: str = SCHEMA_VERSION
 
 
@@ -158,6 +161,7 @@ def _build_episode_result(
     log_dir: Path,
     batch_result: object,
     env: EvacEnvironment,
+    scope_decision: ScopeDecision,
 ) -> EpisodeResult:
     actual_episode_id = batch_result.episode_id
     action_rows = [
@@ -228,6 +232,8 @@ def _build_episode_result(
             "orchestrator": float(batch_result.total_normalized_reward_by_role.get("orchestrator", 0.0)),
             "floor_agent": float(floor_norm),
         },
+        scope_policy_key=scope_decision.policy_key,
+        scope_route_reason=scope_decision.reason,
     )
 
 
@@ -280,6 +286,16 @@ def _snapshot_has_zscore_state(snapshot: dict | None) -> bool:
     return False
 
 
+def _policy_for_scope(
+    policy_factory: Callable[[], Policy],
+    scope_decision: ScopeDecision,
+) -> Policy:
+    scoped_factory = getattr(policy_factory, "for_scope", None)
+    if callable(scoped_factory):
+        return scoped_factory(scope_decision)
+    return policy_factory()
+
+
 def run_fixed_suite(
     policy_factory: Callable[[], Policy],
     *,
@@ -302,7 +318,13 @@ def run_fixed_suite(
             for family in families:
                 env = EvacEnvironment()
                 curriculum = FixedTierCurriculum(tier)
-                policy = policy_factory()
+                scope_decision = route_scope(
+                    {
+                        "disaster_family": family.value,
+                        "tier": tier,
+                    }
+                )
+                policy = _policy_for_scope(policy_factory, scope_decision)
                 normalizer = _seed_eval_normalizer(tier, snapshot=normalizer_snapshot)
                 log_dir = output_dir / "logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
@@ -337,6 +359,7 @@ def run_fixed_suite(
                     log_dir=log_dir,
                     batch_result=results[0],
                     env=env,
+                    scope_decision=scope_decision,
                 )
                 episodes.append(episode)
 

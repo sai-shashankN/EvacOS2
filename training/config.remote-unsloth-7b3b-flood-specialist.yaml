@@ -1,0 +1,49 @@
+backend: "unsloth"
+# Flood-only specialist lane for the validated 7B orchestrator / 3B floor-agent topology.
+# Intended for cleaner, faster per-disaster convergence than the mixed-family bridge.
+max_steps: 100
+unsloth_max_seq_length: 2048
+load_in_4bit: true
+model:
+  base: "Qwen/Qwen2.5-3B-Instruct"
+  orchestrator_base: "Qwen/Qwen2.5-7B-Instruct"
+  floor_base: "Qwen/Qwen2.5-3B-Instruct"
+  dtype: "bfloat16"
+  max_prompt_tokens: 1024
+  max_completion_tokens: 128
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+rollout:
+  episodes_per_step: 1
+  max_rounds_per_episode: 4
+  seed_retry_limit: 200
+  use_vllm: false
+  disaster_families: ["flood"]
+grpo:
+  learning_rate: 5.0e-6
+  kl_coef: 0.04
+  clip_range: 0.2
+  num_train_epochs_per_step: 1
+reward:
+  rationale_scaling: "linear_capped"
+  alpha: 0.01
+  beta: 0.25
+  cap: 1.0
+  eligible_token_ceiling: 96
+  clip_normalized_to: 1.0
+eval:
+  every_steps: 20
+  tiers: ["easy"]
+  seeds: [42, 123]
+checkpoint:
+  every_steps: 5
+  keep_last_n: 5
+  root_dir: "outputs/training/remote-unsloth-7b3b-flood-specialist"
+metrics:
+  csv_path: "outputs/training/remote-unsloth-7b3b-flood-specialist-metrics.csv"
+  jsonl_dir: "outputs/logs/remote-unsloth-7b3b-flood-specialist"
+seed:
+  training_rng: 12345
