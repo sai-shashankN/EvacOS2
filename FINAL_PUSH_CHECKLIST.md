@@ -1,100 +1,146 @@
 # Final Push Checklist
 
-This is the active checklist for taking EvacOS2 from "strong repo" to "strongest possible submission."
+This is the active Sunday checklist for taking EvacOS2 from "strong system" to "strong submission."
 
-## Priority Order
+The goal is no longer to prove the stack exists.
+The goal is to show **clean, undeniable improvement** with minimal inconsistency.
 
-- [ ] Run a real split-role training checkpoint on remote GPU hardware
-- [ ] Generate trained submission artifacts immediately after the run
-- [ ] Tighten demo / deployment clarity
-- [ ] Do one final judge-eye consistency pass across the repo
+## Must Fix
 
-## 1. Split-Role Training Run
+- [ ] Fix the OpenEnv manifest/schema contract mismatch
+- [ ] Unify `expert` vs `brutal` difficulty naming everywhere public-facing
+- [ ] Make evaluation config-safe for split-role checkpoints
+- [ ] Generate one clean baseline-vs-trained evidence bundle
+- [ ] Lock one deterministic demo scenario
+- [ ] Update README / brief / demo story after the run
 
-Target:
-- [ ] Start with split-role training directly
-- [ ] Orchestrator model: `Qwen/Qwen2.5-7B-Instruct`
-- [ ] Floor-agent model: `Qwen/Qwen2.5-3B-Instruct`
-- [ ] Primary target runtime: Vast.ai
-- [ ] First budget target: about `2` hours for the initial run
+## Do Not Waste Time On
 
-Preflight:
-- [ ] Vast.ai account created
-- [ ] Suitable Linux CUDA machine selected
-- [ ] Repo available on the remote box
-- [ ] Python environment created
-- [ ] Follow `REMOTE_GPU_SETUP.md` instead of ad-hoc package install order
-- [ ] CUDA-visible PyTorch / training stack verified
-- [ ] Hugging Face login/token available if model pulls require it
-- [ ] Output/checkpoint directory chosen on persistent storage
+- [ ] Adding new benchmark modes
+- [ ] Large refactors
+- [ ] More architecture polish
+- [ ] More training features
+- [ ] Overselling orchestrator convergence
 
-Training config:
-- [ ] Confirm `training/config.yaml` or a dedicated remote config points to split-role bases
-- [ ] Prefer Linux/CUDA path with `backend: "unsloth"`
-- [ ] Enable `rollout.use_vllm: true` if supported on the chosen machine
-- [ ] Confirm checkpoint cadence is frequent enough that a short run still leaves usable artifacts
-- [ ] Confirm outputs write to a persistent path, not disposable container scratch space
+## 1. Contract Consistency
 
-During run:
-- [ ] Capture the exact command used
-- [ ] Capture start time, stop time, and actual wall-clock runtime
-- [ ] Capture any OOM / throughput / dependency issues
-- [ ] Preserve latest checkpoint and any adapter directories
-- [ ] Preserve training logs/metrics
+Goal: remove easy judge attacks caused by naming or interface drift.
 
-Success bar for this step:
-- [ ] At least one real split-role checkpoint saved successfully
-- [ ] Enough evidence collected to run baseline-vs-trained comparison
+- [ ] `evacos_ma.openenv.manifest` should reference the schema the runtime actually accepts
+- [ ] `/openenv/*` should be clearly identified as the canonical benchmark surface
+- [ ] Root-level `/reset`, `/step`, `/state`, `/health`, `/schema`, `/metadata` should be described as legacy/local helpers if retained
+- [ ] Public difficulty labels should consistently use one vocabulary
+- [ ] README, `openenv.yaml`, task registry, procgen paths, and rendered docs should agree
 
-## 2. Trained Submission Artifacts
+Success bar:
+- [ ] A reviewer comparing manifest, schema, README, and runtime does not see contradictions
 
-Immediately after the first successful training run:
-- [ ] Build the trained demo bundle
-- [ ] Generate a real `submission_scorecard.md`
-- [ ] Generate a real `submission_scorecard.json`
-- [ ] Generate `demo_bundle_summary.md`
-- [ ] Generate `baseline_vs_trained.csv`
-- [ ] Check whether the trained result actually improves the headline metrics
+## 2. Evaluation Safety
 
-Key outputs:
-- [ ] `outputs/demo_bundle/submission_scorecard.md`
-- [ ] `outputs/demo_bundle/submission_scorecard.json`
-- [ ] `outputs/demo_bundle/demo_bundle_summary.md`
-- [ ] `outputs/demo_bundle/baseline_vs_trained.csv`
+Goal: ensure the evaluation run is scoring the checkpoint you actually trained, not silently assuming `training/config.yaml`.
 
-## 3. Demo / Deployment Tightening
+- [ ] `evaluation/baseline_vs_trained.py` must not rely on the wrong default config for split-role runs
+- [ ] Evaluation should accept explicit config/model routing, or resolve it from checkpoint metadata
+- [ ] Split-role checkpoints should evaluate without hidden assumptions about shared-model layout
+- [ ] Baseline-vs-trained output should remain reproducible across reruns
 
-Do this after trained artifacts exist:
-- [ ] Make the quickest judge path unmistakable
-- [ ] Tighten hosted-vs-local demo language so there is one canonical story
-- [ ] Add or refine a "demo in 60 seconds" section if still needed
-- [ ] Ensure README, HACKATHON, and SUBMISSION_BRIEF point to the same final demo flow
+Success bar:
+- [ ] You can point at a checkpoint and trust that the reported comparison matches that checkpoint's actual model layout
 
-## 4. Final Judge-Eye Pass
+## 3. Proof Bundle
 
-Do this last:
+Goal: produce the evidence that actually wins.
+
+### Required artifacts
+
+- [ ] `baseline_vs_trained.csv`
+- [ ] `submission_scorecard.md`
+- [ ] `submission_scorecard.json`
+- [ ] `demo_bundle_summary.md`
+- [ ] plots for the final selected checkpoint
+
+### Required story
+
+- [ ] Graph 1: performance vs training progress
+- [ ] Graph 2: baseline vs trained comparison
+- [ ] Graph 3: scenario outcome breakdown
+- [ ] At least one visible behavior change in the chosen demo scenario
+
+### Required metric framing
+
+- [ ] One main headline metric judges can understand immediately
+- [ ] One operational metric such as casualties / safe evacuations / evacuation time
+- [ ] One role-aware diagnostic if useful, especially `floor_agent` vs `orchestrator`
+
+Success bar:
+- [ ] A judge can understand "same environment, trained agent performs better" in under 30 seconds
+
+## 4. Demo Lock
+
+Goal: remove randomness from the live pitch.
+
+- [ ] Pick one disaster family
+- [ ] Pick one seed
+- [ ] Pick one layout / reset path
+- [ ] Use the same scenario for before/after comparison
+- [ ] Rehearse the exact flow without improvising
+
+Demo rule:
+- [ ] Do not rely on live procgen randomness during the actual pitch
+
+Success bar:
+- [ ] The demo is reproducible and confidence-building, not surprising
+
+## 5. Messaging
+
+Goal: sound credible, not defensive.
+
+- [ ] Say floor agents are currently the clearest improvement signal
+- [ ] Present orchestrator as the longer-horizon coordination challenge
+- [ ] Do not claim full convergence if you do not have it
+- [ ] Keep the story outcome-first, not complexity-first
+
+Recommended framing:
+
+- [ ] "Baseline struggles with coordination and hazard response"
+- [ ] "After training, floor agents learn localized evacuation strategies"
+- [ ] "EvacOS measures meaningful improvement, not just simulated scenarios"
+
+Avoid:
+
+- [ ] "We're still training" vibes
+- [ ] log-dump demos
+- [ ] architecture-overload explanations
+- [ ] claiming more than the run proves
+
+## 6. Repo Polish
+
+Goal: make the public repo feel finished.
+
+- [ ] README should match the actual repo state exactly
+- [ ] Pending sections should be updated as soon as real artifacts exist
+- [ ] One canonical demo path should be obvious
+- [ ] HF Space / demo surface should be linked clearly if live
+- [ ] Screenshots or committed lightweight result artifacts should be added if they improve first impression
+
+Success bar:
+- [ ] The repo reads as "proven and intentional," not "almost there"
+
+## 7. Final Review Pass
+
 - [ ] Re-read `README.md`
-- [ ] Re-read `HACKATHON.md`
 - [ ] Re-read `SUBMISSION_BRIEF.md`
-- [ ] Re-read the generated trained scorecard and bundle summary
-- [ ] Remove wording drift, contradictions, or stale claims
-- [ ] Make sure the repo tells one clean story from top to bottom
-
-## Vast.ai Migration Notes
-
-When the Vast.ai account is ready, the next practical work is:
-- [ ] choose the machine spec
-- [ ] clone or sync the repo onto the box
-- [ ] install dependencies
-- [ ] set secrets/tokens
-- [ ] point training outputs at persistent storage
-- [ ] run the split-role training command
-- [ ] verify checkpoints exist before ending the session
+- [ ] Re-read `HACKATHON.md`
+- [ ] Re-read generated scorecard + summary bundle
+- [ ] Re-check that the README claims match the final outputs
+- [ ] Re-check that demo commands still work exactly as written
 
 ## Done Means
 
-We can call this truly submission-done when:
-- [ ] a real split-role checkpoint exists
-- [ ] trained scorecard artifacts exist
-- [ ] the demo/deployment path is tight
-- [ ] the final repo-wide judge pass is complete
+You are ready when:
+
+- [ ] the contract is consistent
+- [ ] evaluation is config-safe
+- [ ] one clean evidence bundle exists
+- [ ] one deterministic demo is locked
+- [ ] the README and pitch both point to the same proof

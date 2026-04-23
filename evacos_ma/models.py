@@ -517,7 +517,7 @@ class StateView(EvacBaseModel):
 class TaskSpec(EvacBaseModel):
     task_id: str
     name: str
-    difficulty: Literal["easy", "medium", "medium_hard", "hard", "expert"]
+    difficulty: Literal["easy", "medium", "medium_hard", "hard", "expert", "brutal"]
     disaster_type: DisasterType
     building_profile: str
     success_criteria: str

@@ -37,6 +37,120 @@ class CheckpointBundle:
     wandb_run_id: str | None = None
 
 
+@dataclass
+class RunLockHandle:
+    lock_paths: list[Path] = field(default_factory=list)
+
+    def release(self) -> None:
+        for lock_path in reversed(self.lock_paths):
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                logger.warning("Failed to remove run lock %s", lock_path)
+        self.lock_paths.clear()
+
+
+def _lock_root_for_targets(target_paths: list[Path]) -> Path:
+    import os
+
+    common = Path(os.path.commonpath([str(path) for path in target_paths]))
+    return common / ".run_locks"
+
+
+def _lock_file_name(target_path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256(str(target_path).encode("utf-8")).hexdigest()[:16]
+    return f"{digest}.lock"
+
+
+def _pid_is_running(pid: int) -> bool:
+    import os
+
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def acquire_run_output_lock(*target_paths: Path) -> RunLockHandle:
+    """Acquire per-target path locks for training outputs.
+
+    Lock files are keyed by absolute target path so overlapping checkpoint,
+    metrics, or JSONL destinations conflict even if the broader config differs.
+    Stale locks from dead processes are removed automatically.
+    """
+
+    import atexit
+    import os
+    import time
+
+    normalized_targets = [
+        Path(path).resolve(strict=False)
+        for path in target_paths
+    ]
+    lock_root = _lock_root_for_targets(normalized_targets)
+    lock_root.mkdir(parents=True, exist_ok=True)
+
+    handle = RunLockHandle()
+    pid = os.getpid()
+    for target_path in normalized_targets:
+        lock_path = lock_root / _lock_file_name(target_path)
+        payload = {
+            "pid": pid,
+            "target_path": str(target_path),
+            "created_at": time.time(),
+        }
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    existing = json.loads(lock_path.read_text(encoding="utf-8"))
+                except Exception:
+                    existing = {}
+                try:
+                    existing_pid = int(existing.get("pid", -1))
+                except (TypeError, ValueError):
+                    existing_pid = -1
+                if _pid_is_running(existing_pid):
+                    handle.release()
+                    raise RuntimeError(
+                        f"Output path is already locked by pid {existing_pid}: {target_path}"
+                    )
+                logger.warning(
+                    "Removing stale run lock %s for dead pid %s",
+                    lock_path,
+                    existing_pid,
+                )
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    continue
+                continue
+
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2)
+            except Exception:
+                try:
+                    Path(lock_path).unlink()
+                except OSError:
+                    pass
+                handle.release()
+                raise
+            handle.lock_paths.append(lock_path)
+            break
+
+    atexit.register(handle.release)
+    return handle
+
+
 def save_checkpoint(
     root: Path,
     bundle: CheckpointBundle,
@@ -127,20 +241,29 @@ def atomic_replace_latest(root: Path, ckpt_dir: Path) -> None:
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    shutil.copytree(ckpt_dir, tmp_dir)
-
-    if latest_dir.exists():
-        shutil.rmtree(latest_dir, ignore_errors=True)
-
     try:
-        # os.rename is atomic on POSIX
         import os
 
-        os.rename(str(tmp_dir), str(latest_dir))
-    except OSError:
-        # Fallback for cross-device or Windows cases
-        shutil.copytree(tmp_dir, latest_dir)
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        shutil.copytree(ckpt_dir, tmp_dir)
+
+        if latest_dir.exists():
+            shutil.rmtree(latest_dir, ignore_errors=True)
+
+        try:
+            os.replace(str(tmp_dir), str(latest_dir))
+            return
+        except OSError:
+            if latest_dir.exists():
+                shutil.rmtree(latest_dir, ignore_errors=True)
+            try:
+                shutil.copytree(tmp_dir, latest_dir)
+            except Exception:
+                if latest_dir.exists():
+                    shutil.rmtree(latest_dir, ignore_errors=True)
+                raise
+    finally:
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def load_checkpoint(root: Path) -> CheckpointBundle | None:

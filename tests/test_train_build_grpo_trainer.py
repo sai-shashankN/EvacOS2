@@ -131,3 +131,54 @@ def test_merge_trainer_diagnostics_aggregates_split_role_fields() -> None:
     assert metrics_row["ratio_mean"] == pytest.approx((0.9 * 1 + 1.1 * 5) / 6.0)
     assert metrics_row["kl_max"] == 0.05
     assert metrics_row["num_inner_epochs"] == 3
+
+
+def test_compute_rollout_metrics_tracks_wait_and_hollow_behavior() -> None:
+    results = [
+        SimpleNamespace(
+            override_count=1,
+            orchestrator_action_count=2,
+            override_win_count=1,
+            rationale_bonus_total=0.5,
+            rationale_bonus_count=2,
+            samples=[
+                SimpleNamespace(
+                    role="orchestrator",
+                    parsed_action={"action_type": "wait", "arguments": {}},
+                ),
+                SimpleNamespace(
+                    role="orchestrator",
+                    parsed_action={"action_type": "override_floor_agent", "arguments": {"target_floor_agent_id": "floor_0_agent"}},
+                ),
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={"action_type": "wait", "arguments": {}, "fallback_reason": "parse_error"},
+                ),
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={"action_type": "wait", "arguments": {}},
+                ),
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={"action_type": "route_within_floor", "arguments": {"from_room_id": "room_1", "to_room_id": "exit_1"}},
+                ),
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={"action_type": "open_exit", "arguments": {}},
+                ),
+            ],
+        )
+    ]
+
+    metrics = train_mod._compute_rollout_metrics(results)
+
+    assert metrics["override_rate"] == 0.5
+    assert metrics["override_win_rate"] == 1.0
+    assert metrics["rationale_bonus_mean"] == 0.25
+    assert metrics["wait_rate"] == pytest.approx(3 / 6, rel=0, abs=1e-4)
+    assert metrics["floor_agent_wait_rate"] == pytest.approx(2 / 4, rel=0, abs=1e-4)
+    assert metrics["orchestrator_wait_rate"] == 0.5
+    assert metrics["empty_args_rate"] == pytest.approx(4 / 6, rel=0, abs=1e-4)
+    assert metrics["floor_agent_active_action_rate"] == pytest.approx(2 / 4, rel=0, abs=1e-4)
+    assert metrics["active_empty_args_rate"] == pytest.approx(1 / 6, rel=0, abs=1e-4)
+    assert metrics["valid_but_hollow_action_rate"] == pytest.approx(2 / 6, rel=0, abs=1e-4)

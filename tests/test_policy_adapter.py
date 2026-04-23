@@ -308,3 +308,90 @@ class TestParseCompletionToAction:
         assert action.episode_id == "real_episode"
         assert action.agent_id == "floor_0_agent"
         assert action.round_id == 3
+
+    def test_parse_completion_salvages_null_client_metadata(self):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": 0,
+            "agent_id": "orchestrator",
+            "action_id": "a1",
+            "action_type": "wait",
+            "arguments": {},
+            "client_metadata": None,
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="orchestrator",
+            role="orchestrator",
+            expected_episode_id="ep1",
+            expected_round_id=0,
+        )
+
+        assert reason == "ok"
+        assert action is not None
+        assert action.client_metadata == {}
+
+    def test_parse_completion_salvages_string_round_ids(self):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": "ep1_round_7",
+            "agent_id": "floor_0_agent",
+            "action_id": "a1",
+            "action_type": "wait",
+            "arguments": {},
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="floor_0_agent",
+            role="floor_agent",
+            expected_episode_id="ep1",
+            expected_round_id=7,
+        )
+
+        assert reason == "ok"
+        assert action is not None
+        assert action.round_id == 7
+
+    def test_parse_completion_rejects_active_action_with_empty_arguments(self):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": 0,
+            "agent_id": "floor_0_agent",
+            "action_id": "a1",
+            "action_type": "route_within_floor",
+            "arguments": {},
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="floor_0_agent",
+            role="floor_agent",
+            expected_episode_id="ep1",
+            expected_round_id=0,
+        )
+
+        assert action is None
+        assert reason == "arguments_invalid"
+
+    def test_parse_completion_rejects_active_action_with_non_dict_arguments(self):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": 0,
+            "agent_id": "floor_0_agent",
+            "action_id": "a1",
+            "action_type": "open_exit",
+            "arguments": None,
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="floor_0_agent",
+            role="floor_agent",
+            expected_episode_id="ep1",
+            expected_round_id=0,
+        )
+
+        assert action is None
+        assert reason == "arguments_invalid"

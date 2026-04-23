@@ -1,4 +1,5 @@
 backend: "hf"
+max_steps: 10
 # Stable remote starter config verified on a single RTX 4090.
 # This is intentionally conservative so training can begin without
 # tripping the current Unsloth/vLLM backward issue.

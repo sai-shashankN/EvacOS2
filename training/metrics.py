@@ -53,6 +53,13 @@ _METRICS_COLUMNS: list[str] = [
     "mean_norm_reward_orch",
     "mean_norm_reward_floor",
     "invalid_action_rate",
+    "wait_rate",
+    "floor_agent_wait_rate",
+    "orchestrator_wait_rate",
+    "empty_args_rate",
+    "floor_agent_active_action_rate",
+    "active_empty_args_rate",
+    "valid_but_hollow_action_rate",
     "override_rate",
     "override_win_rate",
     "rationale_bonus_mean",
@@ -71,7 +78,17 @@ def append_training_metrics_row(csv_path: Path, row: dict) -> None:
     """
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    write_header = not csv_path.exists()
+    write_header = not csv_path.exists() or csv_path.stat().st_size == 0
+    if not write_header:
+        with open(csv_path, newline="") as existing:
+            reader = csv.reader(existing)
+            existing_header = next(reader, None)
+        if existing_header != _METRICS_COLUMNS:
+            raise RuntimeError(
+                "Training metrics CSV header does not match the current schema. "
+                f"Refusing to append to {csv_path}; start a new metrics path or migrate the file."
+            )
+
     with open(csv_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=_METRICS_COLUMNS, extrasaction="ignore")
         if write_header:

@@ -71,6 +71,7 @@ class TestMetadataEndpoint:
         assert data["name"] == "evacos-ma"
         assert data["version"] == "0.1.0"
         assert "manifest" in data
+        assert data["manifest"]["action_schema_ref"].endswith("ActionBundleMA")
 
 
 class TestResetEndpoint:
@@ -89,6 +90,14 @@ class TestResetEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert "episode_id" in data
+
+    def test_reset_rejects_tier_without_procgen_disaster_family(self, client):
+        resp = client.post(
+            "/openenv/reset",
+            json={"task_id": "task_1_fire_easy", "seed": 42, "tier": "brutal"},
+        )
+        assert resp.status_code == 400
+        assert "disaster_family" in resp.json()["detail"]
 
 
 class TestStepEndpoint:

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from training.checkpoint import (
+    acquire_run_output_lock,
     atomic_replace_latest,
     CheckpointBundle,
     load_checkpoint,
@@ -162,5 +163,72 @@ class TestRotateCheckpoints:
             assert ckpt_dirs[0].name == "ckpt_3"
             assert ckpt_dirs[1].name == "ckpt_4"
             assert ckpt_dirs[2].name == "ckpt_5"
+        finally:
+            shutil.rmtree(ckpt_root, ignore_errors=True)
+
+
+class TestRunOutputLock:
+    def test_acquire_run_output_lock_rejects_live_lock(self):
+        ckpt_root = _tmp_dir()
+        try:
+            metrics_path = ckpt_root / "metrics.csv"
+            jsonl_dir = ckpt_root / "logs"
+            lock = acquire_run_output_lock(ckpt_root, metrics_path, jsonl_dir)
+            with pytest.raises(RuntimeError, match="already locked"):
+                acquire_run_output_lock(ckpt_root, metrics_path, jsonl_dir)
+            lock.release()
+        finally:
+            shutil.rmtree(ckpt_root, ignore_errors=True)
+
+    def test_acquire_run_output_lock_cleans_stale_lock(self, monkeypatch):
+        ckpt_root = _tmp_dir()
+        try:
+            metrics_path = ckpt_root / "metrics.csv"
+            jsonl_dir = ckpt_root / "logs"
+            lock = acquire_run_output_lock(ckpt_root, metrics_path, jsonl_dir)
+            lock_path = lock.lock_paths[0]
+            lock.release()
+            lock_path.write_text(
+                json.dumps({"pid": 999999, "target_path": str(ckpt_root)}),
+                encoding="utf-8",
+            )
+
+            monkeypatch.setattr("training.checkpoint._pid_is_running", lambda pid: False)
+            refreshed = acquire_run_output_lock(ckpt_root, metrics_path, jsonl_dir)
+
+            assert all(path.exists() for path in refreshed.lock_paths)
+            refreshed.release()
+        finally:
+            shutil.rmtree(ckpt_root, ignore_errors=True)
+
+
+class TestAtomicReplaceLatest:
+    def test_atomic_replace_latest_cleans_tmp_on_fallback_failure(self, monkeypatch):
+        ckpt_root = _tmp_dir()
+        try:
+            ckpt_dir = ckpt_root / "ckpt_1"
+            latest_dir = ckpt_root / "latest"
+            tmp_dir = ckpt_root / "latest.tmp"
+            ckpt_dir.mkdir(parents=True)
+            latest_dir.mkdir(parents=True)
+            (ckpt_dir / "meta.json").write_text("{}", encoding="utf-8")
+            (latest_dir / "old.txt").write_text("old", encoding="utf-8")
+
+            real_copytree = shutil.copytree
+
+            def failing_copytree(src, dst, *args, **kwargs):
+                result = real_copytree(src, dst, *args, **kwargs)
+                if Path(src) == tmp_dir and Path(dst) == latest_dir:
+                    raise RuntimeError("publish failed")
+                return result
+
+            monkeypatch.setattr("os.replace", lambda src, dst: (_ for _ in ()).throw(OSError("rename failed")))
+            monkeypatch.setattr(shutil, "copytree", failing_copytree)
+
+            with pytest.raises(RuntimeError, match="publish failed"):
+                atomic_replace_latest(ckpt_root, ckpt_dir)
+
+            assert not tmp_dir.exists()
+            assert not latest_dir.exists()
         finally:
             shutil.rmtree(ckpt_root, ignore_errors=True)

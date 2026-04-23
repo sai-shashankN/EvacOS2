@@ -1,4 +1,5 @@
 backend: "unsloth"
+max_steps: 3
 # Diagnostic remote smoke for the current Unsloth backward issue.
 # This keeps vLLM out of the loop so we can isolate Unsloth training.
 unsloth_max_seq_length: 2048

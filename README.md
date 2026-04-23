@@ -28,7 +28,7 @@
 | vLLM lane | `7B + vLLM` | Smoke validated on stronger hardware | [training/](training) |
 | Split-role lane | `7B` orchestrator / `3B` floor agents | Smoke validated on stronger hardware | [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
-| Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoints.py](training/checkpoints.py) |
+| Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
 
 Here, **smoke validated** means a capped end-to-end run completed model load, rollout, training, and checkpointing on stronger hardware.
@@ -114,7 +114,7 @@ Two final artifacts are intentionally still marked as pending rather than implie
 | Artifact | Current status | What will land here |
 |---|---|---|
 | **Extended benchmark / eval results** | Pending longer run | Fixed-suite baseline-vs-trained deltas, checkpoint-selected scorecard, and longer-horizon plots from a serious training run |
-| **Hugging Face Space / live demo surface** | Pending deployment | Public judge-facing demo that exposes the environment or dashboard flow on a hosted Space |
+| **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the OpenEnv API surface |
 | **YouTube walkthrough video** | Pending recording | Short end-to-end submission demo: environment, baseline vs trained evidence, and deterministic live scenario |
 | **Hugging Face blog / write-up** | Pending publication | Public technical write-up covering benchmark design, reward strategy, training stack, and evaluation story |
 
@@ -155,6 +155,7 @@ For full trained comparison once you have a checkpoint:
 ```bash
 python -m evaluation.demo_bundle \
   --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter \
+  --config training/config.remote-unsloth-7b3b-split-bridge.yaml \
   --output-dir outputs/demo_bundle
 ```
 

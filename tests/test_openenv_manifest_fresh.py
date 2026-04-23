@@ -30,12 +30,20 @@ def test_metadata_and_state_agree_on_debug_state(monkeypatch):
 
     monkeypatch.setenv("EVACOS_DEBUG_STATE", "true")
     metadata_true = client.get("/openenv/metadata").json()
-    state_true = client.get("/openenv/state", params={"episode_id": "ep_test"}).json()
+    reset_true = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 1}).json()
+    state_true = client.get(
+        "/openenv/state",
+        params={"episode_id": reset_true["episode_id"]},
+    ).json()
     assert metadata_true["manifest"]["debug_state_enabled"] is True
     assert metadata_true["manifest"]["debug_state_enabled"] == (state_true["full_state"] is not None)
 
     monkeypatch.delenv("EVACOS_DEBUG_STATE", raising=False)
     metadata_false = client.get("/openenv/metadata").json()
-    state_false = client.get("/openenv/state", params={"episode_id": "ep_test"}).json()
+    reset_false = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 2}).json()
+    state_false = client.get(
+        "/openenv/state",
+        params={"episode_id": reset_false["episode_id"]},
+    ).json()
     assert metadata_false["manifest"]["debug_state_enabled"] is False
     assert metadata_false["manifest"]["debug_state_enabled"] == (state_false["full_state"] is not None)

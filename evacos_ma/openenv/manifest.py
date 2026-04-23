@@ -22,7 +22,7 @@ MANIFEST: dict[str, Any] = {
     "version": VERSION,
     "description": "Hierarchical Multi-Agent Evacuation Environment (Round 2)",
     "tasks": _TASK_LIST,
-    "action_schema_ref": "evacos_ma.schemas.multi_agent.ActionEnvelopeMA",
+    "action_schema_ref": "evacos_ma.schemas.multi_agent.ActionBundleMA",
     "observation_schema_ref": "evacos_ma.schemas.multi_agent.RoleObservationMA",
     "supported_tiers": ["easy", "medium", "hard", "brutal"],
     "agent_topology": {

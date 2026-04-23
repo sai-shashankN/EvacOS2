@@ -68,6 +68,13 @@ MANIFEST
 # =========================================================================
 .pytest_cache/
 .pytest_tmp/
+pytest_tmp*/
+.pytest_tmp*/
+.phase*_test_tmp/
+phase*_renderer_smoke/
+tmp_hf_space_openenv/
+tmp_run_*.py
+vast
 .coverage
 .coverage.*
 htmlcov/

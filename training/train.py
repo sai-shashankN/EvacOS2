@@ -1043,8 +1043,71 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     rationale_bonus_count = sum(
         int(getattr(result, "rationale_bonus_count", 0)) for result in results
     )
+    samples = [
+        sample
+        for result in results
+        for sample in getattr(result, "samples", [])
+    ]
+
+    def _parsed_action(sample: Any) -> dict[str, Any]:
+        parsed = getattr(sample, "parsed_action", {})
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _action_type(sample: Any) -> str:
+        return str(_parsed_action(sample).get("action_type", ""))
+
+    def _arguments(sample: Any) -> dict[str, Any]:
+        arguments = _parsed_action(sample).get("arguments", {})
+        return arguments if isinstance(arguments, dict) else {}
+
+    def _is_valid_action(sample: Any) -> bool:
+        return "fallback_reason" not in _parsed_action(sample)
+
+    def _is_wait_action(sample: Any) -> bool:
+        return _action_type(sample) == "wait"
+
+    def _has_empty_arguments(sample: Any) -> bool:
+        return len(_arguments(sample)) == 0
+
+    floor_samples = [sample for sample in samples if getattr(sample, "role", "") == "floor_agent"]
+    orchestrator_samples = [
+        sample for sample in samples if getattr(sample, "role", "") == "orchestrator"
+    ]
+    wait_count = sum(1 for sample in samples if _is_wait_action(sample))
+    floor_wait_count = sum(1 for sample in floor_samples if _is_wait_action(sample))
+    orchestrator_wait_count = sum(
+        1 for sample in orchestrator_samples if _is_wait_action(sample)
+    )
+    empty_args_count = sum(1 for sample in samples if _has_empty_arguments(sample))
+    floor_active_count = sum(1 for sample in floor_samples if not _is_wait_action(sample))
+    active_empty_args_count = sum(
+        1
+        for sample in samples
+        if not _is_wait_action(sample) and _has_empty_arguments(sample)
+    )
+    valid_but_hollow_count = sum(
+        1
+        for sample in samples
+        if _is_valid_action(sample)
+        and _is_wait_action(sample)
+        and _has_empty_arguments(sample)
+    )
 
     return {
+        "wait_rate": round(wait_count / max(len(samples), 1), 4),
+        "floor_agent_wait_rate": round(floor_wait_count / max(len(floor_samples), 1), 4),
+        "orchestrator_wait_rate": round(
+            orchestrator_wait_count / max(len(orchestrator_samples), 1), 4
+        ),
+        "empty_args_rate": round(empty_args_count / max(len(samples), 1), 4),
+        "floor_agent_active_action_rate": round(
+            floor_active_count / max(len(floor_samples), 1), 4
+        ),
+        "active_empty_args_rate": round(active_empty_args_count / max(len(samples), 1), 4),
+        "valid_but_hollow_action_rate": round(
+            valid_but_hollow_count / max(len(samples), 1),
+            4,
+        ),
         "override_rate": round(override_count / max(orchestrator_action_count, 1), 4),
         "override_win_rate": round(override_win_count / max(override_count, 1), 4),
         "rationale_bonus_mean": round(rationale_bonus_total / max(rationale_bonus_count, 1), 4),
@@ -1389,6 +1452,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     from evacos_ma.models import DisasterType
 
     from training.checkpoint import (
+        acquire_run_output_lock,
         CheckpointBundle,
         atomic_replace_latest,
         load_checkpoint,
@@ -1399,10 +1463,12 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     from training.rollout import collect_batch
 
     ckpt_root = Path(config.checkpoint.root_dir)
-    ckpt_root.mkdir(parents=True, exist_ok=True)
     metrics_path = Path(config.metrics.csv_path)
     jsonl_dir = Path(config.metrics.jsonl_dir)
+
+    ckpt_root.mkdir(parents=True, exist_ok=True)
     jsonl_dir.mkdir(parents=True, exist_ok=True)
+    run_lock = acquire_run_output_lock(ckpt_root, metrics_path, jsonl_dir)
 
     rng = random.Random(config.seed.training_rng)
     torch.manual_seed(config.seed.training_rng)
@@ -1606,10 +1672,13 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     except KeyboardInterrupt:
         stop_requested = True
     finally:
-        # Write a final checkpoint only if we made net-new progress.
-        # Avoid duplicating an already-on-disk checkpoint when zero steps
-        # completed after resume.
-        if last_completed_step >= start_step:
-            _write_checkpoint(last_completed_step)
-        if wandb_run is not None:
-            wandb_run.finish()
+        try:
+            # Write a final checkpoint only if we made net-new progress.
+            # Avoid duplicating an already-on-disk checkpoint when zero steps
+            # completed after resume.
+            if last_completed_step >= start_step:
+                _write_checkpoint(last_completed_step)
+            if wandb_run is not None:
+                wandb_run.finish()
+        finally:
+            run_lock.release()

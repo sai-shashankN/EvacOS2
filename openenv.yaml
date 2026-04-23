@@ -13,8 +13,20 @@ tasks:
     difficulty: hard
   - task_id: task_4_cascade_hard
     name: Multi-Hazard Cascade
-    difficulty: expert
-action_schema_ref: evacos_ma.schemas.multi_agent.ActionEnvelopeMA
+    difficulty: brutal
+  - task_id: task_lh_fire_easy
+    name: Long-Horizon Fire Easy
+    difficulty: easy
+  - task_id: task_lh_flood_medium
+    name: Long-Horizon Flood Medium
+    difficulty: medium
+  - task_id: task_lh_cascade_hard
+    name: Long-Horizon Multi-Cascade Hard
+    difficulty: hard
+  - task_id: task_lh_cascade_brutal
+    name: Long-Horizon Multi-Cascade Brutal
+    difficulty: brutal
+action_schema_ref: evacos_ma.schemas.multi_agent.ActionBundleMA
 observation_schema_ref: evacos_ma.schemas.multi_agent.RoleObservationMA
 debug_state_enabled: false
 supported_tiers:

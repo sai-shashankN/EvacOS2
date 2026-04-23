@@ -17,11 +17,12 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
   - `/openenv/state`
 - Fixed evaluation path:
   - `python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline`
-  - `python -m evaluation.demo_bundle --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter --output-dir outputs/demo_bundle`
+  - `python -m evaluation.demo_bundle --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter --config training/config.remote-unsloth-7b3b-split-bridge.yaml --output-dir outputs/demo_bundle`
 - Headline artifacts:
   - `outputs/demo_bundle/submission_scorecard.md`
   - `outputs/demo_bundle/demo_bundle_summary.md`
   - `outputs/demo_bundle/baseline_vs_trained.csv`
+  - If `outputs/demo_bundle` is absent, the checked-in bundle is baseline-only and the trained scorecard still needs to be generated from a selected checkpoint.
 
 ## Core competitive claims
 

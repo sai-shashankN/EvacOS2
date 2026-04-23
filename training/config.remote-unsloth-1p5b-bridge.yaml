@@ -1,4 +1,5 @@
 backend: "unsloth"
+max_steps: 100
 # Memory-aware bridge run after validating the Unsloth trainer fix.
 # This is the strongest likely-stable lane on a single RTX 4090 before
 # we try to push back into the 3B/vLLM regime.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -12,7 +13,7 @@ from .log_stream import list_episodes, tail_episode
 
 APP_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = APP_ROOT / "static"
-LOG_ROOT = Path("outputs/logs")
+LOG_ROOT = Path(os.environ.get("EVACOS_DASHBOARD_LOG_ROOT", "outputs/logs"))
 
 app = FastAPI(title="Phase 8 Dashboard", version="2026.04.20")
 

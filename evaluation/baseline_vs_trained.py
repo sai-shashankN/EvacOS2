@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
 from pathlib import Path
 from typing import Callable, Sequence
@@ -50,6 +51,52 @@ def _load_model_config(config_path: Path = Path("training/config.yaml")) -> dict
     }
 
 
+def _checkpoint_meta_path(checkpoint: Path) -> Path | None:
+    """Return the nearest checkpoint ``meta.json`` for an adapter/latest path."""
+    candidates = [
+        checkpoint / "meta.json",
+        checkpoint.parent / "meta.json",
+        checkpoint.parent.parent / "meta.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _adapter_root(checkpoint: Path) -> Path:
+    """Accept either a checkpoint dir or its lora_adapter dir."""
+    adapter_dir = checkpoint / "lora_adapter"
+    if adapter_dir.exists():
+        return adapter_dir
+    return checkpoint
+
+
+def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool] | None:
+    meta_path = _checkpoint_meta_path(checkpoint)
+    if meta_path is None:
+        return None
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    role_model_names = meta.get("role_model_names")
+    if isinstance(role_model_names, dict):
+        orchestrator = str(role_model_names.get("orchestrator") or "")
+        floor = str(role_model_names.get("floor_agent") or "")
+        if orchestrator and floor:
+            return {
+                "base": orchestrator,
+                "orchestrator": orchestrator,
+                "floor_agent": floor,
+                "split": orchestrator != floor,
+            }
+    model_name = str(meta.get("model_name") or "Qwen/Qwen2.5-3B-Instruct")
+    return {
+        "base": model_name,
+        "orchestrator": model_name,
+        "floor_agent": model_name,
+        "split": False,
+    }
+
+
 def _load_model_name(config_path: Path = Path("training/config.yaml")) -> str:
     config = _load_model_config(config_path)
     return str(config["orchestrator"])
@@ -71,14 +118,19 @@ def _metric_rows(suite: FixedSuiteResult) -> dict[tuple[str, int, str, str, str]
     return rows
 
 
-def _trained_factory(checkpoint: Path) -> Callable[[], object]:
-    model_cfg = _load_model_config()
+def _trained_factory(
+    checkpoint: Path,
+    *,
+    config_path: Path = Path("training/config.yaml"),
+) -> Callable[[], object]:
+    adapter_root = _adapter_root(checkpoint)
+    model_cfg = _load_model_config_from_checkpoint(checkpoint) or _load_model_config(config_path)
     if not bool(model_cfg["split"]):
         model_name = str(model_cfg["orchestrator"])
-        return lambda: hf_policy_factory(model_name, lora_adapter_path=str(checkpoint))
+        return lambda: hf_policy_factory(model_name, lora_adapter_path=str(adapter_root))
 
-    orch_checkpoint = checkpoint / "orchestrator"
-    floor_checkpoint = checkpoint / "floor_agent"
+    orch_checkpoint = adapter_root / "orchestrator"
+    floor_checkpoint = adapter_root / "floor_agent"
     if not orch_checkpoint.exists() or not floor_checkpoint.exists():
         raise FileNotFoundError(
             "Split-role trained comparison expects checkpoint/orchestrator and "
@@ -110,6 +162,7 @@ def run_comparison(
     output_csv: Path = Path("outputs/evals/baseline_vs_trained.csv"),
     skip_trained: bool = False,
     trained_normalizer_snapshot: dict | None = None,
+    config_path: Path = Path("training/config.yaml"),
 ) -> ComparisonResult:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
 
@@ -131,7 +184,7 @@ def run_comparison(
             raise FileNotFoundError("trained_checkpoint does not exist and skip_trained=False")
     else:
         trained_suite = run_fixed_suite(
-            _trained_factory(trained_checkpoint),
+            _trained_factory(trained_checkpoint, config_path=config_path),
             tiers=tiers,
             seeds=seeds,
             disaster_families=disaster_families,

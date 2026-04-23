@@ -154,12 +154,22 @@ def reset(req: ResetRequestMA = Body(default=None)) -> OpenEnvResetResponse:
                 procgen_max_steps=req.max_steps,
             )
         else:
+            if req.max_steps is not None or req.tier != "easy":
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "tier and max_steps only apply to procedural resets; "
+                        "provide disaster_family or use the task_id defaults."
+                    ),
+                )
             observations = _OPENENV_ENV.reset_multi_agent(
                 task_id=req.task_id,
                 seed=req.seed,
             )
     except ValueError as exc:
         raise _http_exception_from_env_error(exc) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

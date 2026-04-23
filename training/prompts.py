@@ -83,6 +83,22 @@ def build_floor_prompt(
     if obs.override_applied_last_round:
         user_parts.append(f"Override applied last round: {obs.override_reason_last_round}")
 
+    user_parts.append(
+        "Decision policy: if civilians are visible and an allowed action can evacuate them, "
+        "open a route, gather missing information, or escalate a concrete blocker, choose that "
+        "active action instead of wait."
+    )
+    user_parts.append(
+        "Use wait only when no safe/useful action is available, the action mask blocks the better "
+        "options, or the situation genuinely requires holding."
+    )
+    user_parts.append(
+        "Examples when allowed by the action mask: "
+        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"route_1","action_type":"route_within_floor","arguments":{"from_room_id":"room_201","to_room_id":"exit_floor_2"}} '
+        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"open_1","action_type":"open_exit","arguments":{"exit_id":"exit_floor_2"}} '
+        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"scout_1","action_type":"scout","arguments":{"target_room_id":"room_205"}}'
+    )
+
     user_msg = "\n".join(user_parts)
 
     response_format = (
@@ -91,6 +107,8 @@ def build_floor_prompt(
         "No prose, no markdown, no code fences, and keep it on one line.\n"
         "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
         "action_type (one of the allowed actions), arguments (dict).\n"
+        "round_id must be the integer shown above, not a string or composite id.\n"
+        "client_metadata must be omitted or {}, never null.\n"
         "Optional keys: rationale, client_metadata. Omit optional keys unless they are needed.\n"
         f"Prompt template version: {version}"
     )
@@ -177,6 +195,8 @@ def build_orchestrator_prompt(
         "No prose, no markdown, no code fences, and keep it on one line.\n"
         "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
         "action_type (one of the allowed actions), arguments (dict).\n"
+        "round_id must be the integer shown above, not a string or composite id.\n"
+        "client_metadata must be omitted or {}, never null.\n"
         "Optional keys: rationale, client_metadata. Omit optional keys unless they are needed.\n"
         f"Prompt template version: {version}"
     )

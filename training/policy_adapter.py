@@ -29,6 +29,7 @@ from evacos_ma.schemas.multi_agent import (
     ActionEnvelopeMA,
     ActionTypeMA,
     AgentRole,
+    ACTION_TYPE_TO_ARGS,
 )
 from training.compat import patch_transformers_cache_exports
 
@@ -161,6 +162,67 @@ def _json_payload_candidates(completion_text: str) -> list[str]:
         _append(_extract_first_json_object(block))
 
     return candidates
+
+
+def _normalize_action_payload(
+    payload: Any,
+    *,
+    expected_episode_id: str,
+    expected_round_id: int,
+    agent_id: str,
+) -> dict[str, Any] | None:
+    """Coerce common model formatting mistakes into ActionEnvelopeMA shape."""
+    if not isinstance(payload, dict):
+        return None
+
+    normalized = dict(payload)
+
+    episode_id = normalized.get("episode_id")
+    if not isinstance(episode_id, str) or not episode_id.strip():
+        normalized["episode_id"] = expected_episode_id
+
+    round_id = normalized.get("round_id")
+    if isinstance(round_id, str):
+        digits = re.findall(r"\d+", round_id)
+        if len(digits) == 1:
+            normalized["round_id"] = int(digits[0])
+        else:
+            normalized["round_id"] = expected_round_id
+    elif not isinstance(round_id, int):
+        normalized["round_id"] = expected_round_id
+
+    model_agent_id = normalized.get("agent_id")
+    if not isinstance(model_agent_id, str) or not model_agent_id.strip():
+        normalized["agent_id"] = agent_id
+
+    action_id = normalized.get("action_id")
+    if isinstance(action_id, str):
+        if not action_id.strip():
+            normalized["action_id"] = f"{agent_id}_{expected_round_id}"
+    elif action_id is None:
+        normalized["action_id"] = f"{agent_id}_{expected_round_id}"
+    else:
+        normalized["action_id"] = str(action_id)
+
+    if normalized.get("arguments") is None or not isinstance(normalized.get("arguments"), dict):
+        normalized["arguments"] = {}
+
+    if normalized.get("client_metadata") is None:
+        normalized["client_metadata"] = {}
+
+    return normalized
+
+
+def _validate_action_arguments(action: ActionEnvelopeMA) -> str:
+    """Validate action-specific argument shape after envelope parsing."""
+    args_model = ACTION_TYPE_TO_ARGS.get(action.action_type)
+    if args_model is None:
+        return "unknown_action_type"
+    try:
+        args_model.model_validate(action.arguments)
+    except Exception:
+        return "arguments_invalid"
+    return "ok"
 
 
 @runtime_checkable
@@ -401,6 +463,15 @@ def parse_completion_to_action(
     if payload is None:
         return None, "invalid_json"
 
+    payload = _normalize_action_payload(
+        payload,
+        expected_episode_id=expected_episode_id,
+        expected_round_id=expected_round_id,
+        agent_id=agent_id,
+    )
+    if payload is None:
+        return None, "schema_invalid"
+
     try:
         action = ActionEnvelopeMA.model_validate(payload)
     except Exception:
@@ -418,6 +489,10 @@ def parse_completion_to_action(
     validation = validate_action_for_role(action, expected_role)
     if not validation.valid:
         return None, validation.reason
+
+    argument_status = _validate_action_arguments(action)
+    if argument_status != "ok":
+        return None, argument_status
 
     return action, "ok"
 

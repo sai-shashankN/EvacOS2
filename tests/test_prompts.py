@@ -228,6 +228,12 @@ def test_build_floor_prompt_includes_identity_contract_and_action_mask():
     assert "Exits:" in user_message
     assert "Civilians:" in user_message
     assert "Hazards:" in user_message
+    assert "Decision policy:" in user_message
+    assert "choose that active action instead of wait" in user_message
+    assert "Use wait only when no safe/useful action is available" in user_message
+    assert '"action_type":"route_within_floor"' in user_message
+    assert '"action_type":"open_exit"' in user_message
+    assert '"action_type":"scout"' in user_message
 
 
 def test_build_floor_prompt_handles_empty_lists():

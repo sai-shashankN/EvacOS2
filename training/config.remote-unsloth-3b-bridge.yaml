@@ -1,4 +1,5 @@
 backend: "unsloth"
+max_steps: 100
 # Stronger remote bridge run after the Unsloth backward fix.
 # This stays off vLLM for one more promotion step so we can validate
 # the training path on a useful model before reintroducing serving-time

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import shutil
 import sys
 import uuid
@@ -133,5 +134,50 @@ def test_trained_factory_supports_split_role_checkpoint(monkeypatch) -> None:
         assert policy.floor_policy["model_name"] == "smaller"
         assert captured[0][1] == str(orch)
         assert captured[1][1] == str(floor)
+    finally:
+        shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+def test_trained_factory_prefers_checkpoint_metadata(monkeypatch) -> None:
+    tmp_path = _tmp_dir()
+    ckpt_dir = tmp_path / "latest"
+    adapter_root = ckpt_dir / "lora_adapter"
+    orch = adapter_root / "orchestrator"
+    floor = adapter_root / "floor_agent"
+    try:
+        orch.mkdir(parents=True)
+        floor.mkdir(parents=True)
+        (ckpt_dir / "meta.json").write_text(
+            json.dumps({
+                "role_model_names": {
+                    "orchestrator": "meta-orchestrator",
+                    "floor_agent": "meta-floor",
+                }
+            }),
+            encoding="utf-8",
+        )
+
+        sys.modules.pop("evaluation.baseline_vs_trained", None)
+        module = importlib.import_module("evaluation.baseline_vs_trained")
+
+        monkeypatch.setattr(module, "_load_model_config", lambda config_path=Path("training/config.yaml"): (_ for _ in ()).throw(AssertionError("should not load config")))
+
+        class FakeRoleRoutedPolicy:
+            def __init__(self, *, orchestrator_policy, floor_policy):
+                self.orchestrator_policy = orchestrator_policy
+                self.floor_policy = floor_policy
+
+        def _fake_factory(model_name, *, lora_adapter_path=None, **kwargs):
+            return {"model_name": model_name, "adapter": lora_adapter_path}
+
+        monkeypatch.setattr(module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+        monkeypatch.setattr(module, "hf_policy_factory", _fake_factory)
+
+        policy = module._trained_factory(ckpt_dir)()
+
+        assert policy.orchestrator_policy["model_name"] == "meta-orchestrator"
+        assert policy.floor_policy["model_name"] == "meta-floor"
+        assert policy.orchestrator_policy["adapter"] == str(orch)
+        assert policy.floor_policy["adapter"] == str(floor)
     finally:
         shutil.rmtree(tmp_path, ignore_errors=True)

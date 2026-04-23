@@ -50,7 +50,7 @@ TASKS: dict[str, TaskSpec] = {
     "task_4_cascade_hard": TaskSpec(
         task_id="task_4_cascade_hard",
         name="Multi-Hazard Cascade",
-        difficulty="expert",
+        difficulty="brutal",
         disaster_type=DisasterType.multi_cascade,
         building_profile="complex_5floor_full",
         success_criteria="Evacuate maximum civilians across all exit types",
@@ -107,7 +107,7 @@ TASKS: dict[str, TaskSpec] = {
     "task_lh_cascade_brutal": TaskSpec(
         task_id="task_lh_cascade_brutal",
         name="Long-Horizon Multi-Cascade Brutal",
-        difficulty="expert",
+        difficulty="brutal",
         disaster_type=DisasterType.multi_cascade,
         building_profile="lh_cascade_brutal_7floor",
         success_criteria="Survive 5-stage cascade over 500 rounds with dense civilian load",

@@ -299,6 +299,7 @@ def build_demo_bundle(
     skip_trained: bool = False,
     training_metrics_path: Path | None = None,
     trained_normalizer_snapshot: dict | None = None,
+    config_path: Path = Path("training/config.yaml"),
 ) -> DemoBundleResult:
     output_dir.mkdir(parents=True, exist_ok=True)
     comparison = run_comparison(
@@ -310,6 +311,7 @@ def build_demo_bundle(
         output_csv=output_dir / "baseline_vs_trained.csv",
         skip_trained=skip_trained,
         trained_normalizer_snapshot=trained_normalizer_snapshot,
+        config_path=config_path,
     )
     plot_paths = [
         path
@@ -374,6 +376,12 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Optional path to the training metrics CSV for reward-curve plotting.",
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("training/config.yaml"),
+        help="Training config to use if checkpoint metadata is unavailable.",
+    )
     return parser.parse_args()
 
 
@@ -385,6 +393,7 @@ def main() -> None:
         rationale_mode=args.rationale_mode,
         skip_trained=args.skip_trained,
         training_metrics_path=args.training_metrics_path,
+        config_path=args.config,
     )
     print(result.scorecard_md)
     print(result.summary_md)
