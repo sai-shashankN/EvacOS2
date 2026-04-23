@@ -16,7 +16,7 @@ from training.scope_router import ScopeDecision, route_scope
 
 from evaluation._training_contract import Policy, RewardNormalizer, collect_batch
 
-SCHEMA_VERSION = "2026.04.20"
+SCHEMA_VERSION = "2026.04.24"
 DEFAULT_DISASTER_FAMILIES: tuple[DisasterType, ...] = tuple(DisasterType)
 _MIN_EVAL_ZSCORE_SAMPLES = 30
 _DEFAULT_REWARD_CONFIG: dict[str, float | str] = {
