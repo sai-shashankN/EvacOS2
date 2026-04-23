@@ -115,6 +115,8 @@ Two final artifacts are intentionally still marked as pending rather than implie
 |---|---|---|
 | **Extended benchmark / eval results** | Pending longer run | Fixed-suite baseline-vs-trained deltas, checkpoint-selected scorecard, and longer-horizon plots from a serious training run |
 | **Hugging Face Space / live demo surface** | Pending deployment | Public judge-facing demo that exposes the environment or dashboard flow on a hosted Space |
+| **YouTube walkthrough video** | Pending recording | Short end-to-end submission demo: environment, baseline vs trained evidence, and deterministic live scenario |
+| **Hugging Face blog / write-up** | Pending publication | Public technical write-up covering benchmark design, reward strategy, training stack, and evaluation story |
 
 These are the two remaining submission-polish gaps, not core system gaps.
 
