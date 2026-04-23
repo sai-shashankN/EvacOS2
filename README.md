@@ -107,6 +107,17 @@ The split-role lane (`7B` orchestrator / `3B` floor agents) emits separate `orch
 
 These smoke runs prove computational fit and end-to-end training integrity. Full quantitative improvement claims are intentionally left to longer runs and the generated evaluation bundle.
 
+## Pending Submission Artifacts
+
+Two final artifacts are intentionally still marked as pending rather than implied:
+
+| Artifact | Current status | What will land here |
+|---|---|---|
+| **Extended benchmark / eval results** | Pending longer run | Fixed-suite baseline-vs-trained deltas, checkpoint-selected scorecard, and longer-horizon plots from a serious training run |
+| **Hugging Face Space / live demo surface** | Pending deployment | Public judge-facing demo that exposes the environment or dashboard flow on a hosted Space |
+
+These are the two remaining submission-polish gaps, not core system gaps.
+
 ## Agent Behavior
 
 Each episode places civilians, hazards, stairwells, elevators, and constrained exits inside a deterministic multi-floor building.
