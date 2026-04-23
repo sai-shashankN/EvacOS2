@@ -32,6 +32,8 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 def _incremental_jsonl_rows(
     path: Path,
     state: dict[str, Any],
+    *,
+    flush_remainder: bool = False,
 ) -> list[dict[str, Any]]:
     if not path.exists():
         state["offset"] = 0
@@ -55,7 +57,10 @@ def _incremental_jsonl_rows(
     lines = text.splitlines(keepends=True)
     remainder = ""
     if lines and not lines[-1].endswith(("\n", "\r")):
-        remainder = lines.pop()
+        if flush_remainder:
+            remainder = ""
+        else:
+            remainder = lines.pop()
     state["remainder"] = remainder
 
     rows: list[dict[str, Any]] = []
@@ -160,13 +165,21 @@ def tail_episode(
     action_rows_by_round: dict[int, list[dict[str, Any]]] = {}
 
     while True:
-        for row in _incremental_jsonl_rows(round_path, round_state):
+        for row in _incremental_jsonl_rows(
+            round_path,
+            round_state,
+            flush_remainder=not follow,
+        ):
             if row.get("episode_id") != episode_id:
                 continue
             round_id = int(row.get("round_id", 0))
             round_rows_by_id[round_id] = row
 
-        for row in _incremental_jsonl_rows(action_path, action_state):
+        for row in _incremental_jsonl_rows(
+            action_path,
+            action_state,
+            flush_remainder=not follow,
+        ):
             if row.get("episode_id") != episode_id:
                 continue
             round_id = int(row.get("round_id", 0))
@@ -188,6 +201,10 @@ def tail_episode(
         if time.monotonic() - started >= follow_timeout_s:
             break
         time.sleep(0.25)
-        for row in _incremental_jsonl_rows(summary_path, summary_state):
+        for row in _incremental_jsonl_rows(
+            summary_path,
+            summary_state,
+            flush_remainder=not follow,
+        ):
             if row.get("episode_id") == episode_id:
                 summary = row

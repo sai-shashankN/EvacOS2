@@ -1,0 +1,62 @@
+{
+  "project": "EvacOS2",
+  "rationale_mode": "linear_capped",
+  "artifacts": {
+    "comparison_csv": "demo/results/baseline_fixed_suite.csv",
+    "baseline_json": "demo/results/fixed_suite_baseline_linear_capped.json",
+    "trained_json": null
+  },
+  "headline": {
+    "improved_metrics": 0,
+    "regressed_metrics": 0,
+    "flat_metrics": 0,
+    "no_trained_data_metrics": 5
+  },
+  "metrics": [
+    {
+      "key": "orch_norm_reward",
+      "label": "orchestrator normalized reward",
+      "goal": "higher",
+      "baseline": -3.0525613705811483,
+      "trained": null,
+      "delta": null,
+      "status": "no_trained_data"
+    },
+    {
+      "key": "floor_norm_reward",
+      "label": "floor-agent normalized reward",
+      "goal": "higher",
+      "baseline": -1.1667303651353562,
+      "trained": null,
+      "delta": null,
+      "status": "no_trained_data"
+    },
+    {
+      "key": "save_rate",
+      "label": "save rate",
+      "goal": "higher",
+      "baseline": 0.5853076252917259,
+      "trained": null,
+      "delta": null,
+      "status": "no_trained_data"
+    },
+    {
+      "key": "invalid_action_rate",
+      "label": "invalid action rate",
+      "goal": "lower",
+      "baseline": 0.0,
+      "trained": null,
+      "delta": null,
+      "status": "no_trained_data"
+    },
+    {
+      "key": "override_win_rate",
+      "label": "override win rate",
+      "goal": "higher",
+      "baseline": 0.0,
+      "trained": null,
+      "delta": null,
+      "status": "no_trained_data"
+    }
+  ]
+}

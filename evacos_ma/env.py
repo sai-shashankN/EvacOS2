@@ -1963,10 +1963,12 @@ class EvacEnvironment:
     def _orchestrator_rationale_bonus(
         self,
         *,
-        action: ActionEnvelopeMA,
+        action: ActionEnvelopeMA | None,
         counterfactual_deltas: dict[str, float],
         reward_config: dict[str, Any],
     ) -> float:
+        if action is None:
+            return 0.0
         if action.action_type != ActionTypeMA.override_floor_agent:
             return 0.0
         passes, raw_token_count = self._rationale_gate_passes(action.rationale)

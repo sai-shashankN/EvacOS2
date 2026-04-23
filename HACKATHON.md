@@ -2,7 +2,7 @@
 
 This is the public-facing guide for turning the repo into a clean hackathon submission story.
 
-For a one-screen judge-facing overview, see [SUBMISSION_BRIEF.md](/C:/Users/LENOVO/Specializations/Competitions/Scaler/SUBMISSION_BRIEF.md).
+For a one-screen judge-facing overview, see [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md).
 
 ## What Should Impress Judges Fast
 
@@ -14,11 +14,11 @@ For a one-screen judge-facing overview, see [SUBMISSION_BRIEF.md](/C:/Users/LENO
 
 ## What The Project Already Has
 
-- A real multi-agent evacuation environment in [`evacos_ma/env.py`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evacos_ma/env.py)
-- A live OpenEnv-style API surface in [`evacos_ma/openenv/server_shell.py`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evacos_ma/openenv/server_shell.py)
-- GRPO-style training and rollout collection in [`training/train.py`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/training/train.py)
-- Programmatic evaluation in [`evaluation/fixed_suite.py`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evaluation/fixed_suite.py)
-- Before/after comparison in [`evaluation/baseline_vs_trained.py`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evaluation/baseline_vs_trained.py)
+- A real multi-agent evacuation environment in [`evacos_ma/env.py`](evacos_ma/env.py)
+- A live OpenEnv-style API surface in [`evacos_ma/openenv/server_shell.py`](evacos_ma/openenv/server_shell.py)
+- GRPO-style training and rollout collection in [`training/train.py`](training/train.py)
+- Programmatic evaluation in [`evaluation/fixed_suite.py`](evaluation/fixed_suite.py)
+- Before/after comparison in [`evaluation/baseline_vs_trained.py`](evaluation/baseline_vs_trained.py)
 
 ## Reward Stack And Safeguards
 
@@ -46,10 +46,10 @@ Safeguards against reward hacking already present in the repo:
 
 For serious training, prefer Linux/CUDA:
 
-1. keep the checked-in default `backend: "unsloth"` in [`training/config.yaml`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/training/config.yaml)
+1. keep the checked-in default `backend: "unsloth"` in [`training/config.yaml`](training/config.yaml)
 2. keep the checked-in default `rollout.use_vllm: true`
 3. train with the notebook or `python -m training.train`
-4. for remote/Vast setup, follow [`REMOTE_GPU_SETUP.md`](/C:/Users/LENOVO/Specializations/Competitions/Scaler/REMOTE_GPU_SETUP.md) so install order and warning-aware health checks stay consistent
+4. for remote/Vast setup, follow [`REMOTE_GPU_SETUP.md`](REMOTE_GPU_SETUP.md) so install order and warning-aware health checks stay consistent
 
 Current checked-in default:
 
@@ -90,7 +90,7 @@ python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle
 Baseline-vs-trained bundle:
 
 ```bash
-python -m evaluation.demo_bundle --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter --output-dir outputs/demo_bundle
+python -m evaluation.demo_bundle --trained-checkpoint /path/to/downloaded/lora_adapter --output-dir outputs/demo_bundle
 ```
 
 This writes:
@@ -131,8 +131,8 @@ Keep that off for normal demos.
 ## Suggested Judge Demo
 
 1. Show the environment and role split.
-2. Open `submission_scorecard.md` first and anchor the audience on the headline metrics.
-3. Show trained metrics and deltas from `demo_bundle_summary.md`.
+2. Open `demo/results/a100_7b3b_run_summary.md` first and anchor the audience on the training signal.
+3. Show `demo/results/submission_scorecard_baseline.md` plus the tracked plots, then explain the selected-checkpoint comparison path.
 4. Show one live OpenEnv interaction.
 5. Explain why the reward stack is hard to game.
 

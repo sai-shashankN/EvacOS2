@@ -1,0 +1,34 @@
+{
+  "step": 99,
+  "steps_completed": 100,
+  "wall_seconds_total": 2690.9559835833497,
+  "model_name": "orchestrator=Qwen/Qwen2.5-7B-Instruct;floor_agent=Qwen/Qwen2.5-3B-Instruct",
+  "config_hash": "sha256:5cebf445544f",
+  "wandb_run_id": "e7ljdmh1",
+  "summary_rows": [
+    {
+      "disaster_family": "fire",
+      "tier": "easy",
+      "samples": 50,
+      "first_reward": 0.5453029984961006,
+      "last_reward": 2.102398091438539,
+      "first_window_mean": 0.7122517383306021,
+      "last_window_mean": 0.7115121558347709,
+      "best_reward": 2.1583960414492087,
+      "last_promoted_round": 100,
+      "last_demoted_round": null
+    },
+    {
+      "disaster_family": "fire",
+      "tier": "medium",
+      "samples": 36,
+      "first_reward": -2.394738077199096,
+      "last_reward": 1.5381648223350979,
+      "first_window_mean": -1.5749659345197078,
+      "last_window_mean": 0.834826754652766,
+      "best_reward": 3.1896441934807602,
+      "last_promoted_round": null,
+      "last_demoted_round": 99
+    }
+  ]
+}

@@ -12,9 +12,14 @@ from pydantic import BaseModel, Field
 from curriculum.controller import EVAL_SEEDS
 from evacos_ma.env import EvacEnvironment
 from evacos_ma.models import DisasterType
-from training.scope_router import ScopeDecision, route_scope
 
-from evaluation._training_contract import Policy, RewardNormalizer, collect_batch
+from evaluation._training_contract import (
+    Policy,
+    RewardNormalizer,
+    ScopeDecision,
+    collect_batch,
+    route_scope,
+)
 
 SCHEMA_VERSION = "2026.04.24"
 DEFAULT_DISASTER_FAMILIES: tuple[DisasterType, ...] = tuple(DisasterType)

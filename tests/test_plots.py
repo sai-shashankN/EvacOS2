@@ -52,3 +52,21 @@ def test_reward_curve_accepts_custom_metrics_path(tmp_path: Path):
 
     assert output is not None and output.exists()
     assert output.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_reward_curve_skips_incompatible_metrics_path(tmp_path: Path):
+    metrics_path = tmp_path / "curriculum-signal.csv"
+    metrics_path.write_text(
+        "\n".join(
+            [
+                "disaster_family,tier,episode_index,normalized_reward",
+                "fire,medium,1,-1.0",
+                "fire,medium,2,0.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = make_reward_curve(tmp_path, metrics_path=metrics_path)
+
+    assert output is None

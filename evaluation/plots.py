@@ -83,6 +83,14 @@ def make_reward_curve(base_dir: Path, *, metrics_path: Path | None = None) -> Pa
     rows = _load_csv(_resolve_training_metrics_path(base_dir, metrics_path))
     if not rows:
         return None
+    required_columns = {"step", "mean_norm_reward_orch", "mean_norm_reward_floor"}
+    missing_columns = required_columns.difference(rows[0])
+    if missing_columns:
+        _warn(
+            "Skipping reward_curve: metrics CSV missing columns "
+            + ", ".join(sorted(missing_columns))
+        )
+        return None
     output = base_dir / "plots" / "reward_curve.png"
     steps = [int(row["step"]) for row in rows]
     orch = [float(row["mean_norm_reward_orch"]) for row in rows]

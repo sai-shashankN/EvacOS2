@@ -1,6 +1,6 @@
 # EvacOS2
 
-**OpenEnv-compatible hierarchical multi-agent evacuation benchmark — deterministic simulator, role-aware GRPO, baseline-to-scorecard evaluation.**
+**OpenEnv-compatible hierarchical multi-agent evacuation benchmark - deterministic simulator, role-aware GRPO, baseline-to-scorecard evaluation.**
 
 ## Judge-Fast Summary
 
@@ -34,6 +34,7 @@
 | Split-role metrics | Aggregate + per-role CSV diagnostics | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
+| A100 split-role run | `7B` orchestrator / `3B` floor agents, 100 steps, final `ckpt_99` | Tracked summary | [demo/results/a100_7b3b_run_summary.md](demo/results/a100_7b3b_run_summary.md), [demo/results/plots/a100_7b3b_training_signal.png](demo/results/plots/a100_7b3b_training_signal.png) |
 
 Here, **smoke validated** means a capped end-to-end run completed model load, rollout, training, and checkpointing on stronger hardware.
 
@@ -119,20 +120,19 @@ The validated stronger configurations each completed:
 
 The split-role lane (`7B` orchestrator / `3B` floor agents) emits separate `orchestrator_loss` and `floor_agent_loss` diagnostics, confirming that the training stack tracks each role independently rather than only globally.
 
-These smoke runs prove computational fit and end-to-end training integrity. Full quantitative improvement claims are intentionally left to longer runs and the generated evaluation bundle.
+These smoke runs prove computational fit and end-to-end training integrity. The tracked A100 run summary shows the first serious split-role training signal; full held-out trained-vs-baseline claims should still be generated from the selected LoRA checkpoint before the final pitch.
 
-## Pending Submission Artifacts
+## Submission Artifacts
 
-Two final artifacts are intentionally still marked as pending rather than implied:
+The repo now includes lightweight, Git-tracked artifacts for reviewers. Large LoRA adapters and raw logs remain outside Git by design.
 
 | Artifact | Current status | What will land here |
 |---|---|---|
-| **Extended benchmark / eval results** | Pending longer run | Fixed-suite baseline-vs-trained deltas, checkpoint-selected scorecard, and longer-horizon plots from a serious training run |
-| **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the OpenEnv API surface |
-| **YouTube walkthrough video** | Pending recording | Short end-to-end submission demo: environment, baseline vs trained evidence, and deterministic live scenario |
-| **Hugging Face blog / write-up** | Pending publication | Public technical write-up covering benchmark design, reward strategy, training stack, and evaluation story |
-
-These are the two remaining submission-polish gaps, not core system gaps.
+| **A100 training signal** | Tracked | [run summary](demo/results/a100_7b3b_run_summary.md), [training-signal CSV](demo/results/a100_7b3b_training_signal.csv), [reward plot](demo/results/plots/a100_7b3b_training_signal.png) |
+| **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
+| **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
+| **YouTube walkthrough video** | Placeholder | Add final video URL here after recording; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
+| **Hugging Face blog / write-up** | Drafted | Local draft lives in [demo/hf_blog.md](demo/hf_blog.md); replace with the published HF post URL before final submission |
 
 ## Agent Behavior
 
@@ -164,11 +164,19 @@ ls evacos_ma/openenv
 cat training/config.remote-unsloth-7b3b-split-bridge.yaml
 ```
 
-For full trained comparison once you have a checkpoint:
+The tracked proof artifacts are available without regenerating:
 
 ```bash
+cat demo/results/a100_7b3b_run_summary.md
+cat demo/results/submission_scorecard_baseline.md
+```
+
+For a full trained comparison, download or restore the selected LoRA adapter artifact first, then pass that adapter path explicitly:
+
+```bash
+CHECKPOINT_DIR=/path/to/downloaded/lora_adapter
 python -m evaluation.demo_bundle \
-  --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter \
+  --trained-checkpoint "$CHECKPOINT_DIR" \
   --config training/config.remote-unsloth-7b3b-split-bridge.yaml \
   --output-dir outputs/demo_bundle
 ```
@@ -216,6 +224,7 @@ Key files:
 - baseline-vs-trained comparison: [evaluation/baseline_vs_trained.py](evaluation/baseline_vs_trained.py)
 - bundle builder: [evaluation/demo_bundle.py](evaluation/demo_bundle.py)
 - plot generation: [evaluation/plots.py](evaluation/plots.py)
+- tracked proof bundle: [demo/results/](demo/results)
 
 The bundle path emits:
 

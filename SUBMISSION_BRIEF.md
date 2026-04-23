@@ -18,12 +18,12 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
   - `/openenv/state`
 - Fixed evaluation path:
   - `python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline`
-  - `python -m evaluation.demo_bundle --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter --config training/config.remote-unsloth-7b3b-split-bridge.yaml --output-dir outputs/demo_bundle`
+  - `python -m evaluation.demo_bundle --trained-checkpoint /path/to/downloaded/lora_adapter --config training/config.remote-unsloth-7b3b-split-bridge.yaml --output-dir outputs/demo_bundle`
 - Headline artifacts:
-  - `outputs/demo_bundle/submission_scorecard.md`
-  - `outputs/demo_bundle/demo_bundle_summary.md`
-  - `outputs/demo_bundle/baseline_vs_trained.csv`
-  - If `outputs/demo_bundle` is absent, the checked-in bundle is baseline-only and the trained scorecard still needs to be generated from a selected checkpoint.
+  - `demo/results/a100_7b3b_run_summary.md`
+  - `demo/results/plots/a100_7b3b_training_signal.png`
+  - `demo/results/submission_scorecard_baseline.md`
+  - `demo/results/baseline_fixed_suite.csv`
 
 ## Core competitive claims
 
@@ -36,16 +36,16 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 
 ## Recommended demo order
 
-1. Open `submission_scorecard.md`.
-2. Show the baseline-vs-trained delta summary.
-3. Explain the verifier-style reward stack and safeguards.
+1. Open `demo/results/a100_7b3b_run_summary.md`.
+2. Show the training-signal plot and fixed-suite baseline scorecard.
+3. Explain what is proven now versus what the final selected-checkpoint comparison will add.
 4. Show the hierarchy: `7B` orchestrator, `3B` floor agents, and optional disaster-specialist routing.
 5. Show one live OpenEnv interaction.
 
 ## Repo landmarks
 
-- Project overview: [README.md](/C:/Users/LENOVO/Specializations/Competitions/Scaler/README.md)
-- Hackathon runbook: [HACKATHON.md](/C:/Users/LENOVO/Specializations/Competitions/Scaler/HACKATHON.md)
-- Demo bundle builder: [evaluation/demo_bundle.py](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evaluation/demo_bundle.py)
-- Fixed-suite evaluation: [evaluation/fixed_suite.py](/C:/Users/LENOVO/Specializations/Competitions/Scaler/evaluation/fixed_suite.py)
-- Scope router: [training/scope_router.py](/C:/Users/LENOVO/Specializations/Competitions/Scaler/training/scope_router.py)
+- Project overview: [README.md](README.md)
+- Hackathon runbook: [HACKATHON.md](HACKATHON.md)
+- Demo bundle builder: [evaluation/demo_bundle.py](evaluation/demo_bundle.py)
+- Fixed-suite evaluation: [evaluation/fixed_suite.py](evaluation/fixed_suite.py)
+- Scope router: [training/scope_router.py](training/scope_router.py)
