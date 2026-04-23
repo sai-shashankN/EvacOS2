@@ -1,8 +1,6 @@
 # EvacOS2
 
-**Hierarchical multi-agent evacuation benchmark with a deterministic simulator, GRPO-style post-training, and judge-ready evidence artifacts.**
-
-For the fastest submission overview, start with [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md).
+**OpenEnv-compatible hierarchical multi-agent evacuation benchmark — deterministic simulator, role-aware GRPO, baseline-to-scorecard evaluation.**
 
 ## Judge-Fast Summary
 
@@ -33,15 +31,17 @@ For the fastest submission overview, start with [SUBMISSION_BRIEF.md](SUBMISSION
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoints.py](training/checkpoints.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
 
+Here, **smoke validated** means a capped end-to-end run completed model load, rollout, training, and checkpointing on stronger hardware.
+
 ## Why It Matters
 
-Most OpenEnv-style submissions stop at one layer: a simulator, a training loop, or an evaluation stub. EvacOS2 closes the loop end to end:
+Most multi-agent demos stop at showing that agents can talk to each other. The harder question is whether post-training measurably improves coordination. Evacuation under uncertainty is a concrete testbed for that question: hazards evolve, exits bottleneck, and no single agent sees the full building.
 
-1. deterministic multi-agent environment
-2. role-aware GRPO-style training
-3. checkpointing and resume
-4. baseline-vs-trained evaluation
-5. judge-consumable scorecards and plots
+EvacOS2 is built around three contributions:
+
+1. **A reproducible benchmark.** Deterministic simulator, four difficulty tiers, and fixed evaluation suites make runs comparable instead of anecdotal.
+2. **Role-aware training.** Shared-model and split-role paths are both supported, including a validated `7B` orchestrator / `3B` floor-agent lane with per-role diagnostics so you can see which role improved and which did not.
+3. **Verifiable evaluation.** Baseline-vs-trained comparison, scorecards, and plots come from real rollouts and checkpoints, not hand-curated examples.
 
 ## Architecture
 
@@ -94,41 +94,58 @@ graph LR
     L --> BVT
 ```
 
+## What Smoke Testing Showed
+
+The validated stronger configurations each completed:
+
+- model load and multi-agent initialization across the `1+5` topology
+- multi-step rollouts over the live environment
+- GRPO training steps with LoRA checkpoint persistence
+- aggregate and per-role metrics emission to CSV
+
+The split-role lane (`7B` orchestrator / `3B` floor agents) emits separate `orchestrator_loss` and `floor_agent_loss` diagnostics, confirming that the training stack tracks each role independently rather than only globally.
+
+These smoke runs prove computational fit and end-to-end training integrity. Full quantitative improvement claims are intentionally left to longer runs and the generated evaluation bundle.
+
+## Agent Behavior
+
+Each episode places civilians, hazards, stairwells, elevators, and constrained exits inside a deterministic multi-floor building.
+
+| Element | Detail |
+|---|---|
+| **Orchestrator observation** | Floor summaries, inter-floor bottlenecks, belief rollups, recent floor actions, directive outcomes, unresolved escalations |
+| **Floor-agent observation** | Visible rooms/corridors, local hazards, civilian groups, exits on floor, stairwell entries, active directives, action mask |
+| **Floor-agent actions** | `route_within_floor`, `prioritize_room`, `open_exit`, `lockdown_room`, `scout`, `predict_state`, `handoff_to_orchestrator`, `wait` |
+| **Orchestrator actions** | `route_between_floors`, `call_elevator`, `evacuate_floor_priority`, `broadcast_directive`, `override_floor_agent`, `request_explanation`, `wait` |
+| **Reward signal** | Base simulation reward plus team progress, floor saved/lost terms, invalid-action penalties, coordination/directive quality, rationale bonuses |
+| **Success shape** | Move civilians to safety while minimizing loss, bottlenecks, and invalid behavior across repeated rounds |
+
+The runtime schema is exposed through `/openenv/schema`, and the canonical types live in [evacos_ma/schemas/multi_agent.py](evacos_ma/schemas/multi_agent.py) and [evacos_ma/schemas/rewards.py](evacos_ma/schemas/rewards.py).
+
 ## Fastest Proof Path
 
-1. Read [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md)
-2. Inspect the OpenEnv contract in [openenv.yaml](openenv.yaml)
-3. Build a baseline evidence bundle:
+```bash
+# 1. Generate a baseline evidence bundle. No GPU or checkpoint required.
+#    Produces: baseline_vs_trained.csv, submission_scorecard.md, plots/
+python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline
 
-   ```bash
-   python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline
-   ```
+# 2. Inspect the OpenEnv contract and live environment package.
+cat openenv.yaml
+ls evacos_ma/openenv
 
-4. Build a trained comparison bundle once you have a checkpoint:
+# 3. Confirm the split-role bridge config is checked in.
+cat training/config.remote-unsloth-7b3b-split-bridge.yaml
+```
 
-   ```bash
-   python -m evaluation.demo_bundle \
-     --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter \
-     --output-dir outputs/demo_bundle
-   ```
+For full trained comparison once you have a checkpoint:
 
-5. Inspect the checked-in split-role bridge config:
-   [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml)
+```bash
+python -m evaluation.demo_bundle \
+  --trained-checkpoint outputs/training/checkpoints/latest/lora_adapter \
+  --output-dir outputs/demo_bundle
+```
 
-## OpenEnv Surface
-
-The public environment contract is described in [openenv.yaml](openenv.yaml).
-
-Key endpoints:
-
-- `/openenv/reset`
-- `/openenv/step`
-- `/openenv/state`
-- `/openenv/schema`
-- `/openenv/health`
-- `/openenv/metadata`
-
-This is wired to the live simulator in [evacos_ma/](evacos_ma), not a canned response layer.
+Start with [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md) if you want the narrative overview first.
 
 ## Repository Map
 
@@ -141,32 +158,20 @@ This is wired to the live simulator in [evacos_ma/](evacos_ma), not a canned res
 | [demo/](demo) | Presentation and story assets |
 | [notebooks/train_evacos_ma.ipynb](notebooks/train_evacos_ma.ipynb) | End-to-end notebook flow |
 
-## Training Modes
+## Training Configs
 
-### 1. Shared-model default
+The checked-in shared-model default is [training/config.yaml](training/config.yaml) with `Qwen/Qwen2.5-3B-Instruct`.
 
-Default checked-in path:
-
-- base model: `Qwen/Qwen2.5-3B-Instruct`
-- config entrypoint: [training/config.yaml](training/config.yaml)
-
-### 2. Stronger single-model lane
-
-Validated smoke lane:
-
-- `7B` single-model
-- `7B + vLLM`
-
-### 3. Split-role lane
-
-Checked-in split bridge config:
-
-- [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml)
-
-Resolved topology:
+The strongest checked-in split bridge is [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml):
 
 - orchestrator: `Qwen/Qwen2.5-7B-Instruct`
 - floor agents: `Qwen/Qwen2.5-3B-Instruct`
+
+Validated stronger lanes include:
+
+- `7B` single-model
+- `7B + vLLM`
+- `7B/3B` split-role
 
 ## Evaluation And Evidence
 
@@ -185,6 +190,8 @@ The bundle path emits:
 - `submission_scorecard.json`
 - plots generated from the run's actual metrics CSV
 
-## Secrets
+---
 
-Copy [.env.example](.env.example) to `.env` and fill only the local values you need. The real `.env` is gitignored.
+Full narrative overview: [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md)
+
+Environment secrets: copy [.env.example](.env.example) to `.env` and fill only the local values you need. The real `.env` is gitignored.
