@@ -33,9 +33,11 @@ def test_build_demo_bundle_baseline_only_writes_summary_and_csv():
         scorecard = result.scorecard_md.read_text(encoding="utf-8")
         assert "Demo Bundle Summary" in summary
         assert "Baseline Metrics" in summary
+        assert "headline eval score" in summary
         assert "trained fixed suite: skipped" in summary
         assert "EvacOS2 Submission Scorecard" in scorecard
         assert "Judge-Fast Take" in scorecard
+        assert "headline eval score (%)" in scorecard
         assert "no-trained-data metrics" in scorecard
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

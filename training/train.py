@@ -11,6 +11,7 @@ import json
 import os
 import pickle
 import random
+import shutil
 import signal
 import time
 from pathlib import Path
@@ -232,6 +233,127 @@ def _model_backed_trainable_roles(config: TrainingConfig) -> tuple[str, ...]:
         for role in config.trainable_roles
         if _role_uses_model_policy(config, role)
     )
+
+
+def _configured_frozen_adapter_paths(config: TrainingConfig) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+    for role in _ROLE_DIAGNOSTIC_ROLES:
+        adapter_path = config.frozen_adapter_path_for_role(role)  # type: ignore[arg-type]
+        if adapter_path is None:
+            continue
+        path = Path(adapter_path).expanduser()
+        if not path.exists():
+            raise RuntimeError(
+                f"roles.frozen_adapter_paths[{role!r}] points to {path!s}, "
+                "but that adapter directory does not exist."
+            )
+        paths[role] = path
+    return paths
+
+
+def _frozen_adapter_paths_for_run(
+    config: TrainingConfig,
+    bundle: Any | None,
+) -> dict[str, Path]:
+    """Resolve frozen role adapters from checkpoint first, config second.
+
+    Checkpoints copy frozen adapters into ``latest/lora_adapter``. On resume or
+    evaluation from another machine, the original configured source path may no
+    longer exist, so the checkpoint-local copy must take precedence.
+    """
+
+    if not config.uses_role_routed_policy:
+        return {}
+
+    bundle_paths = getattr(bundle, "role_lora_weights_paths", None) or {}
+    paths: dict[str, Path] = {}
+    missing_roles: list[str] = []
+    for role in _ROLE_DIAGNOSTIC_ROLES:
+        if config.is_role_trainable(role):  # type: ignore[arg-type]
+            continue
+
+        bundle_path = bundle_paths.get(role)
+        if bundle_path is not None and Path(bundle_path).exists():
+            paths[role] = Path(bundle_path)
+            continue
+
+        configured_path = config.frozen_adapter_path_for_role(role)  # type: ignore[arg-type]
+        if configured_path is not None:
+            path = Path(configured_path).expanduser()
+            if not path.exists():
+                raise RuntimeError(
+                    f"roles.frozen_adapter_paths[{role!r}] points to {path!s}, "
+                    "but that adapter directory does not exist and no "
+                    "checkpoint-local copy is available."
+                )
+            paths[role] = path
+            continue
+
+        if bundle_path is not None:
+            missing_roles.append(role)
+
+    if missing_roles:
+        raise RuntimeError(
+            "Checkpoint bundle references missing frozen adapter role(s): "
+            f"{missing_roles!r}"
+        )
+    return paths
+
+
+def _configured_floor_specialist_adapter_paths(config: TrainingConfig) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+    for family, adapter_path in config.roles.frozen_floor_specialist_adapter_paths.items():
+        path = Path(adapter_path).expanduser()
+        if not path.exists():
+            raise RuntimeError(
+                "roles.frozen_floor_specialist_adapter_paths"
+                f"[{family!r}] points to {path!s}, but that adapter directory "
+                "does not exist."
+            )
+        paths[family] = path
+    return paths
+
+
+def _frozen_floor_specialist_adapter_paths_for_run(
+    config: TrainingConfig,
+    bundle: Any | None,
+) -> dict[str, Path]:
+    """Resolve routed frozen floor specialists from checkpoint first."""
+
+    configured_paths = config.roles.frozen_floor_specialist_adapter_paths
+    if not configured_paths:
+        return {}
+
+    bundle_paths = getattr(bundle, "floor_specialist_lora_weights_paths", None) or {}
+    paths: dict[str, Path] = {}
+    missing_families: list[str] = []
+    for family, configured_path_raw in configured_paths.items():
+        bundle_path = bundle_paths.get(family)
+        if bundle_path is not None and Path(bundle_path).exists():
+            paths[family] = Path(bundle_path)
+            continue
+
+        configured_path = Path(configured_path_raw).expanduser()
+        if configured_path.exists():
+            paths[family] = configured_path
+            continue
+
+        if bundle_path is not None:
+            missing_families.append(family)
+            continue
+
+        raise RuntimeError(
+            "roles.frozen_floor_specialist_adapter_paths"
+            f"[{family!r}] points to {configured_path!s}, but that adapter "
+            "directory does not exist and no checkpoint-local copy is available."
+        )
+
+    if missing_families:
+        raise RuntimeError(
+            "Checkpoint bundle references missing frozen floor specialist "
+            f"adapter(s): {missing_families!r}"
+        )
+    return paths
 
 
 def _resolved_model_name_tag(config: TrainingConfig) -> str:
@@ -1165,12 +1287,58 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     }
 
 
-def _save_adapter_weights(policy: Any, target_dir: Path) -> dict[str, Path] | None:
+def _population_std(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return variance ** 0.5
+
+
+def _copy_adapter_tree(source_dir: Path, target_dir: Path) -> None:
+    if source_dir.resolve() == target_dir.resolve():
+        return
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_dir, target_dir)
+
+
+def _copy_floor_specialist_adapter_trees(
+    specialist_adapter_paths_to_copy: dict[str, Path] | None,
+    target_dir: Path,
+) -> dict[str, Path] | None:
+    if not specialist_adapter_paths_to_copy:
+        return None
+
+    saved_paths: dict[str, Path] = {}
+    for family, source_dir in specialist_adapter_paths_to_copy.items():
+        family_dir = target_dir / family
+        _copy_adapter_tree(source_dir, family_dir)
+        saved_paths[family] = family_dir
+    return saved_paths
+
+
+def _save_adapter_weights(
+    policy: Any,
+    target_dir: Path,
+    *,
+    roles_to_save: set[str] | None = None,
+    role_adapter_paths_to_copy: dict[str, Path] | None = None,
+) -> dict[str, Path] | None:
     role_policies = getattr(policy, "_role_policies", None)
     if role_policies is not None:
         saved_paths: dict[str, Path] = {}
+        role_adapter_paths_to_copy = role_adapter_paths_to_copy or {}
         for role, role_policy in role_policies.items():
             role_dir = target_dir / role
+            frozen_source = role_adapter_paths_to_copy.get(role)
+            if frozen_source is not None:
+                _copy_adapter_tree(frozen_source, role_dir)
+                saved_paths[role] = role_dir
+                continue
+            if roles_to_save is not None and role not in roles_to_save:
+                continue
             model = getattr(role_policy, "_model", None)
             save_pretrained = getattr(model, "save_pretrained", None)
             if callable(save_pretrained):
@@ -1253,7 +1421,14 @@ def _build_policy(
     shared_model_name = resolved_models["orchestrator"]
 
     lora_adapter_path: str | None = None
-    role_lora_adapter_paths: dict[str, str] = {}
+    frozen_adapter_paths = _frozen_adapter_paths_for_run(config, bundle)
+    floor_specialist_adapter_paths = _frozen_floor_specialist_adapter_paths_for_run(
+        config,
+        bundle,
+    )
+    role_lora_adapter_paths: dict[str, str] = {
+        role: str(path) for role, path in frozen_adapter_paths.items()
+    }
     if bundle is not None:
         if not bundle.lora_weights_path.exists():
             raise RuntimeError(
@@ -1292,6 +1467,7 @@ def _build_policy(
     if backend == "unsloth":
         from training.policy_adapter import (
             RoleRoutedPolicy,
+            ScopeRoutedFloorPolicy,
             StubPolicy,
             unsloth_policy_factory,
         )
@@ -1315,11 +1491,10 @@ def _build_policy(
                     temperature=0.0,
                     seed=config.seed.training_rng,
                 )
-            return RoleRoutedPolicy(
-                orchestrator_policy=orchestrator_policy,
-                floor_policy=unsloth_policy_factory(
+            def _build_unsloth_floor_policy(adapter_path: str | None) -> Any:
+                return unsloth_policy_factory(
                     resolved_models["floor_agent"],
-                    lora_adapter_path=role_lora_adapter_paths.get("floor_agent"),
+                    lora_adapter_path=adapter_path,
                     lora_r=config.lora.rank,
                     lora_alpha=config.lora.alpha,
                     lora_target_modules=list(config.lora.target_modules),
@@ -1331,7 +1506,27 @@ def _build_policy(
                     max_new_tokens=config.model.max_completion_tokens,
                     temperature=0.0,
                     seed=config.seed.training_rng,
-                ),
+                )
+
+            if floor_specialist_adapter_paths:
+                floor_policy = ScopeRoutedFloorPolicy(
+                    specialist_policies={
+                        family: _build_unsloth_floor_policy(str(path))
+                        for family, path in floor_specialist_adapter_paths.items()
+                    },
+                    generalist_policy=(
+                        _build_unsloth_floor_policy(role_lora_adapter_paths["floor_agent"])
+                        if "floor_agent" in role_lora_adapter_paths
+                        else None
+                    ),
+                )
+            else:
+                floor_policy = _build_unsloth_floor_policy(
+                    role_lora_adapter_paths.get("floor_agent")
+                )
+            return RoleRoutedPolicy(
+                orchestrator_policy=orchestrator_policy,
+                floor_policy=floor_policy,
             )
 
         return unsloth_policy_factory(
@@ -1350,7 +1545,12 @@ def _build_policy(
             seed=config.seed.training_rng,
         )
     if backend == "hf":
-        from training.policy_adapter import RoleRoutedPolicy, StubPolicy, hf_policy_factory
+        from training.policy_adapter import (
+            RoleRoutedPolicy,
+            ScopeRoutedFloorPolicy,
+            StubPolicy,
+            hf_policy_factory,
+        )
 
         peft_config = None
         if lora_adapter_path is None:
@@ -1397,17 +1597,40 @@ def _build_policy(
                     max_new_tokens=config.model.max_completion_tokens,
                     do_sample=False,
                 )
-            return RoleRoutedPolicy(
-                orchestrator_policy=orchestrator_policy,
-                floor_policy=hf_policy_factory(
+            def _build_hf_floor_policy(
+                adapter_path: str | None,
+                peft_config_for_policy: Any | None = None,
+            ) -> Any:
+                return hf_policy_factory(
                     resolved_models["floor_agent"],
-                    lora_adapter_path=role_lora_adapter_paths.get("floor_agent"),
-                    peft_config=floor_peft,
+                    lora_adapter_path=adapter_path,
+                    peft_config=peft_config_for_policy,
                     torch_dtype=config.model.dtype,
                     max_prompt_tokens=config.model.max_prompt_tokens,
                     max_new_tokens=config.model.max_completion_tokens,
                     do_sample=False,
-                ),
+                )
+
+            if floor_specialist_adapter_paths:
+                floor_policy = ScopeRoutedFloorPolicy(
+                    specialist_policies={
+                        family: _build_hf_floor_policy(str(path))
+                        for family, path in floor_specialist_adapter_paths.items()
+                    },
+                    generalist_policy=(
+                        _build_hf_floor_policy(role_lora_adapter_paths["floor_agent"])
+                        if "floor_agent" in role_lora_adapter_paths
+                        else None
+                    ),
+                )
+            else:
+                floor_policy = _build_hf_floor_policy(
+                    role_lora_adapter_paths.get("floor_agent"),
+                    floor_peft,
+                )
+            return RoleRoutedPolicy(
+                orchestrator_policy=orchestrator_policy,
+                floor_policy=floor_policy,
             )
 
         return hf_policy_factory(
@@ -1612,7 +1835,24 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
         adapter_path = ckpt_dir / "lora_adapter"
 
         # 1. Write adapter weights into ckpt_N/lora_adapter (durable first)
-        role_adapter_paths = _save_adapter_weights(policy, adapter_path)
+        role_adapter_paths = _save_adapter_weights(
+            policy,
+            adapter_path,
+            roles_to_save=(
+                set(_model_backed_trainable_roles(config))
+                if config.uses_role_routed_policy
+                else None
+            ),
+            role_adapter_paths_to_copy=(
+                _frozen_adapter_paths_for_run(config, bundle)
+                if config.uses_role_routed_policy
+                else None
+            ),
+        )
+        floor_specialist_adapter_paths = _copy_floor_specialist_adapter_trees(
+            _frozen_floor_specialist_adapter_paths_for_run(config, bundle),
+            adapter_path / "floor_agent" / "specialists",
+        )
 
         # 2. Build the bundle pointing at the durable adapter path
         import torch as _torch_mod
@@ -1640,6 +1880,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             model_name=model_name,
             config_hash=config_hash,
             role_lora_weights_paths=role_adapter_paths,
+            floor_specialist_lora_weights_paths=floor_specialist_adapter_paths,
             role_model_names=checkpoint_role_model_names,
             orchestrator_policy=checkpoint_orchestrator_policy,
             optimizer_state=optimizer_state,
@@ -1717,8 +1958,12 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 "tier_mix": ";".join(sorted({result.tier for result in results})),
                 "mean_raw_reward_orch": round(sum(all_raw_orch) / max(len(all_raw_orch), 1), 4),
                 "mean_raw_reward_floor": round(sum(all_raw_floor) / max(len(all_raw_floor), 1), 4),
+                "raw_reward_std_orch": round(_population_std(all_raw_orch), 4),
+                "raw_reward_std_floor": round(_population_std(all_raw_floor), 4),
                 "mean_norm_reward_orch": round(sum(all_norm_orch) / max(len(all_norm_orch), 1), 4),
                 "mean_norm_reward_floor": round(sum(all_norm_floor) / max(len(all_norm_floor), 1), 4),
+                "norm_reward_std_orch": round(_population_std(all_norm_orch), 4),
+                "norm_reward_std_floor": round(_population_std(all_norm_floor), 4),
                 "invalid_action_rate": round(invalid_count / max(total_samples, 1), 4),
                 **rollout_metrics,
                 "episodes_seen": (step + 1) * config.rollout.episodes_per_step,

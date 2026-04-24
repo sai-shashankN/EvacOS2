@@ -59,6 +59,9 @@ def test_comparison_row_count_matches_roles_times_metrics():
         )
         with output_csv.open("r", encoding="utf-8", newline="") as handle:
             rows = list(csv.DictReader(handle))
-        assert len(rows) == 1 * 1 * 1 * 2 * 5
+        role_metric_rows = 1 * 1 * 1 * 2 * 5
+        team_metric_rows = 1 * 1 * 1 * 1
+        assert len(rows) == role_metric_rows + team_metric_rows
+        assert any(row["role"] == "team" and row["metric"] == "eval_score_pct" for row in rows)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

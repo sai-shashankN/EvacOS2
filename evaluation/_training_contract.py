@@ -11,6 +11,7 @@ from training import (
 
 Policy = _policy_adapter.Policy
 RoleRoutedPolicy = _policy_adapter.RoleRoutedPolicy
+ScopeRoutedFloorPolicy = _policy_adapter.ScopeRoutedFloorPolicy
 StubPolicy = _policy_adapter.StubPolicy
 hf_policy_factory = _policy_adapter.hf_policy_factory
 RewardNormalizer = _reward.RewardNormalizer
@@ -21,6 +22,7 @@ route_scope = _scope_router.route_scope
 __all__ = [
     "Policy",
     "RoleRoutedPolicy",
+    "ScopeRoutedFloorPolicy",
     "RewardNormalizer",
     "ScopeDecision",
     "collect_batch",

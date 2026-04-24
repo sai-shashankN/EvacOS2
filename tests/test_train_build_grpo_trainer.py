@@ -136,6 +136,32 @@ def test_floor_only_stub_orchestrator_builds_floor_trainer_only(monkeypatch):
     }
 
 
+def test_orchestrator_only_model_backed_builds_orchestrator_trainer_only(monkeypatch):
+    config = TrainingConfig(
+        model={
+            "base": "shared-model",
+            "orchestrator_base": "bigger-model",
+            "floor_base": "smaller-model",
+        },
+        roles={"trainable": ["orchestrator"]},
+    )
+    monkeypatch.setattr(train_mod, "MultiAgentGRPOTrainer", FakeProjectTrainer)
+
+    trainer = train_mod._build_grpo_trainer(
+        GRPOTrainer=MockTRLTrainerModelOnly,
+        policy=_make_dual_policy(),
+        config=config,
+        role_optimizer_states={"orchestrator": {"state": "orch-only"}},
+    )
+
+    assert isinstance(trainer, train_mod.DualRoleGRPOTrainer)
+    assert set(trainer._role_trainers) == {"orchestrator"}
+    assert trainer._role_trainers["orchestrator"].kwargs["model"] == "orch-model"
+    assert trainer._role_trainers["orchestrator"].kwargs["optimizer_state"] == {
+        "state": "orch-only"
+    }
+
+
 def test_dual_role_trainer_skips_untrainable_role_groups() -> None:
     floor_calls: list[dict[str, list[list[object]]]] = []
 
@@ -254,6 +280,336 @@ def test_build_policy_resumes_floor_only_role_adapter(monkeypatch):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def test_build_policy_uses_frozen_floor_adapter_for_orchestrator_only_training(
+    monkeypatch,
+):
+    tmp_dir = _tmp_dir()
+    try:
+        frozen_floor = tmp_dir / "frozen_floor"
+        frozen_floor.mkdir(parents=True)
+        (frozen_floor / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+        config = TrainingConfig(
+            model={
+                "base": "shared-model",
+                "orchestrator_base": "Qwen/Qwen2.5-7B-Instruct",
+                "floor_base": "Qwen/Qwen2.5-3B-Instruct",
+            },
+            roles={
+                "trainable": ["orchestrator"],
+                "frozen_adapter_paths": {"floor_agent": str(frozen_floor)},
+            },
+            rollout={"use_vllm": False},
+        )
+        captured: list[tuple[str, dict[str, object]]] = []
+
+        import training.policy_adapter as policy_module
+
+        class FakeRoleRoutedPolicy:
+            def __init__(self, *, orchestrator_policy, floor_policy):
+                self.orchestrator_policy = orchestrator_policy
+                self.floor_policy = floor_policy
+
+        def fake_unsloth_policy_factory(model_name, **kwargs):
+            captured.append((model_name, kwargs))
+            return {"model_name": model_name, "adapter": kwargs.get("lora_adapter_path")}
+
+        monkeypatch.setattr(policy_module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+        monkeypatch.setattr(policy_module, "unsloth_policy_factory", fake_unsloth_policy_factory)
+
+        policy = train_mod._build_policy(config, None, LoraConfig=SimpleNamespace)
+
+        assert len(captured) == 2
+        assert policy.orchestrator_policy["model_name"] == "Qwen/Qwen2.5-7B-Instruct"
+        assert policy.orchestrator_policy["adapter"] is None
+        assert policy.floor_policy["model_name"] == "Qwen/Qwen2.5-3B-Instruct"
+        assert policy.floor_policy["adapter"] == str(frozen_floor)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_build_policy_routes_three_frozen_floor_specialists_for_orchestrator_training(
+    monkeypatch,
+):
+    tmp_dir = _tmp_dir()
+    try:
+        specialist_paths: dict[str, Path] = {}
+        for family in ("fire", "flood", "gas"):
+            path = tmp_dir / family / "lora_adapter" / "floor_agent"
+            path.mkdir(parents=True)
+            (path / "adapter_config.json").write_text("{}", encoding="utf-8")
+            specialist_paths[family] = path
+
+        config = TrainingConfig(
+            model={
+                "base": "shared-model",
+                "orchestrator_base": "Qwen/Qwen2.5-7B-Instruct",
+                "floor_base": "Qwen/Qwen2.5-3B-Instruct",
+            },
+            roles={
+                "trainable": ["orchestrator"],
+                "frozen_floor_specialist_adapter_paths": {
+                    family: str(path)
+                    for family, path in specialist_paths.items()
+                },
+            },
+            rollout={
+                "use_vllm": False,
+                "disaster_families": ["fire", "flood", "gas"],
+            },
+        )
+        captured: list[tuple[str, dict[str, object]]] = []
+
+        import training.policy_adapter as policy_module
+
+        class FakeRoleRoutedPolicy:
+            def __init__(self, *, orchestrator_policy, floor_policy):
+                self.orchestrator_policy = orchestrator_policy
+                self.floor_policy = floor_policy
+
+        class FakeGeneratedPolicy:
+            def __init__(self, model_name: str, adapter: object):
+                self.model_name = model_name
+                self.adapter = adapter
+
+            def act(self, prompt, agent_id, role):
+                return f"{self.model_name}:{self.adapter}:{agent_id}", []
+
+        def fake_unsloth_policy_factory(model_name, **kwargs):
+            captured.append((model_name, kwargs))
+            return FakeGeneratedPolicy(model_name, kwargs.get("lora_adapter_path"))
+
+        monkeypatch.setattr(policy_module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+        monkeypatch.setattr(policy_module, "unsloth_policy_factory", fake_unsloth_policy_factory)
+
+        policy = train_mod._build_policy(config, None, LoraConfig=SimpleNamespace)
+
+        assert policy.orchestrator_policy.model_name == "Qwen/Qwen2.5-7B-Instruct"
+        assert sorted(policy.floor_policy.specialist_policy_keys) == [
+            "fire_specialist",
+            "flood_specialist",
+            "gas_specialist",
+        ]
+        assert len(captured) == 4
+        assert captured[0] == (
+            "Qwen/Qwen2.5-7B-Instruct",
+            captured[0][1],
+        )
+        captured_adapters = {
+            kwargs.get("lora_adapter_path")
+            for _model_name, kwargs in captured[1:]
+        }
+        assert captured_adapters == {str(path) for path in specialist_paths.values()}
+        fire_output = policy.floor_policy.act(
+            [{"role": "system", "content": "Disaster: fire\nRound: 0"}],
+            "floor_0_agent",
+            "floor_agent",
+        )
+        assert str(specialist_paths["fire"]) in fire_output[0]
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_build_policy_resume_prefers_checkpoint_frozen_adapter_over_config_path(
+    monkeypatch,
+):
+    tmp_dir = _tmp_dir()
+    try:
+        ckpt_adapter_root = tmp_dir / "latest" / "lora_adapter"
+        ckpt_orch = ckpt_adapter_root / "orchestrator"
+        ckpt_floor = ckpt_adapter_root / "floor_agent"
+        ckpt_orch.mkdir(parents=True)
+        ckpt_floor.mkdir(parents=True)
+        missing_original = tmp_dir / "deleted_original_floor_adapter"
+
+        config = TrainingConfig(
+            model={
+                "base": "shared-model",
+                "orchestrator_base": "Qwen/Qwen2.5-7B-Instruct",
+                "floor_base": "Qwen/Qwen2.5-3B-Instruct",
+            },
+            roles={
+                "trainable": ["orchestrator"],
+                "frozen_adapter_paths": {"floor_agent": str(missing_original)},
+            },
+            rollout={"use_vllm": False},
+        )
+        bundle = SimpleNamespace(
+            lora_weights_path=ckpt_adapter_root,
+            role_lora_weights_paths={
+                "orchestrator": ckpt_orch,
+                "floor_agent": ckpt_floor,
+            },
+        )
+        captured: list[tuple[str, dict[str, object]]] = []
+
+        import training.policy_adapter as policy_module
+
+        class FakeRoleRoutedPolicy:
+            def __init__(self, *, orchestrator_policy, floor_policy):
+                self.orchestrator_policy = orchestrator_policy
+                self.floor_policy = floor_policy
+
+        def fake_unsloth_policy_factory(model_name, **kwargs):
+            captured.append((model_name, kwargs))
+            return {"model_name": model_name, "adapter": kwargs.get("lora_adapter_path")}
+
+        monkeypatch.setattr(policy_module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+        monkeypatch.setattr(policy_module, "unsloth_policy_factory", fake_unsloth_policy_factory)
+
+        policy = train_mod._build_policy(config, bundle, LoraConfig=SimpleNamespace)
+
+        assert policy.orchestrator_policy["adapter"] == str(ckpt_orch)
+        assert policy.floor_policy["adapter"] == str(ckpt_floor)
+        assert len(captured) == 2
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_build_policy_resume_prefers_checkpoint_floor_specialists_over_config_paths(
+    monkeypatch,
+):
+    tmp_dir = _tmp_dir()
+    try:
+        ckpt_adapter_root = tmp_dir / "latest" / "lora_adapter"
+        ckpt_orch = ckpt_adapter_root / "orchestrator"
+        ckpt_orch.mkdir(parents=True)
+        missing_originals: dict[str, Path] = {}
+        ckpt_specialists: dict[str, Path] = {}
+        for family in ("fire", "flood", "gas"):
+            missing_originals[family] = tmp_dir / f"deleted_{family}_adapter"
+            ckpt_dir = ckpt_adapter_root / "floor_agent" / "specialists" / family
+            ckpt_dir.mkdir(parents=True)
+            ckpt_specialists[family] = ckpt_dir
+
+        config = TrainingConfig(
+            model={
+                "base": "shared-model",
+                "orchestrator_base": "Qwen/Qwen2.5-7B-Instruct",
+                "floor_base": "Qwen/Qwen2.5-3B-Instruct",
+            },
+            roles={
+                "trainable": ["orchestrator"],
+                "frozen_floor_specialist_adapter_paths": {
+                    family: str(path)
+                    for family, path in missing_originals.items()
+                },
+            },
+            rollout={
+                "use_vllm": False,
+                "disaster_families": ["fire", "flood", "gas"],
+            },
+        )
+        bundle = SimpleNamespace(
+            lora_weights_path=ckpt_adapter_root,
+            role_lora_weights_paths={"orchestrator": ckpt_orch},
+            floor_specialist_lora_weights_paths=ckpt_specialists,
+        )
+        captured: list[tuple[str, dict[str, object]]] = []
+
+        import training.policy_adapter as policy_module
+
+        class FakeRoleRoutedPolicy:
+            def __init__(self, *, orchestrator_policy, floor_policy):
+                self.orchestrator_policy = orchestrator_policy
+                self.floor_policy = floor_policy
+
+        class FakeGeneratedPolicy:
+            def __init__(self, model_name: str, adapter: object):
+                self.model_name = model_name
+                self.adapter = adapter
+
+            def act(self, prompt, agent_id, role):
+                return f"{self.adapter}:{agent_id}", []
+
+        def fake_unsloth_policy_factory(model_name, **kwargs):
+            captured.append((model_name, kwargs))
+            return FakeGeneratedPolicy(model_name, kwargs.get("lora_adapter_path"))
+
+        monkeypatch.setattr(policy_module, "RoleRoutedPolicy", FakeRoleRoutedPolicy)
+        monkeypatch.setattr(policy_module, "unsloth_policy_factory", fake_unsloth_policy_factory)
+
+        policy = train_mod._build_policy(config, bundle, LoraConfig=SimpleNamespace)
+
+        assert policy.orchestrator_policy.adapter == str(ckpt_orch)
+        captured_adapters = {
+            kwargs.get("lora_adapter_path")
+            for _model_name, kwargs in captured[1:]
+        }
+        assert captured_adapters == {str(path) for path in ckpt_specialists.values()}
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_save_adapter_weights_copies_frozen_adapter_without_saving_full_floor_model():
+    tmp_dir = _tmp_dir()
+    try:
+        target = tmp_dir / "checkpoint" / "lora_adapter"
+        frozen_floor = tmp_dir / "frozen_floor"
+        frozen_floor.mkdir(parents=True)
+        (frozen_floor / "adapter_config.json").write_text("{}", encoding="utf-8")
+        calls: list[str] = []
+
+        class FakeModel:
+            def __init__(self, role: str):
+                self.role = role
+
+            def save_pretrained(self, path: str) -> None:
+                calls.append(self.role)
+                Path(path).mkdir(parents=True, exist_ok=True)
+                (Path(path) / "adapter_model.safetensors").write_text(
+                    self.role,
+                    encoding="utf-8",
+                )
+
+        policy = SimpleNamespace(
+            _role_policies={
+                "orchestrator": SimpleNamespace(_model=FakeModel("orchestrator")),
+                "floor_agent": SimpleNamespace(_model=FakeModel("floor_agent")),
+            }
+        )
+
+        saved = train_mod._save_adapter_weights(
+            policy,
+            target,
+            roles_to_save={"orchestrator"},
+            role_adapter_paths_to_copy={"floor_agent": frozen_floor},
+        )
+
+        assert saved == {
+            "orchestrator": target / "orchestrator",
+            "floor_agent": target / "floor_agent",
+        }
+        assert calls == ["orchestrator"]
+        assert (target / "floor_agent" / "adapter_config.json").exists()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_copy_floor_specialist_adapter_trees_preserves_family_paths():
+    tmp_dir = _tmp_dir()
+    try:
+        sources: dict[str, Path] = {}
+        for family in ("fire", "flood", "gas"):
+            source = tmp_dir / "source" / family
+            source.mkdir(parents=True)
+            (source / "adapter_config.json").write_text(family, encoding="utf-8")
+            sources[family] = source
+
+        target = tmp_dir / "checkpoint" / "lora_adapter" / "floor_agent" / "specialists"
+        saved = train_mod._copy_floor_specialist_adapter_trees(sources, target)
+
+        assert saved == {
+            "fire": target / "fire",
+            "flood": target / "flood",
+            "gas": target / "gas",
+        }
+        for family in sources:
+            assert (target / family / "adapter_config.json").read_text(encoding="utf-8") == family
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def test_checkpoint_role_metadata_includes_floor_only_specialist() -> None:
     config = TrainingConfig(
         roles={
@@ -363,3 +719,9 @@ def test_compute_rollout_metrics_tracks_wait_and_hollow_behavior() -> None:
     assert metrics["floor_agent_active_action_rate"] == pytest.approx(2 / 4, rel=0, abs=1e-4)
     assert metrics["active_empty_args_rate"] == pytest.approx(1 / 6, rel=0, abs=1e-4)
     assert metrics["valid_but_hollow_action_rate"] == pytest.approx(2 / 6, rel=0, abs=1e-4)
+
+
+def test_population_std_uses_zero_for_singleton_and_population_variance() -> None:
+    assert train_mod._population_std([]) == 0.0
+    assert train_mod._population_std([2.0]) == 0.0
+    assert train_mod._population_std([1.0, 3.0]) == pytest.approx(1.0)

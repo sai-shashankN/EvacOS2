@@ -17,6 +17,7 @@ from training.checkpoint import (
     acquire_run_output_lock,
     atomic_replace_latest,
     CheckpointBundle,
+    _pid_is_running,
     load_checkpoint,
     rotate_checkpoints,
     save_checkpoint,
@@ -162,6 +163,118 @@ class TestCheckpointRoundtrip:
         finally:
             shutil.rmtree(ckpt_root, ignore_errors=True)
 
+    def test_save_and_load_roundtrip_with_floor_specialist_artifacts(self):
+        ckpt_root = _tmp_dir()
+        try:
+            rng = random.Random(17)
+            rng_state = pickle.dumps(rng.getstate())
+            lora_dir = ckpt_root / "ckpt_5" / "lora_adapter"
+            orch_dir = lora_dir / "orchestrator"
+            fire_dir = lora_dir / "floor_agent" / "specialists" / "fire"
+            flood_dir = lora_dir / "floor_agent" / "specialists" / "flood"
+            gas_dir = lora_dir / "floor_agent" / "specialists" / "gas"
+            for path in (orch_dir, fire_dir, flood_dir, gas_dir):
+                path.mkdir(parents=True)
+                (path / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+            bundle = CheckpointBundle(
+                step=5,
+                wall_seconds_total=21.0,
+                curriculum_snapshot={"tier": "hard"},
+                normalizer_snapshot={"k": {"count": 3, "mean": 0.4, "m2": 0.2}},
+                rollout_rng_state=rng_state,
+                lora_weights_path=lora_dir,
+                model_name="orchestrator=big;floor_agent=small",
+                config_hash="sha256:routed123456",
+                role_lora_weights_paths={"orchestrator": orch_dir},
+                floor_specialist_lora_weights_paths={
+                    "fire": fire_dir,
+                    "flood": flood_dir,
+                    "gas": gas_dir,
+                },
+                role_model_names={
+                    "orchestrator": "big-model",
+                    "floor_agent": "small-model",
+                },
+                role_optimizer_states={"orchestrator": {"state": {0: {"step": 5}}}},
+            )
+
+            saved_path = save_checkpoint(ckpt_root, bundle)
+            atomic_replace_latest(ckpt_root, saved_path)
+
+            loaded = load_checkpoint(ckpt_root)
+            assert loaded is not None
+            assert loaded.role_lora_weights_paths == {"orchestrator": orch_dir}
+            assert loaded.floor_specialist_lora_weights_paths == {
+                "fire": fire_dir,
+                "flood": flood_dir,
+                "gas": gas_dir,
+            }
+            assert loaded.role_optimizer_states == {"orchestrator": {"state": {0: {"step": 5}}}}
+        finally:
+            shutil.rmtree(ckpt_root, ignore_errors=True)
+
+    def test_load_rebases_copied_latest_floor_specialist_paths(self):
+        tmp_root = _tmp_dir()
+        src_root = tmp_root / "source" / "checkpoints"
+        portable_root = tmp_root / "portable" / "checkpoints"
+        try:
+            rng = random.Random(19)
+            rng_state = pickle.dumps(rng.getstate())
+            lora_dir = src_root / "ckpt_6" / "lora_adapter"
+            orch_dir = lora_dir / "orchestrator"
+            fire_dir = lora_dir / "floor_agent" / "specialists" / "fire"
+            flood_dir = lora_dir / "floor_agent" / "specialists" / "flood"
+            gas_dir = lora_dir / "floor_agent" / "specialists" / "gas"
+            for path in (orch_dir, fire_dir, flood_dir, gas_dir):
+                path.mkdir(parents=True)
+                (path / "adapter_config.json").write_text("{}", encoding="utf-8")
+
+            bundle = CheckpointBundle(
+                step=6,
+                wall_seconds_total=22.0,
+                curriculum_snapshot={"tier": "brutal"},
+                normalizer_snapshot={"k": {"count": 4, "mean": 0.5, "m2": 0.3}},
+                rollout_rng_state=rng_state,
+                lora_weights_path=lora_dir,
+                model_name="orchestrator=big;floor_agent=small",
+                config_hash="sha256:routedcopy123",
+                role_lora_weights_paths={"orchestrator": orch_dir},
+                floor_specialist_lora_weights_paths={
+                    "fire": fire_dir,
+                    "flood": flood_dir,
+                    "gas": gas_dir,
+                },
+                role_model_names={
+                    "orchestrator": "big-model",
+                    "floor_agent": "small-model",
+                },
+            )
+
+            saved_path = save_checkpoint(src_root, bundle)
+            atomic_replace_latest(src_root, saved_path)
+            portable_root.mkdir(parents=True)
+            shutil.copytree(src_root / "latest", portable_root / "latest")
+            shutil.rmtree(src_root)
+
+            loaded = load_checkpoint(portable_root)
+            assert loaded is not None
+            expected_adapter_root = portable_root / "latest" / "lora_adapter"
+            assert loaded.lora_weights_path == expected_adapter_root
+            assert loaded.lora_weights_path.exists()
+            assert loaded.role_lora_weights_paths == {
+                "orchestrator": expected_adapter_root / "orchestrator",
+            }
+            assert loaded.floor_specialist_lora_weights_paths == {
+                "fire": expected_adapter_root / "floor_agent" / "specialists" / "fire",
+                "flood": expected_adapter_root / "floor_agent" / "specialists" / "flood",
+                "gas": expected_adapter_root / "floor_agent" / "specialists" / "gas",
+            }
+            assert all(path.exists() for path in loaded.role_lora_weights_paths.values())
+            assert all(path.exists() for path in loaded.floor_specialist_lora_weights_paths.values())
+        finally:
+            shutil.rmtree(tmp_root, ignore_errors=True)
+
 
 class TestRotateCheckpoints:
     def test_rotate_keeps_highest_n(self):
@@ -211,6 +324,9 @@ class TestRotateCheckpoints:
 
 
 class TestRunOutputLock:
+    def test_pid_is_running_checks_current_process_without_signaling(self):
+        assert _pid_is_running(os.getpid()) is True
+
     def test_acquire_run_output_lock_rejects_live_lock(self):
         ckpt_root = _tmp_dir()
         try:

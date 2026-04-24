@@ -21,6 +21,7 @@ import json
 import logging
 import random
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence, runtime_checkable
 
@@ -32,6 +33,7 @@ from evacos_ma.schemas.multi_agent import (
     ACTION_TYPE_TO_ARGS,
 )
 from training.compat import patch_transformers_cache_exports
+from training.scope_router import GENERALIST_POLICY_KEY, SPECIALIST_POLICY_KEYS, route_scope
 
 PolicyResult = tuple[str, list[int]]
 
@@ -298,6 +300,159 @@ class RoleRoutedPolicy:
                 ]
             for out_idx, original_idx in enumerate(indices):
                 outputs[original_idx] = role_outputs[out_idx]
+
+        return [output if output is not None else ("", []) for output in outputs]
+
+
+_SPECIALIST_POLICY_KEY_SET = frozenset(SPECIALIST_POLICY_KEYS.values())
+_PROMPT_METADATA_LABELS: tuple[tuple[str, str], ...] = (
+    ("disaster_family", "disaster_family"),
+    ("disaster_type", "disaster_family"),
+    ("family", "disaster_family"),
+    ("Disaster", "disaster_family"),
+    ("tier", "tier"),
+    ("Tier", "tier"),
+    ("severity", "severity"),
+    ("Severity", "severity"),
+)
+
+
+def _prompt_text(prompt: list[dict[str, str]]) -> str:
+    return "\n".join(str(message.get("content", "")) for message in prompt)
+
+
+def _extract_prompt_scope_metadata(prompt: list[dict[str, str]]) -> dict[str, Any]:
+    """Extract routing metadata from chat prompts without changing Policy.act."""
+
+    text = _prompt_text(prompt)
+    metadata: dict[str, Any] = {}
+
+    families_match = re.search(
+        r"(?im)(?:disaster_families|families)\s*[:=]\s*\[([^\]]+)\]",
+        text,
+    )
+    if families_match:
+        families = re.findall(r"[A-Za-z][A-Za-z0-9_\- ]*", families_match.group(1))
+        if families:
+            metadata["disaster_families"] = [family.strip() for family in families]
+
+    for label, key in _PROMPT_METADATA_LABELS:
+        if key in metadata:
+            continue
+        match = re.search(
+            rf"(?im)^\s*{re.escape(label)}\s*[:=]\s*[\"']?([^\"'\n,;]+)",
+            text,
+        )
+        if match:
+            metadata[key] = match.group(1).strip()
+
+    return metadata
+
+
+def _normalize_specialist_policy_key(key: str) -> str:
+    normalized = key.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in SPECIALIST_POLICY_KEYS:
+        return SPECIALIST_POLICY_KEYS[normalized]
+    if normalized in _SPECIALIST_POLICY_KEY_SET:
+        return normalized
+    raise ValueError(
+        "ScopeRoutedFloorPolicy specialist keys must be disaster families "
+        f"{sorted(SPECIALIST_POLICY_KEYS)} or policy keys "
+        f"{sorted(_SPECIALIST_POLICY_KEY_SET)}; got {key!r}"
+    )
+
+
+class ScopeRoutedFloorPolicy:
+    """Route floor-agent generation to frozen disaster-specialist policies.
+
+    The rollout interface intentionally stays unchanged.  Routing metadata is
+    extracted from the prompt (`Disaster: fire`, JSON-style fields, or similar),
+    then passed through `training.scope_router.route_scope` so this wrapper and
+    the offline planning/router code share one deterministic decision function.
+    """
+
+    def __init__(
+        self,
+        *,
+        specialist_policies: Mapping[str, Policy],
+        generalist_policy: Policy | None = None,
+    ) -> None:
+        if not specialist_policies:
+            raise ValueError("ScopeRoutedFloorPolicy requires at least one specialist policy")
+
+        normalized: dict[str, Policy] = {}
+        for key, policy in specialist_policies.items():
+            normalized[_normalize_specialist_policy_key(key)] = policy
+
+        self._specialist_policies = normalized
+        self._generalist_policy = generalist_policy
+
+    @property
+    def specialist_policy_keys(self) -> tuple[str, ...]:
+        return tuple(sorted(self._specialist_policies))
+
+    def _policy_for_prompt(self, prompt: list[dict[str, str]]) -> tuple[Policy, str]:
+        decision = route_scope(_extract_prompt_scope_metadata(prompt))
+        policy = self._specialist_policies.get(decision.policy_key)
+        if policy is not None:
+            return policy, decision.policy_key
+
+        if self._generalist_policy is not None:
+            return self._generalist_policy, GENERALIST_POLICY_KEY
+
+        raise RuntimeError(
+            "No frozen floor policy is available for disaster route "
+            f"{decision.policy_key!r} (family={decision.disaster_family!r}, "
+            f"reason={decision.reason!r}). Add the matching "
+            "roles.frozen_floor_specialist_adapter_paths entry or provide "
+            "roles.frozen_adapter_paths.floor_agent as a generalist fallback."
+        )
+
+    def act(
+        self,
+        prompt: list[dict[str, str]],
+        agent_id: str,
+        role: str,
+    ) -> PolicyResult:
+        if role != "floor_agent":
+            raise ValueError("ScopeRoutedFloorPolicy only supports role='floor_agent'")
+        policy, _policy_key = self._policy_for_prompt(prompt)
+        return _as_policy_result(policy.act(prompt, agent_id, role))
+
+    def act_batch(
+        self,
+        prompts: list[list[dict[str, str]]],
+        agent_ids: list[str],
+        roles: list[str],
+    ) -> list[PolicyResult]:
+        if not (len(prompts) == len(agent_ids) == len(roles)):
+            raise ValueError("prompts, agent_ids, and roles must have the same length")
+        if any(role != "floor_agent" for role in roles):
+            raise ValueError("ScopeRoutedFloorPolicy only supports floor_agent batches")
+        if not prompts:
+            return []
+
+        grouped: dict[str, tuple[Policy, list[int]]] = {}
+        for idx, prompt in enumerate(prompts):
+            policy, policy_key = self._policy_for_prompt(prompt)
+            if policy_key not in grouped:
+                grouped[policy_key] = (policy, [])
+            grouped[policy_key][1].append(idx)
+
+        outputs: list[PolicyResult | None] = [None] * len(prompts)
+        for policy, indices in grouped.values():
+            policy_prompts = [prompts[idx] for idx in indices]
+            policy_agent_ids = [agent_ids[idx] for idx in indices]
+            policy_roles = [roles[idx] for idx in indices]
+            if hasattr(policy, "act_batch"):
+                policy_outputs = policy.act_batch(policy_prompts, policy_agent_ids, policy_roles)  # type: ignore[attr-defined]
+            else:
+                policy_outputs = [
+                    _as_policy_result(policy.act(prompt, aid, role))
+                    for prompt, aid, role in zip(policy_prompts, policy_agent_ids, policy_roles, strict=True)
+                ]
+            for out_idx, original_idx in enumerate(indices):
+                outputs[original_idx] = _as_policy_result(policy_outputs[out_idx])
 
         return [output if output is not None else ("", []) for output in outputs]
 

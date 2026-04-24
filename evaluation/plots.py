@@ -189,6 +189,10 @@ def make_override_win_rate_plot(base_dir: Path) -> Path | None:
     return _line_metric_plot(base_dir, "override_win_rate", "override_win_rate.png", "Override Win Rate by Tier")
 
 
+def make_eval_score_plot(base_dir: Path) -> Path | None:
+    return _line_metric_plot(base_dir, "eval_score_pct", "eval_score_pct.png", "Headline Eval Score by Tier")
+
+
 def make_rationale_mode_comparison(base_dir: Path) -> Path | None:
     if not _ready():
         return None
@@ -254,6 +258,7 @@ def make_all_plots(base_dir: Path, *, metrics_path: Path | None = None) -> list[
     return [
         make_reward_curve(base_dir, metrics_path=metrics_path),
         make_baseline_vs_trained_bar(base_dir),
+        make_eval_score_plot(base_dir),
         make_invalid_action_rate_plot(base_dir),
         make_override_win_rate_plot(base_dir),
         make_rationale_mode_comparison(base_dir),

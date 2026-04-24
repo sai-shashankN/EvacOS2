@@ -8,7 +8,7 @@ The goal is to show **clean, undeniable improvement** with minimal inconsistency
 ## Must Fix
 
 - [ ] Fix the OpenEnv manifest/schema contract mismatch
-- [ ] Unify `expert` vs `brutal` difficulty naming everywhere public-facing
+- [x] Unify difficulty naming around `brutal` for the hardest tier
 - [ ] Make evaluation config-safe for split-role checkpoints
 - [ ] Generate one clean baseline-vs-trained evidence bundle
 - [ ] Lock one deterministic demo scenario

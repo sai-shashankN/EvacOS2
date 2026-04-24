@@ -24,12 +24,57 @@ If you skip that ordering, you can end up with:
 
 ## Recommended machine shape
 
-Good first remote target:
+Good first remote target for debugging a single 3B specialist:
 
 - Linux + CUDA
 - 1x RTX 4090
 - ~150 GB disk
 - Jupyter terminal or SSH access
+
+Cost-aware specialist plan for future runs:
+
+- Use parallel 24 GB consumer/workstation GPUs for the 3B floor specialists.
+- Preferred cheap lanes: 1x RTX 3090 24 GB per specialist when reliability and
+  storage are acceptable.
+- Also acceptable for 3B-only specialist sweeps: RTX 4090 24 GB, RTX A5000
+  24 GB, or A10/A10G 24 GB.
+- Reserve A100-class hardware for the finale: 7B orchestrator/generalist
+  training, mixed-disaster curriculum, or larger evaluation runs.
+- The 4090 was safe and fast for the fire 3B proof run, but it was likely more
+  than necessary once the stack was stable. Next time, prefer three cheaper
+  parallel 3090-style lanes for fire/flood/gas, then move the selected artifacts
+  into the A100 finale.
+
+Future 3B specialist curriculum:
+
+- For real specialist training, run all tiers: `easy`, `medium`, `hard`, then
+  `brutal`. Do not introduce alternate names for the hardest tier.
+- Prefer staged curriculum blocks over per-step round-robin. Do not alternate
+  `easy -> medium -> hard -> brutal` every single step at the start; that makes
+  the reward distribution noisy before the policy has stable behavior.
+- Default next-rental specialist run:
+  - 50 steps `easy`
+  - 50 steps `medium`
+  - 40 steps `hard`
+  - 20 steps `brutal`
+  - Total: 160 steps per disaster specialist
+- Use this 160-step plan when renting 24 GB GPUs for parallel fire/flood/gas
+  specialist training. It is the best current balance between cost, tier
+  coverage, and not letting brutal-tier noise dominate the run.
+- A stronger but costlier 400-step specialist run is:
+  - 100 steps `easy`
+  - 100 steps `medium`
+  - 100 steps `hard`
+  - 100 steps `brutal`
+- In later blocks, keep a small replay mix from easier tiers if supported
+  (roughly 10-20%) so the model does not forget the behaviors that made early
+  tiers work.
+- If only running a 100-step proof, use a staged mini-curriculum such as
+  30 easy / 30 medium / 25 hard / 15 brutal, but expect noisier graphs than the
+  easy-only proof run.
+- Always evaluate the final checkpoint on fixed held-out seeds for every tier,
+  even if training used a curriculum. Training curves show learning; held-out
+  tier eval proves generalization.
 
 ## Repo bootstrap
 
@@ -148,6 +193,18 @@ Before a long run:
 2. verify `python -m training.train` can import its stack
 3. run a very small smoke config
 4. only then start the real checkpoint-producing run
+
+## Upload the selected adapter
+
+After a successful run, publish the adapter folder rather than committing large
+binary weights to Git:
+
+```bash
+export HF_ADAPTER_REPO=your-username/evacos2-lora-adapter
+python scripts/upload_adapter.py \
+  outputs/training/checkpoints/latest/lora_adapter \
+  "$HF_ADAPTER_REPO"
+```
 
 ## If the environment is already partially installed
 

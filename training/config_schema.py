@@ -14,6 +14,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 _EVAL_SEEDS_SET = frozenset({42, 123, 456, 789, 1024})
 _ROLE_NAMES = ("orchestrator", "floor_agent")
 RoleName = Literal["orchestrator", "floor_agent"]
+FloorSpecialistFamily = Literal["fire", "flood", "gas"]
+_FLOOR_SPECIALIST_FAMILIES = frozenset({"fire", "flood", "gas"})
+_FAMILY_ALIASES = {
+    "gas_leak": "gas",
+    "gasleak": "gas",
+    "smoke": "fire",
+    "water": "flood",
+}
+
+
+def _normalize_family_name(value: Any) -> str:
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None:
+        value = enum_value
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    return _FAMILY_ALIASES.get(text, text)
 
 
 class RolesConfig(BaseModel):
@@ -22,6 +38,14 @@ class RolesConfig(BaseModel):
         default_factory=lambda: ["orchestrator", "floor_agent"]
     )
     orchestrator_policy: Literal["model", "stub"] = "model"
+    frozen_adapter_paths: dict[RoleName, str] = Field(default_factory=dict)
+    frozen_floor_specialist_adapter_paths: dict[FloorSpecialistFamily, str] = Field(
+        default_factory=dict,
+        description=(
+            "Frozen floor-agent LoRA adapters keyed by disaster family. "
+            "Used for phase-2 7B orchestrator training over fire/flood/gas specialists."
+        ),
+    )
 
     @field_validator("trainable")
     @classmethod
@@ -48,6 +72,15 @@ class RolesConfig(BaseModel):
 
     def is_trainable(self, role: RoleName) -> bool:
         return role in self.trainable_set
+
+    def frozen_adapter_path_for_role(self, role: RoleName) -> str | None:
+        return self.frozen_adapter_paths.get(role)
+
+    def frozen_floor_specialist_adapter_path_for_family(
+        self,
+        family: FloorSpecialistFamily,
+    ) -> str | None:
+        return self.frozen_floor_specialist_adapter_paths.get(family)
 
     def policy_for_role(self, role: RoleName) -> Literal["model", "stub"]:
         if role == "orchestrator":
@@ -234,9 +267,24 @@ class TrainingConfig(BaseModel):
     def policy_for_role(self, role: RoleName) -> Literal["model", "stub"]:
         return self.roles.policy_for_role(role)
 
+    def frozen_adapter_path_for_role(self, role: RoleName) -> str | None:
+        return self.roles.frozen_adapter_path_for_role(role)
+
+    def frozen_floor_specialist_adapter_path_for_family(
+        self,
+        family: FloorSpecialistFamily,
+    ) -> str | None:
+        return self.roles.frozen_floor_specialist_adapter_path_for_family(family)
+
     @property
     def uses_role_routed_policy(self) -> bool:
-        return self.model.uses_split_bases or self.roles.orchestrator_policy != "model"
+        return (
+            self.model.uses_split_bases
+            or self.roles.orchestrator_policy != "model"
+            or bool(self.roles.frozen_adapter_paths)
+            or bool(self.roles.frozen_floor_specialist_adapter_paths)
+            or self.roles.trainable_set != set(_ROLE_NAMES)
+        )
 
     @model_validator(mode="after")
     def vllm_requires_unsloth_backend(self) -> "TrainingConfig":
@@ -252,13 +300,58 @@ class TrainingConfig(BaseModel):
                 "roles.orchestrator_policy='stub' is incompatible with "
                 "roles.trainable including 'orchestrator'"
             )
-        if (
-            trainable_roles != set(_ROLE_NAMES)
-            and self.roles.orchestrator_policy != "stub"
-        ):
-            raise ValueError(
-                "Selective roles.trainable currently requires "
-                "roles.orchestrator_policy='stub'; model-backed selective-role "
-                "training is not supported yet."
-            )
+        for role, adapter_path in self.roles.frozen_adapter_paths.items():
+            if role in trainable_roles:
+                raise ValueError(
+                    "roles.frozen_adapter_paths may only target non-trainable "
+                    f"roles; got frozen path for trainable role {role!r}"
+                )
+            if self.policy_for_role(role) != "model":
+                raise ValueError(
+                    "roles.frozen_adapter_paths may only target model-backed "
+                    f"roles; got {role!r} with policy {self.policy_for_role(role)!r}"
+                )
+            if not adapter_path.strip():
+                raise ValueError(
+                    f"roles.frozen_adapter_paths[{role!r}] must be a non-empty path"
+                )
+        specialist_paths = self.roles.frozen_floor_specialist_adapter_paths
+        if specialist_paths:
+            if "floor_agent" in trainable_roles:
+                raise ValueError(
+                    "roles.frozen_floor_specialist_adapter_paths requires "
+                    "roles.trainable to exclude 'floor_agent'; floor specialists "
+                    "must be frozen while the orchestrator trains."
+                )
+            for family, adapter_path in specialist_paths.items():
+                if not adapter_path.strip():
+                    raise ValueError(
+                        "roles.frozen_floor_specialist_adapter_paths"
+                        f"[{family!r}] must be a non-empty path"
+                    )
+
+            configured_families = set(specialist_paths)
+            requested_families = {
+                _normalize_family_name(family)
+                for family in self.rollout.disaster_families
+            }
+            specialist_requested = requested_families & _FLOOR_SPECIALIST_FAMILIES
+            missing_specialists = specialist_requested - configured_families
+            has_generalist_fallback = "floor_agent" in self.roles.frozen_adapter_paths
+            if missing_specialists and not has_generalist_fallback:
+                raise ValueError(
+                    "rollout.disaster_families includes specialist disaster(s) "
+                    f"{sorted(missing_specialists)!r}, but no matching "
+                    "roles.frozen_floor_specialist_adapter_paths entry or "
+                    "roles.frozen_adapter_paths.floor_agent fallback was provided."
+                )
+
+            unsupported_requested = requested_families - _FLOOR_SPECIALIST_FAMILIES
+            if unsupported_requested and not has_generalist_fallback:
+                raise ValueError(
+                    "scope-routed floor specialists only cover fire/flood/gas. "
+                    f"Unsupported rollout.disaster_families={sorted(unsupported_requested)!r} "
+                    "require roles.frozen_adapter_paths.floor_agent as a "
+                    "generalist fallback."
+                )
         return self

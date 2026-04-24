@@ -24,7 +24,7 @@ from evacos_ma.schemas.rewards import REWARD_SCHEMA_VERSION
 def _generate_sample(n: int = 50, seed: int = 42) -> list[tuple[str, float]]:
     """Generate fixed synthetic (tier, raw_reward) pairs."""
     rng = random.Random(seed)
-    tiers = ["easy", "medium", "hard", "expert"]
+    tiers = ["easy", "medium", "hard", "brutal"]
     return [(rng.choice(tiers), rng.uniform(-1000, 1000)) for _ in range(n)]
 
 

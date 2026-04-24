@@ -28,6 +28,7 @@ class CheckpointBundle:
     model_name: str
     config_hash: str  # sha256 of the resolved TrainingConfig JSON
     role_lora_weights_paths: dict[str, Path] | None = None
+    floor_specialist_lora_weights_paths: dict[str, Path] | None = None
     role_model_names: dict[str, str] | None = None
     orchestrator_policy: str | None = None
     # Phase 12 fields — all default to None for backward compatibility
@@ -72,6 +73,34 @@ def _pid_is_running(pid: int) -> bool:
 
     if pid <= 0:
         return False
+    if os.name == "nt":
+        import ctypes
+
+        error_access_denied = 5
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel32.GetExitCodeProcess.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+
+        handle = kernel32.OpenProcess(
+            process_query_limited_information,
+            False,
+            int(pid),
+        )
+        if not handle:
+            return ctypes.get_last_error() == error_access_denied
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return True
+            return exit_code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except OSError:
@@ -178,6 +207,11 @@ def save_checkpoint(
     if bundle.role_lora_weights_paths is not None:
         meta["role_lora_weights_paths"] = {
             role: str(path) for role, path in bundle.role_lora_weights_paths.items()
+        }
+    if bundle.floor_specialist_lora_weights_paths is not None:
+        meta["floor_specialist_lora_weights_paths"] = {
+            family: str(path)
+            for family, path in bundle.floor_specialist_lora_weights_paths.items()
         }
     if bundle.role_model_names is not None:
         meta["role_model_names"] = dict(bundle.role_model_names)
@@ -365,12 +399,26 @@ def load_checkpoint(root: Path) -> CheckpointBundle | None:
         curriculum_snapshot=meta["curriculum_snapshot"],
         normalizer_snapshot=meta["normalizer_snapshot"],
         rollout_rng_state=rng_state,
-        lora_weights_path=Path(meta["lora_weights_path"]),
+        lora_weights_path=_resolve_loaded_adapter_path(
+            meta["lora_weights_path"],
+            latest_dir / "lora_adapter",
+        ),
         model_name=meta["model_name"],
         config_hash=meta["config_hash"],
         role_lora_weights_paths={
-            role: Path(path)
+            role: _resolve_loaded_adapter_path(
+                path,
+                latest_dir / "lora_adapter" / role,
+            )
             for role, path in meta.get("role_lora_weights_paths", {}).items()
+        }
+        or None,
+        floor_specialist_lora_weights_paths={
+            family: _resolve_loaded_adapter_path(
+                path,
+                latest_dir / "lora_adapter" / "floor_agent" / "specialists" / family,
+            )
+            for family, path in meta.get("floor_specialist_lora_weights_paths", {}).items()
         }
         or None,
         role_model_names=meta.get("role_model_names"),
@@ -411,6 +459,17 @@ def _find_highest_valid_ckpt(root: Path) -> Path | None:
         return None
     candidates.sort(key=lambda x: x[0])
     return candidates[-1][1]
+
+
+def _resolve_loaded_adapter_path(stored_path: str | Path, local_fallback: Path) -> Path:
+    """Use checkpoint-local adapter copies when meta paths became stale."""
+
+    path = Path(stored_path)
+    if path.exists():
+        return path
+    if local_fallback.exists():
+        return local_fallback
+    return path
 
 
 def rotate_checkpoints(root: Path, keep_last_n: int) -> None:

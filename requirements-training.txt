@@ -1,12 +1,13 @@
 # Heavy dependencies for the training pipeline.
 # NOT required for core package or test suite — only for training/ and Colab notebook.
 torch>=2.1
-transformers>=4.36
-trl>=0.7
-peft>=0.7
+transformers==4.56.2
+trl==0.24.0
+peft==0.19.1
 accelerate>=0.25
 bitsandbytes>=0.41
 datasets>=2.14
+huggingface_hub>=0.24
 pyyaml>=6.0
 nbformat>=5.9
 wandb>=0.19
@@ -14,7 +15,7 @@ wandb>=0.19
 # --- Unsloth backend (optional, Colab-only) ---
 # Unsloth pins are Python/CUDA-specific. Install in Colab via:
 #   !pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-#   !pip install --no-deps trl peft accelerate bitsandbytes
+#   !pip install --no-deps "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes
 # vllm is installed separately when rollout.use_vllm=true:
-#   !pip install vllm
+#   !pip install "vllm==0.10.2"
 # Do NOT pin unsloth/vllm in this file — Windows local dev cannot install them.

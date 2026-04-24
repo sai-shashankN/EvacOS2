@@ -77,10 +77,105 @@ class TestRoleSelectionConfig:
             )
         assert "orchestrator_policy='stub'" in str(excinfo.value)
 
-    def test_training_config_rejects_selective_model_backed_training(self):
+    def test_training_config_allows_orchestrator_only_with_frozen_floor_adapter(self):
+        config = TrainingConfig(
+            model={
+                "base": "shared-model",
+                "orchestrator_base": "bigger-model",
+                "floor_base": "smaller-model",
+            },
+            roles={
+                "trainable": ["orchestrator"],
+                "frozen_adapter_paths": {
+                    "floor_agent": "outputs/floor-specialist/lora_adapter/floor_agent",
+                },
+            },
+        )
+
+        assert config.trainable_roles == ("orchestrator",)
+        assert config.roles.frozen_adapter_paths == {
+            "floor_agent": "outputs/floor-specialist/lora_adapter/floor_agent",
+        }
+        assert config.uses_role_routed_policy is True
+
+    def test_training_config_allows_orchestrator_with_frozen_floor_specialists(self):
+        config = TrainingConfig(
+            model={
+                "base": "shared-model",
+                "orchestrator_base": "bigger-model",
+                "floor_base": "smaller-model",
+            },
+            roles={
+                "trainable": ["orchestrator"],
+                "frozen_floor_specialist_adapter_paths": {
+                    "fire": "outputs/fire/lora_adapter/floor_agent",
+                    "flood": "outputs/flood/lora_adapter/floor_agent",
+                    "gas": "outputs/gas/lora_adapter/floor_agent",
+                },
+            },
+            rollout={"disaster_families": ["fire", "flood", "gas"]},
+        )
+
+        assert config.trainable_roles == ("orchestrator",)
+        assert config.roles.frozen_floor_specialist_adapter_paths["fire"].endswith(
+            "floor_agent"
+        )
+        assert config.uses_role_routed_policy is True
+
+    def test_training_config_rejects_trainable_floor_specialist_paths(self):
         with pytest.raises(ValidationError) as excinfo:
-            TrainingConfig(roles={"trainable": ["floor_agent"]})
-        assert "Selective roles.trainable currently requires" in str(excinfo.value)
+            TrainingConfig(
+                roles={
+                    "trainable": ["orchestrator", "floor_agent"],
+                    "frozen_floor_specialist_adapter_paths": {
+                        "fire": "outputs/fire/lora_adapter/floor_agent",
+                    },
+                },
+                rollout={"disaster_families": ["fire"]},
+            )
+
+        assert "floor specialists must be frozen" in str(excinfo.value)
+
+    def test_training_config_rejects_missing_requested_specialist_without_fallback(self):
+        with pytest.raises(ValidationError) as excinfo:
+            TrainingConfig(
+                roles={
+                    "trainable": ["orchestrator"],
+                    "frozen_floor_specialist_adapter_paths": {
+                        "fire": "outputs/fire/lora_adapter/floor_agent",
+                    },
+                },
+                rollout={"disaster_families": ["fire", "flood"]},
+            )
+
+        assert "no matching roles.frozen_floor_specialist_adapter_paths" in str(excinfo.value)
+
+    def test_training_config_allows_generalist_fallback_for_unsupported_family(self):
+        config = TrainingConfig(
+            roles={
+                "trainable": ["orchestrator"],
+                "frozen_adapter_paths": {
+                    "floor_agent": "outputs/generalist/lora_adapter/floor_agent",
+                },
+                "frozen_floor_specialist_adapter_paths": {
+                    "fire": "outputs/fire/lora_adapter/floor_agent",
+                },
+            },
+            rollout={"disaster_families": ["fire", "structural"]},
+        )
+
+        assert config.roles.frozen_adapter_paths["floor_agent"].endswith("floor_agent")
+        assert config.uses_role_routed_policy is True
+
+    def test_training_config_rejects_frozen_adapter_for_trainable_role(self):
+        with pytest.raises(ValidationError) as excinfo:
+            TrainingConfig(
+                roles={
+                    "trainable": ["orchestrator"],
+                    "frozen_adapter_paths": {"orchestrator": "outputs/orch"},
+                },
+            )
+        assert "frozen_adapter_paths may only target non-trainable" in str(excinfo.value)
 
 
 class TestVllmBackendGate:

@@ -13,7 +13,7 @@
 | **Endpoints** | `/openenv/reset`, `/openenv/step`, `/openenv/state`, `/openenv/schema`, `/openenv/health`, `/openenv/metadata` |
 | **Difficulty tiers** | `easy`, `medium`, `hard`, `brutal` |
 | **Training** | Unsloth + LoRA + GRPO-style training, with shared-model and split-role support |
-| **Specialization path** | Optional `fire`, `flood`, and `gas` specialist configs with a deterministic scope router |
+| **Specialization path** | Optional `fire`, `flood`, and `gas` specialist configs with a deterministic scope router driven by observed incident metadata |
 | **Evaluation** | Fixed-suite verification, baseline-vs-trained comparison, scorecards, and plots |
 | **Validated stronger configs** | `7B` single-model smoke, `7B + vLLM` smoke, `7B/3B` split-role smoke |
 | **Metrics support** | Aggregate diagnostics plus per-role diagnostics such as `orchestrator_loss` and `floor_agent_loss` |
@@ -48,7 +48,7 @@ EvacOS2 is built around three contributions:
 1. **A reproducible benchmark.** Deterministic simulator, four difficulty tiers, and fixed evaluation suites make runs comparable instead of anecdotal.
 2. **Role-aware training.** Shared-model and split-role paths are both supported, including a validated `7B` orchestrator / `3B` floor-agent lane with per-role diagnostics so you can see which role improved and which did not.
 3. **Verifiable evaluation.** Baseline-vs-trained comparison, scorecards, and plots come from real rollouts and checkpoints, not hand-curated examples.
-4. **A practical specialization path.** The same environment can train a mixed-disaster generalist or separate `fire`, `flood`, and `gas` specialists, then route scenarios through a deterministic scope layer.
+4. **A practical specialization path.** The same environment can train a mixed-disaster generalist or separate `fire`, `flood`, and `gas` specialists, then route scenarios through a deterministic scope layer using the incident type that would realistically come from building alarms, sensors, or dispatch reports.
 
 ## Architecture
 
@@ -110,6 +110,8 @@ EvacOS2 supports two complementary training stories:
 - **Floor-only specialist lanes:** the `3B` fire/flood/gas configs use a deterministic stub orchestrator and train only the floor-agent policy. These are cheaper parallel lanes for quickly learning local fire, flood, and gas evacuation behavior before a later shared orchestrator is trained against the frozen specialists.
 
 [training/scope_router.py](training/scope_router.py) is a deterministic routing helper for placing in front of trained specialist checkpoints: it maps single-family scenarios to the matching specialist lane and falls back to the generalist for unknown, mixed, structural, active-threat, or cascade cases. The fixed-suite evaluator records the selected route for each episode and can pass it to a scope-aware policy factory. That gives the demo a clean story without overclaiming specialist training: fast local floor agents handle immediate routing, the stronger orchestrator handles slower global coordination, and the scope layer decides which disaster-specific policy lane to use once those checkpoints are trained.
+
+This routing is meant to model realistic incident classification, not hidden omniscience. In a real deployment, fire mode can be raised by smoke/heat/fire-alarm signals, flood mode by water or moisture sensors plus facility reports, and gas mode by gas/CO/air-quality detectors or manual dispatch metadata. EvacOS2 represents that already-known incident context as scenario metadata, then uses it to select the matching frozen floor specialist while the `7B` orchestrator focuses on building-level coordination.
 
 ## What Smoke Testing Showed
 
@@ -183,6 +185,14 @@ python -m evaluation.demo_bundle \
   --output-dir outputs/demo_bundle
 ```
 
+To publish the selected adapter artifact to Hugging Face Hub:
+
+```bash
+python scripts/upload_adapter.py \
+  outputs/training/checkpoints/latest/lora_adapter \
+  "$HF_ADAPTER_REPO"
+```
+
 Start with [SUBMISSION_BRIEF.md](SUBMISSION_BRIEF.md) if you want the narrative overview first.
 
 ## Repository Map
@@ -218,6 +228,13 @@ Floor-only `3B` specialist variants use a deterministic stub orchestrator and tr
 - flood: [training/config.remote-unsloth-3b-flood-floor-specialist.yaml](training/config.remote-unsloth-3b-flood-floor-specialist.yaml)
 - gas: [training/config.remote-unsloth-3b-gas-floor-specialist.yaml](training/config.remote-unsloth-3b-gas-floor-specialist.yaml)
 
+Phase-2 orchestrator training supports two frozen-floor modes:
+
+- Single frozen floor policy: set `roles.trainable: ["orchestrator"]` and point `roles.frozen_adapter_paths.floor_agent` at one trained floor adapter.
+- Routed frozen specialists: set `roles.frozen_floor_specialist_adapter_paths.fire/flood/gas` so the floor policy deterministically switches among trained `3B` specialists by observed disaster family while the `7B` orchestrator trains.
+
+Start from [training/config.remote-unsloth-7b-orchestrator-frozen-specialists.example.yaml](training/config.remote-unsloth-7b-orchestrator-frozen-specialists.example.yaml) for the routed-specialist run. Checkpoints copy both trainable role adapters and frozen specialist adapter paths into the checkpoint metadata so final eval/upload does not depend on the original remote artifact folders.
+
 Validated stronger lanes include:
 
 - `7B` single-model
@@ -241,6 +258,28 @@ The bundle path emits:
 - `submission_scorecard.md`
 - `submission_scorecard.json`
 - plots generated from the run's actual metrics CSV
+
+The scorecard includes a bounded `0-100` headline eval score:
+
+```text
+eval_score_pct = 100 * save_rate * (1 - 0.5 * invalid_action_rate)
+```
+
+This is intentionally separate from training reward. It gives judges a clean success percentage while preserving raw and normalized rewards for debugging GRPO behavior.
+
+Dedicated eval entrypoints wrap the same bundle builder with safer defaults:
+
+```bash
+# 3B floor specialists: one disaster family per report.
+python scripts/eval_3b_fire.py --trained-checkpoint /path/to/fire/checkpoint-or-lora_adapter
+python scripts/eval_3b_flood.py --trained-checkpoint /path/to/flood/checkpoint-or-lora_adapter
+python scripts/eval_3b_gas.py --trained-checkpoint /path/to/gas/checkpoint-or-lora_adapter
+
+# Shared 7B orchestrator over routed frozen fire/flood/gas floor specialists.
+python scripts/eval_7b_orchestrator.py --trained-checkpoint /path/to/orchestrator/checkpoint-or-lora_adapter
+```
+
+By default these scripts evaluate `easy,medium,hard,brutal` on held-out seeds `42,123,456,789,1024`. The `3B` scripts restrict `disaster_families` to their specialist lane, while the `7B` script evaluates the routed `fire,flood,gas` orchestration stack.
 
 ---
 

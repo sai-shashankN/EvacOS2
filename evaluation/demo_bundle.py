@@ -42,7 +42,15 @@ def _aggregate_metrics(payload: dict | None) -> dict[str, float]:
     if not payload:
         return {}
     aggregate = payload.get("aggregate", {})
+    eval_score = aggregate.get("eval_score_pct", {}).get("mean")
+    if eval_score is None:
+        episode_scores = [
+            float(episode.get("eval_score_pct", 0.0))
+            for episode in payload.get("episodes", [])
+        ]
+        eval_score = sum(episode_scores) / len(episode_scores) if episode_scores else 0.0
     return {
+        "eval_score_pct": float(eval_score),
         "orch_norm_reward": float(
             aggregate.get("normalized_reward", {})
             .get("orchestrator", {})
@@ -82,6 +90,7 @@ def _metric_direction(key: str) -> str:
 
 def _metric_label(key: str) -> str:
     labels = {
+        "eval_score_pct": "headline eval score (%)",
         "orch_norm_reward": "orchestrator normalized reward",
         "floor_norm_reward": "floor-agent normalized reward",
         "save_rate": "save rate",
@@ -130,6 +139,7 @@ def _write_summary_markdown(
         f"- `{rationale_mode}`",
         "",
         "## Baseline Metrics",
+        f"- headline eval score: `{baseline_metrics.get('eval_score_pct', 0.0):.2f}%`",
         f"- orchestrator mean normalized reward: `{baseline_metrics.get('orch_norm_reward', 0.0):.4f}`",
         f"- floor-agent mean normalized reward: `{baseline_metrics.get('floor_norm_reward', 0.0):.4f}`",
         f"- save rate: `{baseline_metrics.get('save_rate', 0.0):.4f}`",
@@ -142,6 +152,7 @@ def _write_summary_markdown(
         lines.extend(
             [
                 "## Trained Metrics",
+                f"- headline eval score: `{trained_metrics.get('eval_score_pct', 0.0):.2f}%`",
                 f"- orchestrator mean normalized reward: `{trained_metrics.get('orch_norm_reward', 0.0):.4f}`",
                 f"- floor-agent mean normalized reward: `{trained_metrics.get('floor_norm_reward', 0.0):.4f}`",
                 f"- save rate: `{trained_metrics.get('save_rate', 0.0):.4f}`",
@@ -149,6 +160,7 @@ def _write_summary_markdown(
                 f"- override win rate: `{trained_metrics.get('override_win_rate', 0.0):.4f}`",
                 "",
                 "## Deltas (Trained - Baseline)",
+                f"- headline eval score: `{_format_delta(baseline_metrics, trained_metrics, 'eval_score_pct')}` percentage points",
                 f"- orchestrator mean normalized reward: `{_format_delta(baseline_metrics, trained_metrics, 'orch_norm_reward')}`",
                 f"- floor-agent mean normalized reward: `{_format_delta(baseline_metrics, trained_metrics, 'floor_norm_reward')}`",
                 f"- save rate: `{_format_delta(baseline_metrics, trained_metrics, 'save_rate')}`",
@@ -185,6 +197,7 @@ def _write_scorecard_artifacts(
     baseline_metrics = _aggregate_metrics(baseline_payload)
     trained_metrics = _aggregate_metrics(trained_payload)
     metric_keys = [
+        "eval_score_pct",
         "orch_norm_reward",
         "floor_norm_reward",
         "save_rate",

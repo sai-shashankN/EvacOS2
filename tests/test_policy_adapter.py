@@ -9,7 +9,13 @@ import types
 
 import pytest
 
-from training.policy_adapter import RoleRoutedPolicy, StubPolicy, UnslothPolicy, parse_completion_to_action
+from training.policy_adapter import (
+    RoleRoutedPolicy,
+    ScopeRoutedFloorPolicy,
+    StubPolicy,
+    UnslothPolicy,
+    parse_completion_to_action,
+)
 
 
 class TestStubPolicy:
@@ -190,6 +196,89 @@ class TestRoleRoutedPolicy:
         ]
         assert len(orch.calls) == 1
         assert len(floor.calls) == 1
+
+
+class TestScopeRoutedFloorPolicy:
+    def test_routes_floor_prompts_by_disaster_and_preserves_batch_order(self):
+        class FakePolicy:
+            def __init__(self, label):
+                self.label = label
+                self.calls = []
+
+            def act_batch(self, prompts, agent_ids, roles):
+                self.calls.append((prompts, agent_ids, roles))
+                return [(f"{self.label}:{agent_id}", [len(self.calls)]) for agent_id in agent_ids]
+
+        fire = FakePolicy("fire")
+        flood = FakePolicy("flood")
+        gas = FakePolicy("gas")
+        policy = ScopeRoutedFloorPolicy(
+            specialist_policies={
+                "fire": fire,
+                "flood": flood,
+                "gas": gas,
+            }
+        )
+
+        outputs = policy.act_batch(
+            prompts=[
+                [{"role": "system", "content": "Disaster: gas\nRound: 0"}],
+                [{"role": "system", "content": "Disaster: fire\nRound: 0"}],
+                [{"role": "system", "content": "Disaster: flood\nRound: 0"}],
+                [{"role": "system", "content": "Disaster: fire\nRound: 1"}],
+            ],
+            agent_ids=["floor_2_agent", "floor_0_agent", "floor_1_agent", "floor_3_agent"],
+            roles=["floor_agent", "floor_agent", "floor_agent", "floor_agent"],
+        )
+
+        assert outputs == [
+            ("gas:floor_2_agent", [1]),
+            ("fire:floor_0_agent", [1]),
+            ("flood:floor_1_agent", [1]),
+            ("fire:floor_3_agent", [1]),
+        ]
+        assert len(fire.calls) == 1
+        assert fire.calls[0][1] == ["floor_0_agent", "floor_3_agent"]
+        assert len(flood.calls) == 1
+        assert len(gas.calls) == 1
+
+    def test_uses_generalist_for_unknown_or_missing_specialist(self):
+        class FakePolicy:
+            def __init__(self, label):
+                self.label = label
+
+            def act(self, prompt, agent_id, role):
+                return f"{self.label}:{agent_id}", []
+
+        policy = ScopeRoutedFloorPolicy(
+            specialist_policies={"fire": FakePolicy("fire")},
+            generalist_policy=FakePolicy("generalist"),
+        )
+
+        assert policy.act(
+            [{"role": "system", "content": "Disaster: structural\nRound: 0"}],
+            "floor_0_agent",
+            "floor_agent",
+        ) == ("generalist:floor_0_agent", [])
+        assert policy.act(
+            [{"role": "system", "content": "Disaster: flood\nRound: 0"}],
+            "floor_1_agent",
+            "floor_agent",
+        ) == ("generalist:floor_1_agent", [])
+
+    def test_unknown_route_without_generalist_fails_loudly(self):
+        class FakePolicy:
+            def act(self, prompt, agent_id, role):
+                return "{}", []
+
+        policy = ScopeRoutedFloorPolicy(specialist_policies={"fire": FakePolicy()})
+
+        with pytest.raises(RuntimeError, match="No frozen floor policy"):
+            policy.act(
+                [{"role": "system", "content": "Disaster: flood\nRound: 0"}],
+                "floor_0_agent",
+                "floor_agent",
+            )
 
 
 class TestParseCompletionToAction:

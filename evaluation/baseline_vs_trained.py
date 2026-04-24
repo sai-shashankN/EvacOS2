@@ -12,7 +12,12 @@ from pydantic import BaseModel
 
 from curriculum.controller import EVAL_SEEDS
 from evacos_ma.models import DisasterType
-from evaluation._training_contract import RoleRoutedPolicy, StubPolicy, hf_policy_factory
+from evaluation._training_contract import (
+    RoleRoutedPolicy,
+    ScopeRoutedFloorPolicy,
+    StubPolicy,
+    hf_policy_factory,
+)
 
 from .fixed_suite import (
     DEFAULT_DISASTER_FAMILIES,
@@ -39,6 +44,12 @@ def _load_model_config(config_path: Path = Path("training/config.yaml")) -> dict
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     model_cfg = data.get("model", {}) or {}
     roles_cfg = data.get("roles", {}) or {}
+    trainable_roles = roles_cfg.get("trainable", ["orchestrator", "floor_agent"])
+    trainable_set = set(trainable_roles if isinstance(trainable_roles, list) else [])
+    frozen_adapter_paths = roles_cfg.get("frozen_adapter_paths", {}) or {}
+    frozen_floor_specialist_paths = (
+        roles_cfg.get("frozen_floor_specialist_adapter_paths", {}) or {}
+    )
     base = str(model_cfg.get("base", "Qwen/Qwen2.5-3B-Instruct"))
     orchestrator_base = model_cfg.get("orchestrator_base")
     floor_base = model_cfg.get("floor_base")
@@ -51,8 +62,15 @@ def _load_model_config(config_path: Path = Path("training/config.yaml")) -> dict
         "orchestrator": resolved_orchestrator,
         "floor_agent": resolved_floor,
         "split": split,
-        "role_routed": split or orchestrator_policy != "model",
+        "role_routed": (
+            split
+            or orchestrator_policy != "model"
+            or bool(frozen_adapter_paths)
+            or bool(frozen_floor_specialist_paths)
+            or trainable_set != {"orchestrator", "floor_agent"}
+        ),
         "orchestrator_policy": orchestrator_policy,
+        "has_floor_specialists": bool(frozen_floor_specialist_paths),
     }
 
 
@@ -77,6 +95,53 @@ def _adapter_root(checkpoint: Path) -> Path:
     return checkpoint
 
 
+def _checkpoint_floor_specialist_paths(checkpoint: Path) -> dict[str, Path]:
+    adapter_root = _adapter_root(checkpoint)
+    specialist_root = adapter_root / "floor_agent" / "specialists"
+    return {
+        family: specialist_root / family
+        for family in ("fire", "flood", "gas")
+        if (specialist_root / family).exists()
+    }
+
+
+def _checkpoint_has_floor_generalist(checkpoint: Path) -> bool:
+    adapter_root = _adapter_root(checkpoint)
+    floor_checkpoint = adapter_root / "floor_agent"
+    return (floor_checkpoint / "adapter_config.json").exists()
+
+
+def _effective_disaster_families_for_checkpoint(
+    checkpoint: Path | None,
+    requested_families: Sequence[DisasterType | str],
+) -> Sequence[DisasterType | str]:
+    """Avoid default eval families that a routed-specialist checkpoint cannot serve."""
+
+    if checkpoint is None or not checkpoint.exists():
+        return requested_families
+    if _checkpoint_has_floor_generalist(checkpoint):
+        return requested_families
+
+    specialist_paths = _checkpoint_floor_specialist_paths(checkpoint)
+    if not specialist_paths:
+        return requested_families
+
+    supported = set(specialist_paths)
+    filtered: list[DisasterType | str] = []
+    for family in requested_families:
+        family_value = family.value if isinstance(family, DisasterType) else str(family)
+        if family_value in supported:
+            filtered.append(family)
+
+    if not filtered:
+        raise ValueError(
+            "Routed-specialist checkpoint has no generalist floor adapter and "
+            f"supports only {sorted(supported)!r}; requested disaster_families "
+            f"{[str(family) for family in requested_families]!r} have no overlap."
+        )
+    return tuple(filtered)
+
+
 def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool] | None:
     meta_path = _checkpoint_meta_path(checkpoint)
     if meta_path is None:
@@ -84,6 +149,14 @@ def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     orchestrator_policy = str(meta.get("orchestrator_policy") or "model")
     role_model_names = meta.get("role_model_names")
+    role_lora_weights_paths = meta.get("role_lora_weights_paths")
+    floor_specialist_paths = meta.get("floor_specialist_lora_weights_paths")
+    has_role_adapter_paths = isinstance(role_lora_weights_paths, dict) and bool(
+        role_lora_weights_paths
+    )
+    has_floor_specialist_paths = isinstance(floor_specialist_paths, dict) and bool(
+        floor_specialist_paths
+    )
     if isinstance(role_model_names, dict):
         fallback_model_name = str(meta.get("model_name") or "Qwen/Qwen2.5-3B-Instruct")
         orchestrator = str(role_model_names.get("orchestrator") or fallback_model_name)
@@ -95,8 +168,14 @@ def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool
                 "orchestrator": orchestrator,
                 "floor_agent": floor,
                 "split": split,
-                "role_routed": split or orchestrator_policy != "model",
+                "role_routed": (
+                    split
+                    or orchestrator_policy != "model"
+                    or has_role_adapter_paths
+                    or has_floor_specialist_paths
+                ),
                 "orchestrator_policy": orchestrator_policy,
+                "has_floor_specialists": has_floor_specialist_paths,
             }
     model_name = str(meta.get("model_name") or "Qwen/Qwen2.5-3B-Instruct")
     return {
@@ -104,8 +183,13 @@ def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool
         "orchestrator": model_name,
         "floor_agent": model_name,
         "split": False,
-        "role_routed": orchestrator_policy != "model",
+        "role_routed": (
+            orchestrator_policy != "model"
+            or has_role_adapter_paths
+            or has_floor_specialist_paths
+        ),
         "orchestrator_policy": orchestrator_policy,
+        "has_floor_specialists": has_floor_specialist_paths,
     }
 
 
@@ -121,6 +205,7 @@ def _nan() -> float:
 def _metric_rows(suite: FixedSuiteResult) -> dict[tuple[str, int, str, str, str], float]:
     rows: dict[tuple[str, int, str, str, str], float] = {}
     for episode in suite.episodes:
+        rows[(episode.tier, episode.seed, episode.disaster_family, "team", "eval_score_pct")] = episode.eval_score_pct
         for role in ("orchestrator", "floor_agent"):
             rows[(episode.tier, episode.seed, episode.disaster_family, role, "raw_reward")] = episode.raw_reward_by_role.get(role, 0.0)
             rows[(episode.tier, episode.seed, episode.disaster_family, role, "normalized_reward")] = episode.normalized_reward_by_role.get(role, 0.0)
@@ -143,6 +228,53 @@ def _trained_factory(
 
     floor_checkpoint = adapter_root / "floor_agent"
     orchestrator_policy = str(model_cfg.get("orchestrator_policy") or "model")
+    floor_specialist_paths = _checkpoint_floor_specialist_paths(checkpoint)
+    floor_generalist_checkpoint = (
+        floor_checkpoint
+        if (floor_checkpoint / "adapter_config.json").exists()
+        else None
+    )
+
+    if floor_specialist_paths:
+        orch_checkpoint = adapter_root / "orchestrator"
+        if orchestrator_policy != "stub" and not orch_checkpoint.exists():
+            raise FileNotFoundError(
+                "Routed-specialist trained comparison expects checkpoint/orchestrator "
+                "for the trained orchestrator adapter."
+            )
+
+        def _routed_specialist_factory() -> object:
+            orchestrator = (
+                StubPolicy(seed=0)
+                if orchestrator_policy == "stub"
+                else hf_policy_factory(
+                    str(model_cfg["orchestrator"]),
+                    lora_adapter_path=str(orch_checkpoint),
+                )
+            )
+            generalist_policy = (
+                hf_policy_factory(
+                    str(model_cfg["floor_agent"]),
+                    lora_adapter_path=str(floor_generalist_checkpoint),
+                )
+                if floor_generalist_checkpoint is not None
+                else None
+            )
+            return RoleRoutedPolicy(
+                orchestrator_policy=orchestrator,
+                floor_policy=ScopeRoutedFloorPolicy(
+                    specialist_policies={
+                        family: hf_policy_factory(
+                            str(model_cfg["floor_agent"]),
+                            lora_adapter_path=str(path),
+                        )
+                        for family, path in floor_specialist_paths.items()
+                    },
+                    generalist_policy=generalist_policy,
+                ),
+            )
+
+        return _routed_specialist_factory
 
     if orchestrator_policy == "stub":
         if not floor_checkpoint.exists():
@@ -197,12 +329,16 @@ def run_comparison(
     config_path: Path = Path("training/config.yaml"),
 ) -> ComparisonResult:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
+    effective_disaster_families = _effective_disaster_families_for_checkpoint(
+        trained_checkpoint,
+        disaster_families,
+    )
 
     baseline_suite = run_fixed_suite(
         lambda: StubPolicy(seed=0),
         tiers=tiers,
         seeds=seeds,
-        disaster_families=disaster_families,
+        disaster_families=effective_disaster_families,
         rationale_mode=rationale_mode,
         label="baseline",
         output_dir=output_csv.parent,
@@ -219,7 +355,7 @@ def run_comparison(
             _trained_factory(trained_checkpoint, config_path=config_path),
             tiers=tiers,
             seeds=seeds,
-            disaster_families=disaster_families,
+            disaster_families=effective_disaster_families,
             rationale_mode=rationale_mode,
             label="trained",
             output_dir=output_csv.parent,

@@ -5,7 +5,7 @@ from evaluation.plots import make_all_plots, make_reward_curve
 
 def test_plot_functions_skip_gracefully_when_inputs_missing(tmp_path: Path):
     results = make_all_plots(tmp_path)
-    assert results == [None, None, None, None, None, None]
+    assert results == [None, None, None, None, None, None, None]
 
 
 def test_reward_curve_writes_png(tmp_path: Path):

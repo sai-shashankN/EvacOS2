@@ -37,6 +37,8 @@ def test_run_fixed_suite_returns_single_episode():
         assert result.env_side_rationale_wired is True
         assert result.episodes[0].scope_policy_key == "fire_specialist"
         assert result.episodes[0].scope_route_reason == "single_family_fire"
+        assert 0.0 <= result.episodes[0].eval_score_pct <= 100.0
+        assert 0.0 <= result.aggregate.eval_score_pct.mean <= 100.0
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -56,6 +58,7 @@ def test_fixed_suite_json_round_trip():
         payload = (tmp_dir / "fixed_suite_roundtrip_linear_capped.json").read_text(encoding="utf-8")
         restored = FixedSuiteResult.model_validate_json(payload)
         assert restored == result
+        assert "eval_score_pct" in payload
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

@@ -513,7 +513,7 @@ class EvacEnvironment:
         task = TaskSpec(
             task_id=task_id,
             name=f"procgen_{procgen_disaster_family.value}_{procgen_tier}",
-            difficulty="expert" if procgen_tier == "brutal" else procgen_tier,
+            difficulty=procgen_tier,
             disaster_type=procgen_disaster_family,
             building_profile="procgen",
             success_criteria="Evacuate civilians before routes are cut off.",
@@ -1837,8 +1837,6 @@ class EvacEnvironment:
         return self._episode_tier_value(ep)
 
     def _ma_tier_value(self, difficulty: str) -> str:
-        if difficulty == "expert":
-            return "brutal"
         if difficulty == "medium_hard":
             return "medium"
         return difficulty

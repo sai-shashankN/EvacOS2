@@ -42,6 +42,7 @@ class SummaryStats(BaseModel):
 
 
 class AggregateStats(BaseModel):
+    eval_score_pct: SummaryStats = Field(default_factory=SummaryStats)
     raw_reward: dict[str, SummaryStats] = Field(default_factory=dict)
     normalized_reward: dict[str, SummaryStats] = Field(default_factory=dict)
     save_rate: SummaryStats = Field(default_factory=SummaryStats)
@@ -69,6 +70,7 @@ class EpisodeResult(BaseModel):
     civilians_saved: int = 0
     civilians_lost: int = 0
     save_rate: float = 0.0
+    eval_score_pct: float = 0.0
     invalid_action_rate: float = 0.0
     override_win_rate: float = 0.0
     raw_reward_by_role: dict[str, float] = Field(default_factory=dict)
@@ -133,6 +135,16 @@ def _summary(values: Sequence[float]) -> SummaryStats:
         p25=float(np.percentile(arr, 25)),
         p75=float(np.percentile(arr, 75)),
     )
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _eval_score_pct(*, save_rate: float, invalid_action_rate: float) -> float:
+    """Bounded human-facing score; training reward remains separate."""
+    valid_multiplier = 1.0 - (0.5 * _clamp01(invalid_action_rate))
+    return 100.0 * _clamp01(save_rate) * _clamp01(valid_multiplier)
 
 
 def _resolve_reward_config(
@@ -227,6 +239,10 @@ def _build_episode_result(
         civilians_saved=saved,
         civilians_lost=lost,
         save_rate=float(saved / total_civilians),
+        eval_score_pct=_eval_score_pct(
+            save_rate=float(saved / total_civilians),
+            invalid_action_rate=float(invalid_count / action_count) if action_count else 0.0,
+        ),
         invalid_action_rate=float(invalid_count / action_count) if action_count else 0.0,
         override_win_rate=float(override_wins / len(override_ids)) if override_ids else 0.0,
         raw_reward_by_role={
@@ -253,6 +269,7 @@ def _build_aggregate(episodes: Sequence[EpisodeResult]) -> AggregateStats:
         for role in roles
     }
     return AggregateStats(
+        eval_score_pct=_summary([episode.eval_score_pct for episode in episodes]),
         raw_reward=raw_reward,
         normalized_reward=normalized_reward,
         save_rate=_summary([episode.save_rate for episode in episodes]),
