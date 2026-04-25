@@ -41,6 +41,14 @@ PRIORITY_CLASS: dict[ActionTypeMA, int] = {
 }
 
 
+def _route_target_if_known(action: ActionEnvelopeMA, explicit_key: str, known: dict[str, Any]) -> Optional[str]:
+    explicit = action.arguments.get(explicit_key)
+    if explicit:
+        return str(explicit)
+    to_room = action.arguments.get("to_room_id")
+    return str(to_room) if to_room in known else None
+
+
 # ---------------------------------------------------------------------------
 # Data structures returned by arbitration
 # ---------------------------------------------------------------------------
@@ -131,6 +139,7 @@ class Arbitrator:
         # --- Phase 2: stairwell capacity ---
         stairwell_intents: dict[str, list[ActionEnvelopeMA]] = {}
         stairwell_capacities: dict[str, int] = snapshot.get("stairwell_capacities", {})
+        self._current_stairwell_capacities = stairwell_capacities
         for action in all_actions:
             if action.action_id in decided_ids:
                 continue
@@ -224,6 +233,7 @@ class Arbitrator:
         # --- Phase 2c: exit throughput ---
         exit_intents: dict[str, list[ActionEnvelopeMA]] = {}
         exit_throughput: dict[str, int] = snapshot.get("exit_throughputs", {})
+        self._current_exit_throughput = exit_throughput
         for action in all_actions:
             if action.action_id in decided_ids:
                 continue
@@ -373,9 +383,11 @@ class Arbitrator:
     def _stairwell_resource(self, action: ActionEnvelopeMA) -> Optional[str]:
         """Extract stairwell resource id from an action, if it uses one."""
         if action.action_type == ActionTypeMA.route_within_floor:
-            # route_within_floor uses stairwell if targeting stairwell entry room
-            # For simplicity, check arguments for stairwell_id
-            return action.arguments.get("stairwell_id")
+            return _route_target_if_known(
+                action,
+                "stairwell_id",
+                getattr(self, "_current_stairwell_capacities", {}),
+            )
         if action.action_type == ActionTypeMA.route_between_floors:
             return action.arguments.get("stairwell_id")
         if action.action_type == ActionTypeMA.call_elevator:
@@ -387,5 +399,9 @@ class Arbitrator:
         if action.action_type == ActionTypeMA.open_exit:
             return action.arguments.get("exit_id")
         if action.action_type == ActionTypeMA.route_within_floor:
-            return action.arguments.get("exit_id")
+            return _route_target_if_known(
+                action,
+                "exit_id",
+                getattr(self, "_current_exit_throughput", {}),
+            )
         return None

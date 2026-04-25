@@ -27,6 +27,11 @@ class CheckpointBundle:
     lora_weights_path: Path  # pointer to the adapter weights dir
     model_name: str
     config_hash: str  # sha256 of the resolved TrainingConfig JSON
+    config_path: str | None = None
+    max_steps: int | None = None
+    rollout_max_rounds_per_episode: int | None = None
+    rollout_disaster_families: list[str] | None = None
+    rollout_tier_schedule: list[dict] | None = None
     role_lora_weights_paths: dict[str, Path] | None = None
     floor_specialist_lora_weights_paths: dict[str, Path] | None = None
     role_model_names: dict[str, str] | None = None
@@ -204,6 +209,16 @@ def save_checkpoint(
         "config_hash": bundle.config_hash,
         "lora_weights_path": str(bundle.lora_weights_path),
     }
+    if bundle.config_path is not None:
+        meta["config_path"] = bundle.config_path
+    if bundle.max_steps is not None:
+        meta["max_steps"] = bundle.max_steps
+    if bundle.rollout_max_rounds_per_episode is not None:
+        meta["rollout_max_rounds_per_episode"] = bundle.rollout_max_rounds_per_episode
+    if bundle.rollout_disaster_families is not None:
+        meta["rollout_disaster_families"] = list(bundle.rollout_disaster_families)
+    if bundle.rollout_tier_schedule is not None:
+        meta["rollout_tier_schedule"] = bundle.rollout_tier_schedule
     if bundle.role_lora_weights_paths is not None:
         meta["role_lora_weights_paths"] = {
             role: str(path) for role, path in bundle.role_lora_weights_paths.items()
@@ -405,6 +420,11 @@ def load_checkpoint(root: Path) -> CheckpointBundle | None:
         ),
         model_name=meta["model_name"],
         config_hash=meta["config_hash"],
+        config_path=meta.get("config_path"),
+        max_steps=meta.get("max_steps"),
+        rollout_max_rounds_per_episode=meta.get("rollout_max_rounds_per_episode"),
+        rollout_disaster_families=meta.get("rollout_disaster_families"),
+        rollout_tier_schedule=meta.get("rollout_tier_schedule"),
         role_lora_weights_paths={
             role: _resolve_loaded_adapter_path(
                 path,

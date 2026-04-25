@@ -9,6 +9,7 @@ from training.policy_adapter import StubPolicy
 from evaluation.fixed_suite import (
     EpisodeResult,
     FixedSuiteResult,
+    _count_actions,
     _seed_eval_normalizer,
     run_fixed_suite,
 )
@@ -39,8 +40,32 @@ def test_run_fixed_suite_returns_single_episode():
         assert result.episodes[0].scope_route_reason == "single_family_fire"
         assert 0.0 <= result.episodes[0].eval_score_pct <= 100.0
         assert 0.0 <= result.aggregate.eval_score_pct.mean <= 100.0
+        assert result.episodes[0].total_civilians >= result.episodes[0].civilians_saved
+        assert result.episodes[0].civilians_remaining >= 0
+        assert result.episodes[0].action_type_counts
+        assert "floor_agent" in result.episodes[0].action_type_counts_by_role
+        assert 0.0 <= result.episodes[0].wait_rate <= 1.0
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_action_diagnostics_count_current_and_legacy_action_names():
+    from collections import Counter
+
+    counts = Counter(
+        {
+            "scout": 2,
+            "scout_status": 1,
+            "evacuate_floor_priority": 3,
+            "evacuate_room": 1,
+        }
+    )
+
+    assert _count_actions(counts, ("scout", "scout_status")) == 3
+    assert _count_actions(
+        counts,
+        ("evacuate_floor_priority", "evacuate_floor", "evacuate_room"),
+    ) == 4
 
 
 def test_fixed_suite_json_round_trip():

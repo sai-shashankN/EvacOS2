@@ -49,6 +49,65 @@ Hermes-aligned operating principles:
 - Keep LoRA adapters out of Git; upload or download them as artifacts.
 - Pin the known-good stack before long runs.
 
+## Codex Harness For ml-intern
+
+`ml-intern` can be used as a top-level Hugging Face / ML specialist lane,
+preferably on GPT-5.5 when available. Codex stays the operational harness:
+use `ml-intern` for serious ML reasoning, review, HF docs/examples, and patch
+recommendations, but do not hand it unapproved direct control over Vast, HF
+Jobs, repo mutations, or adapter uploads.
+
+Hermes-agent reference pattern:
+
+- Hermes uses an OpenAI Codex OAuth / ChatGPT-account path rather than a normal OpenAI API key for subscription-backed Codex calls.
+- The local `.tmp_external_review/ml-intern` checkout has been patched with the same practical bridge: `openai-codex/...` model ids read the Codex CLI OAuth access token and call the ChatGPT Codex Responses backend.
+- Use direct `--runner ml-intern --model openai-codex/gpt-5.5` when we want ml-intern itself to run on the local Codex/ChatGPT subscription session.
+- Use `scripts/ml_intern_harness.py --runner codex` only when we want to bypass ml-intern and run a Codex CLI executor in the same scratch-harness style.
+
+Recommended Pro-backed ml-intern runner:
+
+```powershell
+python scripts/ml_intern_harness.py "Review the EvacOS2 GRPO reward/eval plan for holes." --context README.md --context HACKATHON_DAY_RUNBOOK.md --runner ml-intern --model openai-codex/gpt-5.5
+```
+
+That command is a dry-run: it writes a guarded task file and the exact
+`ml-intern` command under `logs/ml_intern/`. To actually launch the
+subscription-backed specialist lane, add `--execute`:
+
+```powershell
+python scripts/ml_intern_harness.py "Find current HF/TRL/OpenEnv guidance relevant to our training script." --context REMOTE_GPU_SETUP.md --runner ml-intern --model openai-codex/gpt-5.5 --execute
+```
+
+Codex CLI runner fallback:
+
+```powershell
+python scripts/ml_intern_harness.py "Review the EvacOS2 GRPO reward/eval plan for holes." --context README.md --context HACKATHON_DAY_RUNBOOK.md --runner codex --model gpt-5.5
+```
+
+Other direct `ml-intern` providers are still supported when their credentials are configured:
+
+```powershell
+python scripts/ml_intern_harness.py "Find current HF/TRL/OpenEnv guidance relevant to our training script." --context REMOTE_GPU_SETUP.md --runner ml-intern --model anthropic/claude-opus-4-6 --max-iterations 8 --execute
+```
+
+Default harness rules:
+
+- Run from a scratch workspace, not the repo root.
+- Strip `HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`, and `GITHUB_TOKEN` unless explicitly allowed.
+- In `--runner codex` mode, strip `OPENAI_*` API env vars unless `--allow-api-key-env` is passed, so the default path uses the signed-in Codex/ChatGPT session instead of accidental API billing.
+- Default to the `top-level` profile: serious ML execution/review authority with Codex as final committer.
+- Use `--profile read-only` for stricter public-docs-only research.
+- Ask for recommendations and patches unless the user explicitly approves autonomous edits.
+- Let `ml-intern` ask for YOLO-class actions in `approval_requests.md`; Codex reviews those requests and either executes them separately, asks the user, or re-runs `ml-intern` with a narrow approval scope.
+- Keep paid compute, repo uploads, deletes, merges, and HF Job launches under Codex approval.
+- Store stdout/stderr in `logs/ml_intern/<run-id>/` for later review.
+
+Subscription/model note:
+
+- Use direct `ml-intern --model openai-codex/gpt-5.5` for ChatGPT Pro-backed GPT-5.5 work when Codex is signed in through ChatGPT.
+- Use Codex/`codex exec -m gpt-5.5` as a fallback runner when we want Codex itself, not the ml-intern agent loop.
+- Do not use `ml-intern --model openai/gpt-5.5` unless a real OpenAI API key/billing path is intentionally configured.
+
 Known-good remote stack:
 
 ```text
@@ -184,6 +243,35 @@ Reason:
 - Fire already showed positive early signal, so it is the lowest-risk place to validate the long run.
 
 Target:
+
+```text
+50-step canary -> 300-step easy proof -> harder curriculum only after proof
+```
+
+Do not jump from a green parser smoke test straight to a full hard/brutal run.
+The first paid proof should establish held-out easy-fire learning.
+
+Available proof configs:
+
+```text
+training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml
+training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml
+```
+
+Acceptance gate for the 300-step easy proof:
+
+- metrics CSV grows through the run
+- checkpoints appear every 25 steps
+- eval rows appear every 25 steps
+- invalid action rate trends under `0.15-0.20`
+- held-out easy-fire eval improves over baseline and early checkpoints
+- sampled traces show real routing/rescue behavior, not wait spam or parser exploits
+- reward variance stays non-zero enough for GRPO to keep learning
+
+If easy-fire eval is not clearly improving by `200-300` easy steps, stop and
+debug reward/parser/policy rather than spending on medium/hard/brutal.
+
+Long-run target after the easy proof passes:
 
 ```text
 200 easy + 200 medium + 200 hard + 150 brutal = 750 steps

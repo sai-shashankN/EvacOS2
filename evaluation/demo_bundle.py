@@ -71,6 +71,28 @@ def _aggregate_metrics(payload: dict | None) -> dict[str, float]:
     }
 
 
+def _behavior_diagnostics(payload: dict | None) -> dict[str, float]:
+    if not payload:
+        return {}
+    episodes = payload.get("episodes", [])
+    if not episodes:
+        return {}
+
+    def _mean_episode_value(key: str) -> float:
+        values = [float(episode.get(key, 0.0)) for episode in episodes]
+        return sum(values) / len(values) if values else 0.0
+
+    return {
+        "civilians_saved": _mean_episode_value("civilians_saved"),
+        "civilians_lost": _mean_episode_value("civilians_lost"),
+        "civilians_remaining": _mean_episode_value("civilians_remaining"),
+        "wait_rate": _mean_episode_value("wait_rate"),
+        "scout_rate": _mean_episode_value("scout_rate"),
+        "route_rate": _mean_episode_value("route_rate"),
+        "evacuate_rate": _mean_episode_value("evacuate_rate"),
+    }
+
+
 def _format_delta(
     baseline_metrics: dict[str, float],
     trained_metrics: dict[str, float],
@@ -126,6 +148,8 @@ def _write_summary_markdown(
 ) -> Path:
     baseline_metrics = _aggregate_metrics(baseline_payload)
     trained_metrics = _aggregate_metrics(trained_payload)
+    baseline_diagnostics = _behavior_diagnostics(baseline_payload)
+    trained_diagnostics = _behavior_diagnostics(trained_payload)
 
     lines = [
         "# Demo Bundle Summary",
@@ -159,6 +183,13 @@ def _write_summary_markdown(
                 f"- invalid action rate: `{trained_metrics.get('invalid_action_rate', 0.0):.4f}`",
                 f"- override win rate: `{trained_metrics.get('override_win_rate', 0.0):.4f}`",
                 "",
+                "## Behavior Diagnostics",
+                f"- trained mean civilians saved: `{trained_diagnostics.get('civilians_saved', 0.0):.2f}`",
+                f"- trained mean civilians lost: `{trained_diagnostics.get('civilians_lost', 0.0):.2f}`",
+                f"- trained mean civilians remaining: `{trained_diagnostics.get('civilians_remaining', 0.0):.2f}`",
+                f"- trained wait/scout/route/evacuate rates: `{trained_diagnostics.get('wait_rate', 0.0):.4f}` / `{trained_diagnostics.get('scout_rate', 0.0):.4f}` / `{trained_diagnostics.get('route_rate', 0.0):.4f}` / `{trained_diagnostics.get('evacuate_rate', 0.0):.4f}`",
+                f"- baseline mean civilians saved/remaining: `{baseline_diagnostics.get('civilians_saved', 0.0):.2f}` / `{baseline_diagnostics.get('civilians_remaining', 0.0):.2f}`",
+                "",
                 "## Deltas (Trained - Baseline)",
                 f"- headline eval score: `{_format_delta(baseline_metrics, trained_metrics, 'eval_score_pct')}` percentage points",
                 f"- orchestrator mean normalized reward: `{_format_delta(baseline_metrics, trained_metrics, 'orch_norm_reward')}`",
@@ -166,6 +197,14 @@ def _write_summary_markdown(
                 f"- save rate: `{_format_delta(baseline_metrics, trained_metrics, 'save_rate')}`",
                 f"- invalid action rate: `{_format_delta(baseline_metrics, trained_metrics, 'invalid_action_rate')}`",
                 f"- override win rate: `{_format_delta(baseline_metrics, trained_metrics, 'override_win_rate')}`",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "## Trained Eval Warning",
+                "- trained fixed suite did not run; this bundle is a baseline smoke artifact, not proof of learning",
                 "",
             ]
         )
@@ -196,6 +235,8 @@ def _write_scorecard_artifacts(
 ) -> tuple[Path, Path]:
     baseline_metrics = _aggregate_metrics(baseline_payload)
     trained_metrics = _aggregate_metrics(trained_payload)
+    baseline_diagnostics = _behavior_diagnostics(baseline_payload)
+    trained_diagnostics = _behavior_diagnostics(trained_payload)
     metric_keys = [
         "eval_score_pct",
         "orch_norm_reward",
@@ -242,8 +283,24 @@ def _write_scorecard_artifacts(
             "flat_metrics": flat_count,
             "no_trained_data_metrics": no_data_count,
         },
+        "warnings": [
+            "trained fixed-suite eval missing; do not claim trained improvement"
+            if trained_payload is None
+            else None,
+            "headline eval score regressed versus baseline"
+            if trained_payload is not None
+            and trained_metrics.get("eval_score_pct", 0.0) < baseline_metrics.get("eval_score_pct", 0.0)
+            else None,
+        ],
+        "behavior_diagnostics": {
+            "baseline": baseline_diagnostics,
+            "trained": trained_diagnostics if trained_payload is not None else None,
+        },
         "metrics": metric_rows,
     }
+    scorecard_payload["warnings"] = [
+        warning for warning in scorecard_payload["warnings"] if warning is not None
+    ]
 
     scorecard_json = output_dir / "submission_scorecard.json"
     scorecard_json.write_text(
@@ -266,10 +323,32 @@ def _write_scorecard_artifacts(
         f"- flat metrics: `{flat_count}`",
         f"- no-trained-data metrics: `{no_data_count}`",
         "",
+        "## Warnings",
+    ]
+    warnings = scorecard_payload["warnings"]
+    if warnings:
+        lines.extend(f"- {warning}" for warning in warnings)
+    else:
+        lines.append("- none")
+
+    lines.extend(
+        [
+            "",
+            "## Behavior Diagnostics",
+            f"- baseline saved/lost/remaining: `{baseline_diagnostics.get('civilians_saved', 0.0):.2f}` / `{baseline_diagnostics.get('civilians_lost', 0.0):.2f}` / `{baseline_diagnostics.get('civilians_remaining', 0.0):.2f}`",
+            f"- trained saved/lost/remaining: `{trained_diagnostics.get('civilians_saved', 0.0):.2f}` / `{trained_diagnostics.get('civilians_lost', 0.0):.2f}` / `{trained_diagnostics.get('civilians_remaining', 0.0):.2f}`" if trained_payload is not None else "- trained saved/lost/remaining: `n/a`",
+            f"- trained wait/scout/route/evacuate: `{trained_diagnostics.get('wait_rate', 0.0):.4f}` / `{trained_diagnostics.get('scout_rate', 0.0):.4f}` / `{trained_diagnostics.get('route_rate', 0.0):.4f}` / `{trained_diagnostics.get('evacuate_rate', 0.0):.4f}`" if trained_payload is not None else "- trained wait/scout/route/evacuate: `n/a`",
+            "",
+        ]
+    )
+
+    lines.extend(
+        [
         "## Metrics",
         "| metric | goal | baseline | trained | delta | status |",
         "| --- | --- | ---: | ---: | ---: | --- |",
-    ]
+        ]
+    )
 
     for row in metric_rows:
         baseline = "n/a" if row["baseline"] is None else f"{float(row['baseline']):.4f}"
@@ -307,6 +386,7 @@ def build_demo_bundle(
     tiers: Sequence[str] = ("easy", "medium"),
     seeds: Sequence[int] = (42, 123, 456, 789, 1024),
     disaster_families: Sequence[DisasterType | str] = tuple(DisasterType),
+    max_rounds: int = 50,
     rationale_mode: str = "linear_capped",
     output_dir: Path = Path("outputs/demo_bundle"),
     skip_trained: bool = False,
@@ -320,6 +400,7 @@ def build_demo_bundle(
         tiers=tiers,
         seeds=seeds,
         disaster_families=disaster_families,
+        max_rounds=max_rounds,
         rationale_mode=rationale_mode,
         output_csv=output_dir / "baseline_vs_trained.csv",
         skip_trained=skip_trained,
@@ -395,6 +476,12 @@ def _parse_args() -> argparse.Namespace:
         default=Path("training/config.yaml"),
         help="Training config to use if checkpoint metadata is unavailable.",
     )
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=50,
+        help="Bounded rounds per eval episode. Keep small for smoke/gate evals.",
+    )
     return parser.parse_args()
 
 
@@ -404,6 +491,7 @@ def main() -> None:
         trained_checkpoint=args.trained_checkpoint,
         output_dir=args.output_dir,
         rationale_mode=args.rationale_mode,
+        max_rounds=args.max_rounds,
         skip_trained=args.skip_trained,
         training_metrics_path=args.training_metrics_path,
         config_path=args.config,

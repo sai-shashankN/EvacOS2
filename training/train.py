@@ -11,6 +11,7 @@ import json
 import os
 import pickle
 import random
+import re
 import shutil
 import signal
 import time
@@ -32,6 +33,10 @@ _TRAINER_DIAGNOSTIC_KEYS: tuple[str, ...] = (
     "mask_coverage",
     "mean_advantage",
     "advantage_std",
+    "group_raw_reward_std_mean",
+    "group_raw_reward_std_min",
+    "group_raw_reward_std_max",
+    "singleton_group_rate",
     "loss_mean_across_epochs",
     "policy_loss_mean_across_epochs",
     "kl_loss_mean_across_epochs",
@@ -138,6 +143,43 @@ def _parse_yaml_value(val: str) -> Any:
 def _config_hash(config: TrainingConfig) -> str:
     blob = json.dumps(config.model_dump(mode="json"), sort_keys=True)
     return "sha256:" + hashlib.sha256(blob.encode()).hexdigest()[:12]
+
+
+def _validate_config_path_identity(config_path: Path, config: TrainingConfig) -> None:
+    """Fail fast when a run-name suffix disagrees with the loaded config.
+
+    This guards the exact Vast failure mode where a file named ``*-750.yaml``
+    contained a 2000-step curriculum and silently wrote 750-looking artifacts.
+    """
+    stem = config_path.stem
+    match = re.search(r"-(\d+)$", stem)
+    if match and config.max_steps is not None:
+        expected_steps = int(match.group(1))
+        if config.max_steps != expected_steps:
+            raise ValueError(
+                f"Config path {config_path} implies {expected_steps} steps, "
+                f"but max_steps={config.max_steps}. Rename the config/artifacts "
+                "or fix max_steps before launching a paid run."
+            )
+
+    path_fields = {
+        "checkpoint.root_dir": config.checkpoint.root_dir,
+        "metrics.csv_path": config.metrics.csv_path,
+        "metrics.jsonl_dir": config.metrics.jsonl_dir,
+    }
+    for field_name, raw_path in path_fields.items():
+        path_match = re.search(
+            r"-(\d+)(?:-(?:metrics|logs))?(?:\.[^.]+)?$",
+            str(raw_path),
+        )
+        if path_match and config.max_steps is not None:
+            expected_steps = int(path_match.group(1))
+            if config.max_steps != expected_steps:
+                raise ValueError(
+                    f"{field_name}={raw_path!r} implies {expected_steps} steps, "
+                    f"but max_steps={config.max_steps}. Use step-consistent "
+                    "output roots so artifacts cannot be mislabeled."
+                )
 
 
 class _FixedTierCurriculum:
@@ -487,6 +529,10 @@ class MultiAgentGRPOTrainer:
         self.kl_coef = float(kl_coef)
         self.clip_range = float(clip_range)
         self.num_train_epochs_per_step = max(1, int(num_train_epochs_per_step))
+        self.logprob_microbatch_size = max(
+            1,
+            int(os.getenv("EVACOS_LOGPROB_MICROBATCH_SIZE", "4")),
+        )
 
         if getattr(self.tokenizer, "pad_token", None) is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -730,15 +776,30 @@ class MultiAgentGRPOTrainer:
         where shifted_labels == -100 are set to 0 (caller should mask them).
         """
         torch = self._torch
-        outputs = self.model(**encoded_full)
-        logits = outputs.logits[:, :-1, :]  # (S, L-1, V)
+        batch_size = int(shifted_labels.shape[0])
+        chunk_size = min(self.logprob_microbatch_size, batch_size)
+        chunks: list[Any] = []
 
-        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-        gather_labels = shifted_labels.masked_fill(shifted_labels == -100, 0)
-        token_log_probs = log_probs.gather(-1, gather_labels.unsqueeze(-1)).squeeze(-1)
-        # Zero out invalid positions but don't multiply — keep raw logprobs
-        token_log_probs = token_log_probs.masked_fill(shifted_labels == -100, 0.0)
-        return token_log_probs
+        for start in range(0, batch_size, chunk_size):
+            stop = min(start + chunk_size, batch_size)
+            encoded_chunk = {
+                key: value[start:stop]
+                for key, value in encoded_full.items()
+            }
+            labels_chunk = shifted_labels[start:stop]
+            outputs = self.model(**encoded_chunk)
+            logits = outputs.logits[:, :-1, :]  # (S, L-1, V)
+
+            log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+            gather_labels = labels_chunk.masked_fill(labels_chunk == -100, 0)
+            token_log_probs = log_probs.gather(
+                -1,
+                gather_labels.unsqueeze(-1),
+            ).squeeze(-1)
+            token_log_probs = token_log_probs.masked_fill(labels_chunk == -100, 0.0)
+            chunks.append(token_log_probs)
+
+        return torch.cat(chunks, dim=0)
 
     # ------------------------------------------------------------------
     # Advantage computation
@@ -860,7 +921,10 @@ class MultiAgentGRPOTrainer:
 
         # --- 1. Old log-probs: frozen, captured ONCE -----------------------
             with torch.no_grad():
-                old_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1)
+                old_lp = self._masked_token_logprobs(
+                    encoded_full,
+                    shifted_labels,
+                ).detach()  # (S, L-1)
 
         # --- 2. Ref log-probs: LoRA adapter disabled -----------------------
             with torch.no_grad():
@@ -873,14 +937,17 @@ class MultiAgentGRPOTrainer:
 
                 if cm is not None:
                     with cm:
-                        ref_lp = self._masked_token_logprobs(encoded_full, shifted_labels)
+                        ref_lp = self._masked_token_logprobs(
+                            encoded_full,
+                            shifted_labels,
+                        ).detach()
                 else:
                     warnings.warn(
                         "Model does not expose disable_adapter(); "
                         "reference log-probs will equal old log-probs (KL = 0).",
                         stacklevel=2,
                     )
-                    ref_lp = old_lp.clone()
+                    ref_lp = old_lp.clone().detach()
 
         # --- 3. Advantages: computed once, detached -------------------------
             advantages = self._compute_group_advantages(
@@ -896,95 +963,133 @@ class MultiAgentGRPOTrainer:
             epoch_kl_losses: list[float] = []
             epoch_losses: list[float] = []
 
+            mask_sum_tensor = completion_mask.sum().clamp_min(1.0)
+            mask_sum_value = float(mask_sum_tensor.detach().item())
+            batch_size = int(shifted_labels.shape[0])
+            chunk_size = min(self.logprob_microbatch_size, batch_size)
+
             for _epoch in range(self.num_train_epochs_per_step):
-                new_lp = self._masked_token_logprobs(encoded_full, shifted_labels)  # (S, L-1), WITH grad
+                ratio_sum_epoch = 0.0
+                ratio_sq_sum_epoch = 0.0
+                clip_count_epoch = 0.0
+                kl_max_epoch = 0.0
+                policy_loss_total = 0.0
+                kl_loss_total = 0.0
+                loss_total = 0.0
 
-            # FP16-safe log-prob ratio via log-space delta
-                delta = (new_lp - old_lp).clamp(-5.0, 5.0)  # (S, L-1)
-                ratio = delta.exp()  # (S, L-1)
+                self.optimizer.zero_grad()
+                for start in range(0, batch_size, chunk_size):
+                    stop = min(start + chunk_size, batch_size)
+                    encoded_chunk = {
+                        key: value[start:stop]
+                        for key, value in encoded_full.items()
+                    }
+                    labels_chunk = shifted_labels[start:stop]
+                    mask_chunk = completion_mask[start:stop]
+                    old_chunk = old_lp[start:stop]
+                    ref_chunk = ref_lp[start:stop]
+                    adv_chunk = advantages[start:stop]
 
-            # Broadcast advantage to token dimension: (S,) -> (S, L-1)
-                A_tok = advantages.unsqueeze(-1) * torch.ones_like(ratio)
+                    new_lp = self._masked_token_logprobs(
+                        encoded_chunk,
+                        labels_chunk,
+                    )
 
-            # Clipped surrogate
-                surr1 = ratio * A_tok
-                surr2 = ratio.clamp(1.0 - self.clip_range, 1.0 + self.clip_range) * A_tok
-                policy_loss = (
-                    -(torch.min(surr1, surr2) * completion_mask).sum()
-                    / completion_mask.sum().clamp_min(1.0)
-                )
+                    # FP16-safe log-prob ratio via log-space delta.
+                    delta = (new_lp - old_chunk).clamp(-5.0, 5.0)
+                    ratio = delta.exp()
 
-            # Schulman k3 KL estimator: k3 = exp(ref - new) - (ref - new) - 1
-                ref_delta = (ref_lp - new_lp).clamp(-5.0, 5.0)
-                kl_per_tok = ref_delta.exp() - ref_delta - 1.0  # >= 0 by construction
-                kl_loss = (
-                    (kl_per_tok * completion_mask).sum()
-                    / completion_mask.sum().clamp_min(1.0)
-                )
-                if hasattr(torch, "isfinite"):
-                    finite_kl = torch.isfinite(kl_loss).all()
-                    if hasattr(finite_kl, "item"):
-                        finite_kl = finite_kl.item()
-                    if not finite_kl:
-                        raise RuntimeError(
-                            f"Non-finite kl_loss detected at step {self._step_counter}; "
-                            f"dtype={getattr(kl_loss, 'dtype', '?')}, value={kl_loss.detach()}"
+                    # Broadcast advantage to token dimension: (S,) -> (S, L-1).
+                    A_tok = adv_chunk.unsqueeze(-1) * torch.ones_like(ratio)
+
+                    surr1 = ratio * A_tok
+                    surr2 = (
+                        ratio.clamp(1.0 - self.clip_range, 1.0 + self.clip_range)
+                        * A_tok
+                    )
+                    policy_loss_chunk = -(
+                        torch.min(surr1, surr2) * mask_chunk
+                    ).sum() / mask_sum_tensor
+
+                    # Schulman k3 KL estimator: k3 = exp(ref - new) - (ref - new) - 1.
+                    ref_delta = (ref_chunk - new_lp).clamp(-5.0, 5.0)
+                    kl_per_tok = ref_delta.exp() - ref_delta - 1.0
+                    kl_loss_chunk = (
+                        (kl_per_tok * mask_chunk).sum() / mask_sum_tensor
+                    )
+                    if hasattr(torch, "isfinite"):
+                        finite_kl = torch.isfinite(kl_loss_chunk).all()
+                        if hasattr(finite_kl, "item"):
+                            finite_kl = finite_kl.item()
+                        if not finite_kl:
+                            raise RuntimeError(
+                                f"Non-finite kl_loss detected at step {self._step_counter}; "
+                                f"dtype={getattr(kl_loss_chunk, 'dtype', '?')}, "
+                                f"value={kl_loss_chunk.detach()}"
+                            )
+                        finite_policy = torch.isfinite(policy_loss_chunk).all()
+                        if hasattr(finite_policy, "item"):
+                            finite_policy = finite_policy.item()
+                        if not finite_policy:
+                            raise RuntimeError(
+                                f"Non-finite policy_loss detected at step {self._step_counter}; "
+                                f"dtype={getattr(policy_loss_chunk, 'dtype', '?')}, "
+                                f"value={policy_loss_chunk.detach()}"
+                            )
+
+                    loss_chunk = policy_loss_chunk + self.kl_coef * kl_loss_chunk
+                    loss_chunk.backward()
+
+                    ratio_detached = ratio.detach()
+                    masked_ratio_chunk = ratio_detached * mask_chunk
+                    ratio_sum_epoch += masked_ratio_chunk.sum().item()
+                    ratio_sq_sum_epoch += ((ratio_detached ** 2) * mask_chunk).sum().item()
+                    outside_clip_chunk = (
+                        ((ratio_detached < 1.0 - self.clip_range)
+                         | (ratio_detached > 1.0 + self.clip_range))
+                        * mask_chunk
+                    )
+                    clip_count_epoch += outside_clip_chunk.sum().item()
+                    if mask_chunk.sum().item() > 0:
+                        kl_max_epoch = max(
+                            kl_max_epoch,
+                            (kl_per_tok.detach() * mask_chunk).max().item(),
                         )
-                    finite_policy = torch.isfinite(policy_loss).all()
-                    if hasattr(finite_policy, "item"):
-                        finite_policy = finite_policy.item()
-                    if not finite_policy:
-                        raise RuntimeError(
-                            f"Non-finite policy_loss detected at step {self._step_counter}; "
-                            f"dtype={getattr(policy_loss, 'dtype', '?')}, value={policy_loss.detach()}"
-                        )
+                    policy_loss_total += policy_loss_chunk.detach().item()
+                    kl_loss_total += kl_loss_chunk.detach().item()
+                    loss_total += loss_chunk.detach().item()
 
-                loss = policy_loss + self.kl_coef * kl_loss
+                    del new_lp, ratio, kl_per_tok, loss_chunk
 
-                mask_sum_epoch = completion_mask.sum().clamp_min(1.0).item()
-                masked_ratio_epoch = ratio.detach() * completion_mask
-                ratio_mean_epoch = masked_ratio_epoch.sum().item() / mask_sum_epoch
-                ratio_sq_mean_epoch = (masked_ratio_epoch ** 2).sum().item() / mask_sum_epoch
-                ratio_std_epoch = (max(ratio_sq_mean_epoch - ratio_mean_epoch ** 2, 0.0)) ** 0.5
-                outside_clip_epoch = (
-                    ((ratio.detach() < 1.0 - self.clip_range)
-                     | (ratio.detach() > 1.0 + self.clip_range))
-                    * completion_mask
-                )
-                clip_fraction_epoch = outside_clip_epoch.sum().item() / mask_sum_epoch
-                kl_max_epoch = (kl_per_tok.detach() * completion_mask).max().item()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.optimizer.step()
+
+                ratio_mean_epoch = ratio_sum_epoch / mask_sum_value
+                ratio_sq_mean_epoch = ratio_sq_sum_epoch / mask_sum_value
+                ratio_std_epoch = (
+                    max(ratio_sq_mean_epoch - ratio_mean_epoch ** 2, 0.0)
+                ) ** 0.5
+                clip_fraction_epoch = clip_count_epoch / mask_sum_value
 
                 epoch_ratio_means.append(ratio_mean_epoch)
                 epoch_ratio_stds.append(ratio_std_epoch)
                 epoch_clip_fractions.append(clip_fraction_epoch)
                 epoch_kl_maxes.append(kl_max_epoch)
-                epoch_policy_losses.append(policy_loss.detach().item())
-                epoch_kl_losses.append(kl_loss.detach().item())
-                epoch_losses.append(loss.detach().item())
-
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                self.optimizer.step()
+                epoch_policy_losses.append(policy_loss_total)
+                epoch_kl_losses.append(kl_loss_total)
+                epoch_losses.append(loss_total)
 
         # --- 5. Diagnostics -------------------------------------------------
-            mask_sum = completion_mask.sum().clamp_min(1.0).item()
-            masked_ratio = ratio.detach() * completion_mask
-            ratio_mean = masked_ratio.sum().item() / mask_sum
-        # Masked std: E[r^2] - E[r]^2  under the mask
-            ratio_sq_mean = (masked_ratio ** 2).sum().item() / mask_sum
-            ratio_std = (max(ratio_sq_mean - ratio_mean ** 2, 0.0)) ** 0.5
-        # Clip fraction: fraction of valid tokens where ratio is outside clip range
-            outside_clip = (
-                ((ratio.detach() < 1.0 - self.clip_range)
-                 | (ratio.detach() > 1.0 + self.clip_range))
-                * completion_mask
-            )
-            clip_fraction = outside_clip.sum().item() / mask_sum
-            kl_max = (kl_per_tok.detach() * completion_mask).max().item()
             mask_coverage = completion_mask.mean().item()
             mean_advantage = advantages.mean().item()
             advantage_std = advantages.std().item() if advantages.numel() > 1 else 0.0
+            group_raw_reward_stds = [
+                _population_std([float(value) for value in rewards])
+                for rewards in grouped_raw_rewards.values()
+            ]
+            singleton_group_rate = sum(
+                1 for rewards in grouped_raw_rewards.values() if len(rewards) < 2
+            ) / max(len(grouped_raw_rewards), 1)
 
             return {
                 "loss": epoch_losses[-1],
@@ -997,6 +1102,12 @@ class MultiAgentGRPOTrainer:
                 "mask_coverage": mask_coverage,
                 "mean_advantage": mean_advantage,
                 "advantage_std": advantage_std,
+                "group_raw_reward_std_mean": (
+                    sum(group_raw_reward_stds) / max(len(group_raw_reward_stds), 1)
+                ),
+                "group_raw_reward_std_min": min(group_raw_reward_stds, default=0.0),
+                "group_raw_reward_std_max": max(group_raw_reward_stds, default=0.0),
+                "singleton_group_rate": singleton_group_rate,
                 "loss_mean_across_epochs": sum(epoch_losses) / max(len(epoch_losses), 1),
                 "policy_loss_mean_across_epochs": sum(epoch_policy_losses) / max(len(epoch_policy_losses), 1),
                 "kl_loss_mean_across_epochs": sum(epoch_kl_losses) / max(len(epoch_kl_losses), 1),
@@ -1272,6 +1383,22 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     def _has_empty_arguments(sample: Any) -> bool:
         return len(_arguments(sample)) == 0
 
+    def _is_floor_route(sample: Any) -> bool:
+        return getattr(sample, "role", "") == "floor_agent" and _action_type(sample) == "route_within_floor"
+
+    def _route_target_kind(sample: Any) -> str:
+        args = _arguments(sample)
+        if args.get("exit_id"):
+            return "exit"
+        if args.get("stairwell_id"):
+            return "stairwell"
+        to_room_id = str(args.get("to_room_id", ""))
+        if to_room_id.startswith(("exit_", "exit-", "EX", "stairwell_", "stair_")):
+            return "legacy_egress_alias"
+        if to_room_id:
+            return "room"
+        return "missing"
+
     floor_samples = [sample for sample in samples if getattr(sample, "role", "") == "floor_agent"]
     orchestrator_samples = [
         sample for sample in samples if getattr(sample, "role", "") == "orchestrator"
@@ -1295,6 +1422,17 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
         and _is_wait_action(sample)
         and _has_empty_arguments(sample)
     )
+    floor_route_samples = [sample for sample in floor_samples if _is_floor_route(sample)]
+    floor_route_count = len(floor_route_samples)
+    floor_route_exit_count = sum(1 for sample in floor_route_samples if _route_target_kind(sample) == "exit")
+    floor_route_stairwell_count = sum(1 for sample in floor_route_samples if _route_target_kind(sample) == "stairwell")
+    floor_route_room_count = sum(1 for sample in floor_route_samples if _route_target_kind(sample) == "room")
+    floor_route_legacy_alias_count = sum(
+        1 for sample in floor_route_samples if _route_target_kind(sample) == "legacy_egress_alias"
+    )
+    floor_route_missing_target_count = sum(
+        1 for sample in floor_route_samples if _route_target_kind(sample) == "missing"
+    )
 
     return {
         "wait_rate": round(wait_count / max(len(samples), 1), 4),
@@ -1309,6 +1447,21 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
         "active_empty_args_rate": round(active_empty_args_count / max(len(samples), 1), 4),
         "valid_but_hollow_action_rate": round(
             valid_but_hollow_count / max(len(samples), 1),
+            4,
+        ),
+        "floor_route_action_rate": round(floor_route_count / max(len(floor_samples), 1), 4),
+        "floor_route_exit_rate": round(floor_route_exit_count / max(floor_route_count, 1), 4),
+        "floor_route_stairwell_rate": round(
+            floor_route_stairwell_count / max(floor_route_count, 1),
+            4,
+        ),
+        "floor_route_room_rate": round(floor_route_room_count / max(floor_route_count, 1), 4),
+        "floor_route_legacy_egress_alias_rate": round(
+            floor_route_legacy_alias_count / max(floor_route_count, 1),
+            4,
+        ),
+        "floor_route_missing_target_rate": round(
+            floor_route_missing_target_count / max(floor_route_count, 1),
             4,
         ),
         "override_rate": round(override_count / max(orchestrator_action_count, 1), 4),
@@ -1728,6 +1881,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
     raw = _load_yaml_config(config_path)
     config = TrainingConfig(**raw)
+    _validate_config_path_identity(config_path, config)
     logger.info(
         "Reward normalization: group-mean-std on raw_rewards (trainer-owned). "
         "RoleReward.normalized and TrajectorySample.normalized_reward are identity "
@@ -1913,6 +2067,15 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             lora_weights_path=adapter_path,
             model_name=model_name,
             config_hash=config_hash,
+            config_path=str(config_path),
+            max_steps=config.max_steps,
+            rollout_max_rounds_per_episode=config.rollout.max_rounds_per_episode,
+            rollout_disaster_families=list(config.rollout.disaster_families),
+            rollout_tier_schedule=[
+                block.model_dump(mode="json")
+                for block in (config.rollout.tier_schedule or [])
+            ]
+            or None,
             role_lora_weights_paths=role_adapter_paths,
             floor_specialist_lora_weights_paths=floor_specialist_adapter_paths,
             role_model_names=checkpoint_role_model_names,
@@ -1991,8 +2154,14 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             rollout_metrics = _compute_rollout_metrics(results)
             metrics_row = {
                 "step": step,
+                "max_steps": config.max_steps,
                 "wall_seconds": round(wall_total, 2),
+                "run_name": ckpt_root.name,
+                "config_hash": config_hash,
                 "tier_mix": ";".join(sorted({result.tier for result in results})),
+                "disaster_families": ";".join(item.value for item in disaster_families),
+                "episodes_per_step": config.rollout.episodes_per_step,
+                "max_rounds_per_episode": config.rollout.max_rounds_per_episode,
                 "mean_raw_reward_orch": round(sum(all_raw_orch) / max(len(all_raw_orch), 1), 4),
                 "mean_raw_reward_floor": round(sum(all_raw_floor) / max(len(all_raw_floor), 1), 4),
                 "raw_reward_std_orch": round(_population_std(all_raw_orch), 4),
@@ -2044,3 +2213,23 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 wandb_run.finish()
         finally:
             run_lock.release()
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint for ``python -m training.train [config.yaml]``."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run EvacOS2 GRPO training.")
+    parser.add_argument(
+        "config",
+        nargs="?",
+        default="training/config.yaml",
+        help="Path to the training YAML config.",
+    )
+    args = parser.parse_args(argv)
+    run_training(Path(args.config))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

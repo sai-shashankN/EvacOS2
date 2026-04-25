@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 import json
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
@@ -67,12 +68,20 @@ class EpisodeResult(BaseModel):
     total_rounds: int
     wall_clock_s: float
     termination_reason: str | None = None
+    total_civilians: int = 0
     civilians_saved: int = 0
     civilians_lost: int = 0
+    civilians_remaining: int = 0
     save_rate: float = 0.0
     eval_score_pct: float = 0.0
     invalid_action_rate: float = 0.0
     override_win_rate: float = 0.0
+    action_type_counts: dict[str, int] = Field(default_factory=dict)
+    action_type_counts_by_role: dict[str, dict[str, int]] = Field(default_factory=dict)
+    wait_rate: float = 0.0
+    scout_rate: float = 0.0
+    route_rate: float = 0.0
+    evacuate_rate: float = 0.0
     raw_reward_by_role: dict[str, float] = Field(default_factory=dict)
     normalized_reward_by_role: dict[str, float] = Field(default_factory=dict)
     scope_policy_key: str = "generalist"
@@ -141,6 +150,10 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _count_actions(counts: Counter[str], names: Sequence[str]) -> int:
+    return sum(counts.get(name, 0) for name in names)
+
+
 def _eval_score_pct(*, save_rate: float, invalid_action_rate: float) -> float:
     """Bounded human-facing score; training reward remains separate."""
     valid_multiplier = 1.0 - (0.5 * _clamp01(invalid_action_rate))
@@ -196,6 +209,14 @@ def _build_episode_result(
 
     action_count = len(action_rows)
     invalid_count = sum(1 for row in action_rows if not row.get("valid", True))
+    action_counts = Counter(
+        str(row.get("action_type", "unknown")) for row in action_rows
+    )
+    action_counts_by_role: dict[str, Counter[str]] = defaultdict(Counter)
+    for row in action_rows:
+        agent_id = str(row.get("agent_id", ""))
+        role = "orchestrator" if agent_id == "orchestrator" else "floor_agent"
+        action_counts_by_role[role][str(row.get("action_type", "unknown"))] += 1
     override_ids = {
         row["action_id"]
         for row in action_rows
@@ -212,6 +233,7 @@ def _build_episode_result(
     total_civilians = max(state.total_civilians.total, 1)
     saved = state.civilians_saved.total
     lost = state.civilians_lost.total
+    remaining = max(total_civilians - saved - lost, 0)
 
     floor_raw = _mean(
         value for key, value in batch_result.total_raw_reward_by_role.items() if key != "orchestrator"
@@ -236,8 +258,10 @@ def _build_episode_result(
         total_rounds=int(batch_result.num_rounds),
         wall_clock_s=float(batch_result.wall_clock_seconds),
         termination_reason=batch_result.done_reason,
+        total_civilians=int(total_civilians),
         civilians_saved=saved,
         civilians_lost=lost,
+        civilians_remaining=int(remaining),
         save_rate=float(saved / total_civilians),
         eval_score_pct=_eval_score_pct(
             save_rate=float(saved / total_civilians),
@@ -245,6 +269,33 @@ def _build_episode_result(
         ),
         invalid_action_rate=float(invalid_count / action_count) if action_count else 0.0,
         override_win_rate=float(override_wins / len(override_ids)) if override_ids else 0.0,
+        action_type_counts={key: int(value) for key, value in sorted(action_counts.items())},
+        action_type_counts_by_role={
+            role: {key: int(value) for key, value in sorted(counts.items())}
+            for role, counts in sorted(action_counts_by_role.items())
+        },
+        wait_rate=float(action_counts.get("wait", 0) / action_count) if action_count else 0.0,
+        scout_rate=float(_count_actions(action_counts, ("scout", "scout_status")) / action_count)
+        if action_count
+        else 0.0,
+        route_rate=float(
+            _count_actions(
+                action_counts,
+                ("route_within_floor", "route_between_floors", "route_civilians"),
+            )
+            / action_count
+        )
+        if action_count
+        else 0.0,
+        evacuate_rate=float(
+            _count_actions(
+                action_counts,
+                ("evacuate_floor_priority", "evacuate_floor", "evacuate_room"),
+            )
+            / action_count
+        )
+        if action_count
+        else 0.0,
         raw_reward_by_role={
             "orchestrator": float(batch_result.total_raw_reward_by_role.get("orchestrator", 0.0)),
             "floor_agent": float(floor_raw),

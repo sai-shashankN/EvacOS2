@@ -194,6 +194,22 @@ def _lookup_stairwell_for_action(stairwell_lookup: dict[str, Any], action: Actio
     return None
 
 
+def _route_exit_id(action: ActionEnvelopeMA, exit_lookup: dict[str, Any]) -> str:
+    exit_id = action.arguments.get("exit_id", "")
+    if exit_id:
+        return str(exit_id)
+    to_room_id = action.arguments.get("to_room_id", "")
+    return str(to_room_id) if to_room_id in exit_lookup else ""
+
+
+def _route_stairwell_id(action: ActionEnvelopeMA, stairwell_lookup: dict[str, Any]) -> str:
+    stairwell_id = action.arguments.get("stairwell_id", "")
+    if stairwell_id:
+        return str(stairwell_id)
+    to_room_id = action.arguments.get("to_room_id", "")
+    return str(to_room_id) if to_room_id in stairwell_lookup else ""
+
+
 def _lookup_elevator_for_action(env: Any, ep_copy: Any, action: ActionEnvelopeMA) -> Any | None:
     elevator_lookup = env._elevator_lookup(ep_copy.building)
     elevator_id = action.arguments.get("elevator_id", "")
@@ -234,14 +250,14 @@ def _apply_counterfactual_action(
         return
 
     if action.action_type == ActionTypeMA.route_within_floor:
-        exit_id = action.arguments.get("exit_id")
+        exit_id = _route_exit_id(action, exit_lookup)
         if exit_id:
             exit_obj = exit_lookup.get(exit_id)
             if exit_obj is not None and not exit_obj.blocked:
                 _increment_counter(ep_copy.civilians_saved, "mobile")
             return
 
-        stairwell_id = action.arguments.get("stairwell_id")
+        stairwell_id = _route_stairwell_id(action, stairwell_lookup)
         if stairwell_id:
             stairwell = stairwell_lookup.get(stairwell_id)
             if stairwell is not None and not getattr(stairwell, "blocked", False):

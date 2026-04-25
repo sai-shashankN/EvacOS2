@@ -52,3 +52,23 @@ def test_fire_hour_supervisor_targets_750_step_real_run_artifacts():
     assert "timeout 3300s bash /root/remote_fire_unsloth_train_call.sh" not in script
     assert "remote-unsloth-3b-fire-floor-specialist-metrics.csv" not in script
     assert "fire_3b_hour_report.json" not in script
+
+
+def test_fire_easy_proof_script_has_self_guarded_artifacts():
+    script = (ROOT / "scripts" / "remote_fire_easy_proof300_train_only.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml" in script
+    assert "remote-unsloth-3b-fire-floor-specialist-easy-proof-300-metrics.csv" in script
+    assert "fire_easy_proof300_watchdog.jsonl" in script
+    assert "EVACOS_STALE_AFTER_SECONDS" in script
+    assert "EVACOS_MAX_WALL_SECONDS" in script
+    assert "EVACOS_TRAIN_TIMEOUT_SECONDS" in script
+    assert "EVACOS_MAX_INVALID_RATE" in script
+    assert 'timeout "${TRAIN_TIMEOUT_SECONDS}s"' in script
+    assert "metrics_stale>" in script
+    assert "wall_time>" in script
+    assert "MISSING_REQUIRED=" in script
+    assert "fire_easy_proof300_artifacts.tgz" in script
+    assert "outputs/oracle_canary/easy_fire_proof300_preflight.json" in script

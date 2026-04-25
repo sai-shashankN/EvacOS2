@@ -250,3 +250,42 @@ class TestLockdownVsRoute:
 
         # lockdown should be accepted (no contention on lockdown itself)
         assert any(a.action_id == "lockdown_a" for a in result.accepted)
+
+
+class TestLegacyRouteEgressAliases:
+    def test_exit_throughput_applies_to_route_to_room_exit_alias(self):
+        arbitrator = Arbitrator()
+        snapshot = {
+            "stairwell_capacities": {},
+            "exit_throughputs": {"exit_0": 1},
+        }
+        floor_actions = {
+            "floor_0_agent": _make_action(
+                ActionTypeMA.route_within_floor,
+                "floor_0_agent",
+                action_id="route_a",
+                arguments={"from_room_id": "room_0", "to_room_id": "exit_0"},
+            ),
+            "floor_1_agent": _make_action(
+                ActionTypeMA.route_within_floor,
+                "floor_1_agent",
+                action_id="route_b",
+                arguments={"from_room_id": "room_1", "to_room_id": "exit_0"},
+            ),
+        }
+
+        result = arbitrator.arbitrate(
+            snapshot=snapshot,
+            orchestrator_action=None,
+            floor_actions=floor_actions,
+            directive_store=None,
+            round_id=0,
+        )
+
+        exit_rejections = [
+            rejection
+            for rejection in result.rejections
+            if rejection["reason"] == "exit_throughput"
+        ]
+        assert len(exit_rejections) == 1
+        assert exit_rejections[0]["resource_id"] == "exit_0"

@@ -18,6 +18,7 @@ from training.checkpoint import load_checkpoint
 
 DEFAULT_TIERS = "easy,medium,hard,brutal"
 DEFAULT_SEEDS = "42,123,456,789,1024"
+DEFAULT_MAX_ROUNDS = 50
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,15 @@ def build_parser(profile: EvalProfile) -> argparse.ArgumentParser:
         help="Comma-separated disaster families. Defaults to the profile lane.",
     )
     parser.add_argument("--rationale-mode", default="linear_capped")
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=DEFAULT_MAX_ROUNDS,
+        help=(
+            "Bounded rounds per eval episode. Keep this small for smoke/gate "
+            "checks so trained eval cannot silently run for hours."
+        ),
+    )
     parser.add_argument("--training-metrics-path", type=Path, default=None)
     parser.add_argument("--skip-trained", action="store_true")
     parser.add_argument(
@@ -150,6 +160,7 @@ def run_profile(profile_name: str, argv: Sequence[str] | None = None) -> DemoBun
         tiers=tuple(_split_csv(args.tiers)),
         seeds=tuple(int(item) for item in _split_csv(args.seeds)),
         disaster_families=tuple(_split_csv(args.families)),
+        max_rounds=args.max_rounds,
         rationale_mode=args.rationale_mode,
         output_dir=args.output_dir,
         skip_trained=args.skip_trained,
@@ -173,4 +184,3 @@ def _print_result(profile: EvalProfile, result: DemoBundleResult) -> None:
         print("Trained fixed suite: skipped")
     for plot_path in result.plot_paths:
         print(f"Plot: {plot_path}")
-

@@ -231,7 +231,9 @@ def test_build_floor_prompt_includes_identity_contract_and_action_mask():
     assert "Decision policy:" in user_message
     assert "choose that active action instead of wait" in user_message
     assert "Use wait only when no safe/useful action is available" in user_message
+    assert "put it in exit_id or stairwell_id" in user_message
     assert '"action_type":"route_within_floor"' in user_message
+    assert '"exit_id":"exit_floor_2"' in user_message
     assert '"action_type":"open_exit"' in user_message
     assert '"action_type":"scout"' in user_message
 

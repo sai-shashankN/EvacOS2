@@ -96,3 +96,42 @@ def test_floor_specialist_configs_use_distinct_output_paths():
         )
 
     assert len(paths) == len(set(paths))
+
+
+def test_fire_floor_canary_config_is_easy_only_and_short():
+    raw = _load_yaml_config(
+        Path("training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml")
+    )
+    config = TrainingConfig(**raw)
+
+    assert config.backend == "unsloth"
+    assert config.max_steps == 50
+    assert config.roles.trainable == ["floor_agent"]
+    assert config.roles.orchestrator_policy == "stub"
+    assert config.rollout.disaster_families == ["fire"]
+    assert config.rollout.max_rounds_per_episode == 4
+    assert config.rollout.expanded_tier_schedule() == ["easy"] * 50
+    assert config.eval.every_steps == 10
+    assert config.eval.tiers == ["easy"]
+    assert config.checkpoint.root_dir.endswith("-canary-50")
+    assert config.metrics.csv_path.endswith("-canary-50-metrics.csv")
+
+
+def test_fire_floor_easy_proof_config_is_easy_only_and_eval_heavy():
+    raw = _load_yaml_config(
+        Path("training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml")
+    )
+    config = TrainingConfig(**raw)
+
+    assert config.backend == "unsloth"
+    assert config.max_steps == 300
+    assert config.roles.trainable == ["floor_agent"]
+    assert config.roles.orchestrator_policy == "stub"
+    assert config.rollout.disaster_families == ["fire"]
+    assert config.rollout.max_rounds_per_episode == 4
+    assert config.rollout.expanded_tier_schedule() == ["easy"] * 300
+    assert config.eval.every_steps == 25
+    assert config.eval.tiers == ["easy"]
+    assert config.checkpoint.every_steps == 25
+    assert config.checkpoint.root_dir.endswith("-easy-proof-300")
+    assert config.metrics.csv_path.endswith("-easy-proof-300-metrics.csv")

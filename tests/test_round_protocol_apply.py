@@ -83,6 +83,31 @@ def test_apply_route_within_floor_increments_civilians_saved():
     assert ep.civilians_saved.mobile == 1
 
 
+def test_apply_route_within_floor_treats_legacy_to_room_exit_as_exit():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+    exit_id = _first_exit_id(ep)
+    env._exit_lookup(ep.building)[exit_id].blocked = False
+
+    RoundProtocol()._apply(
+        env,
+        ep,
+        [
+            ActionEnvelopeMA(
+                episode_id=episode_id,
+                round_id=ep.step,
+                agent_id="floor_0_agent",
+                action_id="route_apply_legacy_exit",
+                action_type=ActionTypeMA.route_within_floor,
+                arguments={"from_room_id": "room_01", "to_room_id": exit_id},
+            )
+        ],
+    )
+
+    assert ep.civilians_saved.mobile == 1
+
+
 def test_apply_returns_per_agent_saved_lost_delta():
     env = EvacEnvironment()
     episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)

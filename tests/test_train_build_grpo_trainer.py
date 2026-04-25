@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 import tempfile
+from contextlib import nullcontext
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -654,6 +655,10 @@ def test_merge_trainer_diagnostics_aggregates_split_role_fields() -> None:
         "floor_agent_ratio_mean": 1.1,
         "orchestrator_kl_max": 0.02,
         "floor_agent_kl_max": 0.05,
+        "orchestrator_group_raw_reward_std_mean": 0.1,
+        "floor_agent_group_raw_reward_std_mean": 0.5,
+        "orchestrator_singleton_group_rate": 0.0,
+        "floor_agent_singleton_group_rate": 0.25,
         "orchestrator_num_inner_epochs": 1,
         "floor_agent_num_inner_epochs": 3,
     }
@@ -666,8 +671,75 @@ def test_merge_trainer_diagnostics_aggregates_split_role_fields() -> None:
     assert metrics_row["floor_agent_sample_groups"] == 5
     assert metrics_row["loss"] == pytest.approx((2.0 * 1 + 4.0 * 5) / 6.0)
     assert metrics_row["ratio_mean"] == pytest.approx((0.9 * 1 + 1.1 * 5) / 6.0)
+    assert metrics_row["group_raw_reward_std_mean"] == pytest.approx(
+        (0.1 * 1 + 0.5 * 5) / 6.0
+    )
+    assert metrics_row["singleton_group_rate"] == pytest.approx((0.0 * 1 + 0.25 * 5) / 6.0)
     assert metrics_row["kl_max"] == 0.05
     assert metrics_row["num_inner_epochs"] == 3
+
+
+def test_multi_agent_grpo_trainer_streams_trainable_logprob_chunks(monkeypatch):
+    torch = pytest.importorskip("torch")
+
+    monkeypatch.setenv("EVACOS_LOGPROB_MICROBATCH_SIZE", "2")
+
+    class TinyTokenizer:
+        pad_token = "<pad>"
+        eos_token = "<eos>"
+        pad_token_id = 0
+        eos_token_id = 0
+        padding_side = "right"
+        model_max_length = 16
+
+        def apply_chat_template(self, prompt, *, tokenize, add_generation_prompt):
+            if tokenize:
+                return [1, 2]
+            return "prompt"
+
+    class TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embed = torch.nn.Embedding(8, 4)
+            self.lm_head = torch.nn.Linear(4, 8, bias=False)
+            self.forward_calls = 0
+
+        def forward(self, input_ids, attention_mask=None):
+            self.forward_calls += 1
+            return SimpleNamespace(logits=self.lm_head(self.embed(input_ids)))
+
+        def disable_adapter(self):
+            return nullcontext()
+
+    model = TinyModel()
+    trainer = train_mod.MultiAgentGRPOTrainer(
+        model=model,
+        tokenizer=TinyTokenizer(),
+        learning_rate=1e-3,
+        kl_coef=0.04,
+        clip_range=0.2,
+        num_train_epochs_per_step=1,
+    )
+    grouped_inputs = {
+        "prompts": [
+            [[{"role": "user", "content": "a"}], [{"role": "user", "content": "b"}]],
+            [[{"role": "user", "content": "c"}], [{"role": "user", "content": "d"}]],
+        ],
+        "completions": [["aa", "bb"], ["cc", "dd"]],
+        "completion_token_ids": [[[3, 4], [4, 5]], [[5, 6], [6, 7]]],
+        "raw_rewards": [[1.0, -1.0], [0.5, -0.5]],
+        "samples": [[SimpleNamespace(role="floor_agent")], [SimpleNamespace(role="floor_agent")]],
+    }
+
+    diagnostics = trainer.step(grouped_inputs=grouped_inputs)
+
+    assert model.forward_calls >= 6
+    assert diagnostics["num_inner_epochs"] == 1
+    assert diagnostics["mask_coverage"] > 0
+    assert diagnostics["advantage_std"] > 0
+    assert diagnostics["group_raw_reward_std_mean"] > 0
+    assert diagnostics["group_raw_reward_std_max"] > 0
+    assert diagnostics["singleton_group_rate"] == 0
 
 
 def test_compute_rollout_metrics_tracks_wait_and_hollow_behavior() -> None:
@@ -701,6 +773,10 @@ def test_compute_rollout_metrics_tracks_wait_and_hollow_behavior() -> None:
                 ),
                 SimpleNamespace(
                     role="floor_agent",
+                    parsed_action={"action_type": "route_within_floor", "arguments": {"from_room_id": "room_2", "exit_id": "exit_2"}},
+                ),
+                SimpleNamespace(
+                    role="floor_agent",
                     parsed_action={"action_type": "open_exit", "arguments": {}},
                 ),
             ],
@@ -712,13 +788,16 @@ def test_compute_rollout_metrics_tracks_wait_and_hollow_behavior() -> None:
     assert metrics["override_rate"] == 0.5
     assert metrics["override_win_rate"] == 1.0
     assert metrics["rationale_bonus_mean"] == 0.25
-    assert metrics["wait_rate"] == pytest.approx(3 / 6, rel=0, abs=1e-4)
-    assert metrics["floor_agent_wait_rate"] == pytest.approx(2 / 4, rel=0, abs=1e-4)
+    assert metrics["wait_rate"] == pytest.approx(3 / 7, rel=0, abs=1e-4)
+    assert metrics["floor_agent_wait_rate"] == pytest.approx(2 / 5, rel=0, abs=1e-4)
     assert metrics["orchestrator_wait_rate"] == 0.5
-    assert metrics["empty_args_rate"] == pytest.approx(4 / 6, rel=0, abs=1e-4)
-    assert metrics["floor_agent_active_action_rate"] == pytest.approx(2 / 4, rel=0, abs=1e-4)
-    assert metrics["active_empty_args_rate"] == pytest.approx(1 / 6, rel=0, abs=1e-4)
-    assert metrics["valid_but_hollow_action_rate"] == pytest.approx(2 / 6, rel=0, abs=1e-4)
+    assert metrics["empty_args_rate"] == pytest.approx(4 / 7, rel=0, abs=1e-4)
+    assert metrics["floor_agent_active_action_rate"] == pytest.approx(3 / 5, rel=0, abs=1e-4)
+    assert metrics["active_empty_args_rate"] == pytest.approx(1 / 7, rel=0, abs=1e-4)
+    assert metrics["valid_but_hollow_action_rate"] == pytest.approx(2 / 7, rel=0, abs=1e-4)
+    assert metrics["floor_route_action_rate"] == pytest.approx(2 / 5, rel=0, abs=1e-4)
+    assert metrics["floor_route_exit_rate"] == pytest.approx(1 / 2, rel=0, abs=1e-4)
+    assert metrics["floor_route_legacy_egress_alias_rate"] == pytest.approx(1 / 2, rel=0, abs=1e-4)
 
 
 def test_population_std_uses_zero_for_singleton_and_population_variance() -> None:

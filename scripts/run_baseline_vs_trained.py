@@ -38,6 +38,12 @@ def main() -> None:
     parser.add_argument("--seeds", default="42,123,456,789,1024")
     parser.add_argument("--families", default="fire,flood,gas,structural,active_threat,multi_cascade")
     parser.add_argument("--rationale-mode", default="linear_capped")
+    parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=50,
+        help="Bounded rounds per eval episode for smoke/gate comparisons.",
+    )
     parser.add_argument("--output-csv", default="outputs/evals/baseline_vs_trained.csv")
     parser.add_argument("--skip-trained", action="store_true")
     parser.add_argument("--use-latest-checkpoint-normalizer", action="store_true")
@@ -52,6 +58,7 @@ def main() -> None:
         tiers=_split_csv(args.tiers),
         seeds=[int(item) for item in _split_csv(args.seeds)],
         disaster_families=[DisasterType(item) for item in _split_csv(args.families)],
+        max_rounds=args.max_rounds,
         rationale_mode=args.rationale_mode,
         output_csv=Path(args.output_csv),
         skip_trained=args.skip_trained,

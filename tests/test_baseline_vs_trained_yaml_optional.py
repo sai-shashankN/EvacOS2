@@ -393,12 +393,13 @@ def test_run_comparison_defaults_to_supported_routed_specialist_families(
             tiers,
             seeds,
             disaster_families,
+            max_rounds,
             rationale_mode,
             label,
             output_dir,
             normalizer_snapshot=None,
         ):
-            del policy_factory, normalizer_snapshot
+            del policy_factory, normalizer_snapshot, max_rounds
             family_values = tuple(
                 family.value if hasattr(family, "value") else str(family)
                 for family in disaster_families

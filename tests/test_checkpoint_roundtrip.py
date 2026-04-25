@@ -51,6 +51,11 @@ class TestCheckpointRoundtrip:
                 lora_weights_path=lora_dir,
                 model_name="stub",
                 config_hash="sha256:abcdef123456",
+                config_path="training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml",
+                max_steps=750,
+                rollout_max_rounds_per_episode=4,
+                rollout_disaster_families=["fire"],
+                rollout_tier_schedule=[{"steps": 750, "mix": {"easy": 750}}],
             )
 
             saved_path = save_checkpoint(ckpt_root, bundle)
@@ -66,6 +71,11 @@ class TestCheckpointRoundtrip:
             assert loaded.rollout_rng_state == bundle.rollout_rng_state
             assert loaded.model_name == bundle.model_name
             assert loaded.config_hash == bundle.config_hash
+            assert loaded.config_path == bundle.config_path
+            assert loaded.max_steps == 750
+            assert loaded.rollout_max_rounds_per_episode == 4
+            assert loaded.rollout_disaster_families == ["fire"]
+            assert loaded.rollout_tier_schedule == [{"steps": 750, "mix": {"easy": 750}}]
         finally:
             shutil.rmtree(ckpt_root, ignore_errors=True)
 

@@ -45,8 +45,13 @@ def main() -> None:
     parser.add_argument("--rationale-mode", default="linear_capped")
     parser.add_argument("--label", default="trained")
     parser.add_argument("--checkpoint")
+    parser.add_argument(
+        "--model-name",
+        default="Qwen/Qwen2.5-3B-Instruct",
+        help="Base model to pair with --checkpoint. Defaults to the 3B specialist base.",
+    )
     parser.add_argument("--output-dir", default="outputs/evals")
-    parser.add_argument("--max-rounds", type=int, default=500)
+    parser.add_argument("--max-rounds", type=int, default=50)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--normalizer-snapshot")
     group.add_argument("--use-latest-checkpoint-normalizer", action="store_true")
@@ -58,7 +63,10 @@ def main() -> None:
 
     if args.checkpoint:
         checkpoint = Path(args.checkpoint)
-        policy_factory = lambda: hf_policy_factory("Qwen/Qwen2.5-1.5B-Instruct", lora_adapter_path=str(checkpoint))
+        policy_factory = lambda: hf_policy_factory(
+            args.model_name,
+            lora_adapter_path=str(checkpoint),
+        )
     else:
         policy_factory = lambda: StubPolicy(seed=0)
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +356,17 @@ RoleObservationMA = Union[FloorAgentObservationMA, OrchestratorObservationMA]
 # ---------------------------------------------------------------------------
 
 class RouteWithinFloorArgs(_MABase):
-    from_room_id: RoomId
-    to_room_id: RoomId
+    from_room_id: Optional[RoomId] = None
+    to_room_id: Optional[RoomId] = None
     civilian_group_id_or_null: Optional[CivilianGroupId] = None
+    exit_id: Optional[ExitId] = None
+    stairwell_id: Optional[StairwellId] = None
+
+    @model_validator(mode="after")
+    def _requires_route_target(self) -> "RouteWithinFloorArgs":
+        if not (self.to_room_id or self.exit_id or self.stairwell_id):
+            raise ValueError("route_within_floor requires to_room_id, exit_id, or stairwell_id")
+        return self
 
 
 class PrioritizeRoomArgs(_MABase):

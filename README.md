@@ -30,8 +30,9 @@
 | vLLM lane | `7B + vLLM` | Smoke validated on stronger hardware | [training/](training) |
 | Split-role lane | `7B` orchestrator / `3B` floor agents | Smoke validated on stronger hardware | [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml) |
 | Split-role disaster specialist lanes | `7B/3B` configs scoped to `fire`, `flood`, or `gas` | Implemented / ready to run | [training/config.remote-unsloth-7b3b-fire-specialist.yaml](training/config.remote-unsloth-7b3b-fire-specialist.yaml), [training/config.remote-unsloth-7b3b-flood-specialist.yaml](training/config.remote-unsloth-7b3b-flood-specialist.yaml), [training/config.remote-unsloth-7b3b-gas-specialist.yaml](training/config.remote-unsloth-7b3b-gas-specialist.yaml) |
-| Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / 100-step smoke and 750-step real-run configs validated | [training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml) |
+| Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / canary and proof-run configs ready | [training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml) |
 | Specialist routing | Deterministic single-disaster router with generalist fallback for mixed/cascade scenarios | Implemented | [training/scope_router.py](training/scope_router.py) |
+| Quality specialist curriculum | Deeper `2000`-step fire/flood/gas floor-specialist configs for more stable held-out eval curves | Implemented / ready to run after canary review | [training/config.remote-unsloth-3b-fire-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-2000.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-2000.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-2000.yaml) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
@@ -134,7 +135,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 |---|---|---|
 | **A100 training signal** | Tracked | [run summary](demo/results/a100_7b3b_run_summary.md), [training-signal CSV](demo/results/a100_7b3b_training_signal.csv), [reward plot](demo/results/plots/a100_7b3b_training_signal.png) |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
-| **Fire `3B` specialist eval curve** | Pending extraction | After the 750-step fire run finishes, extract `outputs/logs/remote-unsloth-3b-fire-floor-specialist-750/*.jsonl` into `fire_3b_eval_by_tier.csv` and `fire_3b_eval_by_tier.png`; plot held-out eval score every 50 steps for `easy`, `medium`, `hard`, and `brutal` |
+| **Fire `3B` specialist eval curve** | Pending extraction | First extract the 300-step easy proof run from `outputs/logs/remote-unsloth-3b-fire-floor-specialist-easy-proof-300/*.jsonl` into `fire_3b_easy_eval_curve.csv` and `fire_3b_easy_eval_curve.png`; after the curriculum run, extract tiered JSONL into `fire_3b_eval_by_tier.csv` and `fire_3b_eval_by_tier.png` |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **YouTube walkthrough video** | Placeholder | Add final video URL here after recording; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
 | **Hugging Face blog / write-up** | Drafted | Local draft lives in [demo/hf_blog.md](demo/hf_blog.md); replace with the published HF post URL before final submission |
@@ -225,11 +226,23 @@ Split-role specialist variants keep the `7B/3B` topology but use one disaster fa
 
 Floor-only `3B` specialist variants use a deterministic stub orchestrator and train only the floor-agent adapter:
 
+- fire canary: [training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml)
+- fire easy proof: [training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml)
 - fire: [training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml)
 - flood: [training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml)
 - gas: [training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml)
 
+The fire lane should be gated before long curricula: use the `50`-step canary to prove parser/checkpoint/CSV health, then the `300`-step easy proof to show held-out easy-fire improvement. If easy-fire eval does not clearly improve by `200-300` easy-only steps, debug the reward/policy loop before spending on harder tiers.
+
 Each 750-step specialist uses a staged replay curriculum: `200` easy, then `160` medium plus `40` easy replay, then `160` hard plus `30` medium and `10` easy replay, then `115` brutal plus `25` hard and `10` medium replay. Replay samples are interleaved inside each stage so the model keeps earlier evacuation behaviors while learning harder disaster dynamics.
+
+If the 750-step canary is too noisy, use the deeper quality configs:
+
+- fire: [training/config.remote-unsloth-3b-fire-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-2000.yaml)
+- flood: [training/config.remote-unsloth-3b-flood-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-2000.yaml)
+- gas: [training/config.remote-unsloth-3b-gas-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-2000.yaml)
+
+The 2000-step quality schedule gives the model much deeper exposure before each tier handoff: `500` easy, then `400` medium plus `100` easy replay, then `400` hard plus `75` medium and `25` easy replay, then `375` brutal plus `100` hard and `25` medium replay. This is the preferred path when the goal is a stronger final specialist rather than just proof that learning starts.
 
 After each real specialist run, convert the saved JSONL traces into a bounded judge-facing eval artifact: one CSV and one plot showing `0-100%` held-out eval score by tier at each 50-step eval checkpoint. Training rewards stay normalized/noisy for GRPO; the README result should show the cleaner eval score curve plus saved/lost civilian outcomes.
 

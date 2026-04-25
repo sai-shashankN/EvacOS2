@@ -464,6 +464,28 @@ class TestParseCompletionToAction:
         assert action is None
         assert reason == "arguments_invalid"
 
+    def test_parse_completion_accepts_route_with_explicit_exit_id(self):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": 0,
+            "agent_id": "floor_0_agent",
+            "action_id": "a1",
+            "action_type": "route_within_floor",
+            "arguments": {"from_room_id": "room_01", "exit_id": "exit_0"},
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="floor_0_agent",
+            role="floor_agent",
+            expected_episode_id="ep1",
+            expected_round_id=0,
+        )
+
+        assert reason == "ok"
+        assert action is not None
+        assert action.arguments["exit_id"] == "exit_0"
+
     def test_parse_completion_rejects_active_action_with_non_dict_arguments(self):
         completion = json.dumps({
             "episode_id": "ep1",

@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from training.config_schema import ModelConfig, RewardConfig, RolloutConfig, TrainingConfig
-from training.train import _load_yaml_config
+from training.train import _load_yaml_config, _validate_config_path_identity
 
 
 class TestModelDtypeValidation:
@@ -286,6 +286,55 @@ class TestTierScheduleConfig:
         assert {"easy", "medium", "hard"} <= set(schedule[400:600])
         assert schedule[600] == "brutal"
         assert {"medium", "hard", "brutal"} <= set(schedule[600:750])
+
+    @pytest.mark.parametrize(
+        ("path", "family"),
+        [
+            ("training/config.remote-unsloth-3b-fire-floor-specialist-2000.yaml", "fire"),
+            ("training/config.remote-unsloth-3b-flood-floor-specialist-2000.yaml", "flood"),
+            ("training/config.remote-unsloth-3b-gas-floor-specialist-2000.yaml", "gas"),
+        ],
+    )
+    def test_specialist_2000_configs_have_expected_schedule(self, path, family):
+        raw = _load_yaml_config(Path(path))
+        config = TrainingConfig(**raw)
+        schedule = config.rollout.expanded_tier_schedule()
+
+        assert config.max_steps == 2000
+        assert config.rollout.disaster_families == [family]
+        assert len(schedule) == 2000
+        assert Counter(schedule[:500]) == Counter({"easy": 500})
+        assert Counter(schedule[500:1000]) == Counter({"medium": 400, "easy": 100})
+        assert Counter(schedule[1000:1500]) == Counter(
+            {"hard": 400, "medium": 75, "easy": 25}
+        )
+        assert Counter(schedule[1500:2000]) == Counter(
+            {"brutal": 375, "hard": 100, "medium": 25}
+        )
+
+    def test_config_path_identity_rejects_mislabeled_step_count(self):
+        config = TrainingConfig(
+            max_steps=2000,
+            rollout={
+                "use_vllm": True,
+                "tier_schedule": [{"steps": 2000, "mix": {"easy": 2000}}],
+            },
+            checkpoint={"root_dir": "outputs/training/debug-2000"},
+            metrics={
+                "csv_path": "outputs/training/debug-2000-metrics.csv",
+                "jsonl_dir": "outputs/logs/debug-2000",
+            },
+        )
+
+        with pytest.raises(ValueError, match="implies 750 steps"):
+            _validate_config_path_identity(Path("training/debug-750.yaml"), config)
+
+    def test_config_path_identity_rejects_mislabeled_output_root(self):
+        config = TrainingConfig(max_steps=750)
+        config.checkpoint.root_dir = "outputs/training/debug-2000"
+
+        with pytest.raises(ValueError, match="checkpoint.root_dir"):
+            _validate_config_path_identity(Path("training/debug.yaml"), config)
 
 
 class TestConfigContractRestoration:

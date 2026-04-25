@@ -93,8 +93,13 @@ def build_floor_prompt(
         "options, or the situation genuinely requires holding."
     )
     user_parts.append(
+        "For route_within_floor, use to_room_id only for actual rooms. If the target is an exit "
+        "or stairwell, put it in exit_id or stairwell_id so the action changes evacuation state."
+    )
+    user_parts.append(
         "Examples when allowed by the action mask: "
-        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"route_1","action_type":"route_within_floor","arguments":{"from_room_id":"room_201","to_room_id":"exit_floor_2"}} '
+        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"route_1","action_type":"route_within_floor","arguments":{"from_room_id":"room_201","exit_id":"exit_floor_2"}} '
+        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"route_stair_1","action_type":"route_within_floor","arguments":{"from_room_id":"room_201","stairwell_id":"stairwell_2"}} '
         '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"open_1","action_type":"open_exit","arguments":{"exit_id":"exit_floor_2"}} '
         '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"scout_1","action_type":"scout","arguments":{"target_room_id":"room_205"}}'
     )
