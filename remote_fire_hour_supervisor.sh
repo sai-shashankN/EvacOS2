@@ -2,17 +2,17 @@
 set -euo pipefail
 
 ROOT=/workspace/EvacOS2
-CONFIG="$ROOT/training/config.remote-unsloth-3b-fire-floor-specialist.yaml"
+CONFIG="$ROOT/training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml"
 LAUNCHER=/root/remote_fire_unsloth_train_call.sh
-METRICS="$ROOT/outputs/training/remote-unsloth-3b-fire-floor-specialist-metrics.csv"
-CKPT_ROOT="$ROOT/outputs/training/remote-unsloth-3b-fire-floor-specialist"
+METRICS="$ROOT/outputs/training/remote-unsloth-3b-fire-floor-specialist-750-metrics.csv"
+CKPT_ROOT="$ROOT/outputs/training/remote-unsloth-3b-fire-floor-specialist-750"
 SUP_LOG=/root/fire_hour_supervisor.log
 TRAIN_LOG=/root/fire_unsloth_train.log
-ARTIFACT=/root/evacos2_fire_3b_artifacts.tgz
-REPORT="$ROOT/outputs/training/fire_3b_hour_report.json"
+ARTIFACT=/root/evacos2_fire_3b_750_artifacts.tgz
+REPORT="$ROOT/outputs/training/fire_3b_750step_report.json"
 
-TARGET_STEPS="${TARGET_STEPS:-200}"
-TARGET_SECONDS="${TARGET_SECONDS:-3600}"
+TARGET_STEPS="${TARGET_STEPS:-750}"
+TARGET_SECONDS="${TARGET_SECONDS:-21600}"
 BUFFER_SECONDS="${BUFFER_SECONDS:-120}"
 
 export HF_HOME=/workspace/hf_cache
@@ -28,7 +28,7 @@ last_step() {
   "$ROOT/.venv/bin/python" - <<'PY'
 import csv
 from pathlib import Path
-p = Path("/workspace/EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-metrics.csv")
+p = Path("/workspace/EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-750-metrics.csv")
 if not p.exists():
     print(-1)
     raise SystemExit
@@ -49,9 +49,9 @@ import csv, json
 from pathlib import Path
 
 root = Path("/workspace/EvacOS2")
-metrics = root / "outputs/training/remote-unsloth-3b-fire-floor-specialist-metrics.csv"
-ckpt_root = root / "outputs/training/remote-unsloth-3b-fire-floor-specialist"
-report_path = root / "outputs/training/fire_3b_hour_report.json"
+metrics = root / "outputs/training/remote-unsloth-3b-fire-floor-specialist-750-metrics.csv"
+ckpt_root = root / "outputs/training/remote-unsloth-3b-fire-floor-specialist-750"
+report_path = root / "outputs/training/fire_3b_750step_report.json"
 
 rows = []
 if metrics.exists():
@@ -73,7 +73,7 @@ invalid_rates = [x for x in invalid_rates if x is not None]
 ckpts = sorted([p.name for p in ckpt_root.glob("ckpt_*")]) if ckpt_root.exists() else []
 
 report = {
-    "run": "remote-unsloth-3b-fire-floor-specialist",
+    "run": "remote-unsloth-3b-fire-floor-specialist-750",
     "metrics_csv": str(metrics),
     "checkpoint_root": str(ckpt_root),
     "rows": len(rows),
@@ -99,7 +99,7 @@ START_EPOCH="$(date +%s)"
 DEADLINE=$((START_EPOCH + TARGET_SECONDS))
 log "supervisor started; target_seconds=$TARGET_SECONDS target_steps=$TARGET_STEPS"
 
-while pgrep -f "timeout 3300s bash /root/remote_fire_unsloth_train_call.sh" >/dev/null; do
+while pgrep -f "remote_fire_unsloth_train_call.sh" >/dev/null; do
   step="$(last_step || echo -1)"
   log "current launch still running; latest_step=$step"
   sleep 60
@@ -139,11 +139,11 @@ write_report | tee -a "$SUP_LOG"
 log "packing artifacts at $ARTIFACT"
 cd /workspace
 tar -czf "$ARTIFACT" \
-  EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist \
-  EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-metrics.csv \
-  EvacOS2/outputs/training/fire_3b_hour_report.json \
-  EvacOS2/outputs/logs/remote-unsloth-3b-fire-floor-specialist \
-  EvacOS2/training/config.remote-unsloth-3b-fire-floor-specialist.yaml \
+  EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-750 \
+  EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-750-metrics.csv \
+  EvacOS2/outputs/training/fire_3b_750step_report.json \
+  EvacOS2/outputs/logs/remote-unsloth-3b-fire-floor-specialist-750 \
+  EvacOS2/training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml \
   fire_unsloth_train.log \
   fire_hour_supervisor.log
 log "artifact ready: $ARTIFACT"

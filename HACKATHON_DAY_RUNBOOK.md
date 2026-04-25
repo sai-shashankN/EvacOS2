@@ -184,6 +184,7 @@ Target:
 ```
 
 This is a staged curriculum budget, not naive "forget the old tier forever" training.
+Replay tiers are interleaved inside each stage rather than clumped at the beginning.
 
 Default exact-750 specialist schedule:
 
@@ -213,7 +214,7 @@ Why:
 - The hardest tier should dominate late training, but not erase easier-tier competence.
 - This follows the Hermes/GRPO bias toward stable curricula, reward diversity, and avoiding reward collapse.
 
-If the implementation cannot yet do replay-aware scheduled sampling, use sequential resume blocks as the fallback:
+If the implementation cannot do replay-aware scheduled sampling on a remote clone, use sequential resume blocks as the fallback:
 
 ```text
 200 easy -> resume
@@ -231,9 +232,9 @@ Expected time:
 
 Important implementation note:
 
-- Current specialist configs are 100-step easy-lane configs.
-- Do not assume `eval.tiers` controls training tier schedule.
-- Before the 750-step run, either add scheduled curriculum support or generate/resume staged configs that actually force the intended training tiers.
+- Real 750-step specialist configs now use `rollout.tier_schedule`.
+- `eval.tiers` still controls evaluation only; training difficulty comes from `rollout.tier_schedule`.
+- The config loader rejects mismatches where `tier_schedule` does not expand to `max_steps`, so a remote run should fail fast instead of silently training the wrong curriculum.
 
 Minimum viable fire execution:
 

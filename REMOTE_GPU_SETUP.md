@@ -52,23 +52,19 @@ Future 3B specialist curriculum:
 - Prefer staged curriculum blocks over per-step round-robin. Do not alternate
   `easy -> medium -> hard -> brutal` every single step at the start; that makes
   the reward distribution noisy before the policy has stable behavior.
-- Default next-rental specialist run:
-  - 50 steps `easy`
-  - 50 steps `medium`
-  - 40 steps `hard`
-  - 20 steps `brutal`
-  - Total: 160 steps per disaster specialist
-- Use this 160-step plan when renting 24 GB GPUs for parallel fire/flood/gas
-  specialist training. It is the best current balance between cost, tier
-  coverage, and not letting brutal-tier noise dominate the run.
-- A stronger but costlier 400-step specialist run is:
-  - 100 steps `easy`
-  - 100 steps `medium`
-  - 100 steps `hard`
-  - 100 steps `brutal`
-- In later blocks, keep a small replay mix from easier tiers if supported
-  (roughly 10-20%) so the model does not forget the behaviors that made early
-  tiers work.
+- Default real specialist run:
+  - 200 steps `easy`
+  - 160 steps `medium` + 40 steps `easy` replay
+  - 160 steps `hard` + 30 steps `medium` replay + 10 steps `easy` replay
+  - 115 steps `brutal` + 25 steps `hard` replay + 10 steps `medium` replay
+  - Total: 750 steps per disaster specialist
+- Use the checked-in `*-750.yaml` configs for real runs. They use
+  `rollout.tier_schedule`, and the config loader validates that the expanded
+  schedule exactly matches `max_steps`.
+- Replay samples are balanced/interleaved inside each stage so the floor policy
+  does not forget easier behaviors while the main difficulty increases.
+- A cheaper smoke run may still use 100-160 steps, but do not treat that as the
+  final specialist quality target.
 - If only running a 100-step proof, use a staged mini-curriculum such as
   30 easy / 30 medium / 25 hard / 15 brutal, but expect noisier graphs than the
   easy-only proof run.

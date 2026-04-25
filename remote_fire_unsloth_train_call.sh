@@ -13,5 +13,5 @@ python - <<'PY'
 from pathlib import Path
 from training.train import run_training
 
-run_training(Path("training/config.remote-unsloth-3b-fire-floor-specialist.yaml"))
+run_training(Path("training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml"))
 PY

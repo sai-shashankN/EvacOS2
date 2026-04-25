@@ -153,6 +153,36 @@ class _FixedTierCurriculum:
         return None
 
 
+class _ScheduledTierCurriculum:
+    """Training-time curriculum with an explicit step-indexed tier schedule."""
+
+    def __init__(self, tiers: list[str]) -> None:
+        if not tiers:
+            raise ValueError("Scheduled curriculum requires at least one tier")
+        self._tiers = list(tiers)
+        self._step = 0
+
+    def set_step(self, step: int) -> None:
+        self._step = max(0, step)
+
+    def suggest_next_tier(self, disaster_family: str) -> str:
+        del disaster_family
+        return self._tiers[min(self._step, len(self._tiers) - 1)]
+
+    def record_outcome(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "mode": "scheduled",
+            "step": self._step,
+            "tiers": self._tiers,
+        }
+
+    def load_snapshot(self, data: dict[str, Any]) -> None:
+        self._step = int(data.get("step", 0) or 0)
+
+
 def _extract_trainer_model(policy: Any) -> Any:
     return getattr(policy, "_model", policy)
 
@@ -1796,7 +1826,11 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
         run_id=bundle.wandb_run_id if bundle is not None else None,
     )
 
-    curriculum = CurriculumController()
+    tier_schedule = config.rollout.expanded_tier_schedule()
+    if tier_schedule:
+        curriculum = _ScheduledTierCurriculum(tier_schedule)
+    else:
+        curriculum = CurriculumController()
     normalizer = RewardNormalizer()
     if bundle is not None:
         curriculum.load_snapshot(bundle.curriculum_snapshot)
@@ -1906,6 +1940,9 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 break
 
             step_started = time.monotonic()
+            set_step = getattr(curriculum, "set_step", None)
+            if set_step is not None:
+                set_step(step)
             checkpoint_tag = f"ckpt_{step}" if step > 0 else "baseline"
             results = collect_batch(
                 env,

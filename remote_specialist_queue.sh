@@ -141,16 +141,15 @@ package_run() {
 
 run_specialist() {
   local family="$1"
-  local name="remote-unsloth-3b-${family}-floor-specialist"
-  local config="$ROOT/training/config.remote-unsloth-3b-${family}-floor-specialist.yaml"
+  local name="remote-unsloth-3b-${family}-floor-specialist-750"
+  local config="$ROOT/training/config.remote-unsloth-3b-${family}-floor-specialist-750.yaml"
   local ckpt_root="$ROOT/outputs/training/${name}"
   local metrics="$ROOT/outputs/training/${name}-metrics.csv"
   local jsonl_dir="$ROOT/outputs/logs/${name}"
   local train_log="/root/${family}_unsloth_train.log"
-  local report="$ROOT/outputs/training/${family}_3b_100step_report.json"
+  local report="$ROOT/outputs/training/${family}_3b_750step_report.json"
 
-  log "starting $family specialist 100-step run"
-  set_max_steps "$config" 100
+  log "starting $family specialist 750-step run"
   rm -rf "$ckpt_root" "$metrics" "$jsonl_dir"
   cd "$ROOT"
   source .venv/bin/activate
@@ -168,21 +167,24 @@ PY
 fire_training_active() {
   pgrep -f "remote_fire_unsloth_train_call.sh" >/dev/null && return 0
   pgrep -f "remote_fire_train_call.sh" >/dev/null && return 0
+  pgrep -f "config.remote-unsloth-3b-fire-floor-specialist-750.yaml" >/dev/null && return 0
   pgrep -f "config.remote-unsloth-3b-fire-floor-specialist.yaml" >/dev/null && return 0
   pgrep -f "config.fire-hour.yaml" >/dev/null && return 0
   return 1
 }
 
 wait_for_fire() {
-  local metrics="$ROOT/outputs/training/remote-unsloth-3b-fire-floor-specialist-metrics.csv"
-  log "waiting for currently-running fire specialist to finish at its loaded 100-step cap"
+  local metrics="$ROOT/outputs/training/remote-unsloth-3b-fire-floor-specialist-750-metrics.csv"
+  log "waiting for currently-running fire specialist to finish at its loaded 750-step cap"
   while fire_training_active; do
     local step="-1"
     if [ -f "$metrics" ]; then
       step="$("$PY" - <<'PY'
 import csv
 from pathlib import Path
-p=Path('/workspace/EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-metrics.csv')
+p=Path('/workspace/EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-750-metrics.csv')
+if not p.exists():
+    p=Path('/workspace/EvacOS2/outputs/training/remote-unsloth-3b-fire-floor-specialist-metrics.csv')
 rows=list(csv.DictReader(p.open(newline='', encoding='utf-8')))
 print(rows[-1].get('step') if rows else -1)
 PY
@@ -194,13 +196,13 @@ PY
 }
 
 package_fire() {
-  local name="remote-unsloth-3b-fire-floor-specialist"
+  local name="remote-unsloth-3b-fire-floor-specialist-750"
   local metrics="$ROOT/outputs/training/${name}-metrics.csv"
   local ckpt_root="$ROOT/outputs/training/${name}"
   local jsonl_dir="$ROOT/outputs/logs/${name}"
-  local config="$ROOT/training/config.remote-unsloth-3b-fire-floor-specialist.yaml"
+  local config="$ROOT/training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml"
   local train_log="/root/fire_unsloth_train.log"
-  local report="$ROOT/outputs/training/fire_3b_100step_report.json"
+  local report="$ROOT/outputs/training/fire_3b_750step_report.json"
   package_run "$name" "$metrics" "$ckpt_root" "$jsonl_dir" "$config" "$train_log" "$report"
 }
 

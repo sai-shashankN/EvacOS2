@@ -15,7 +15,9 @@ _EVAL_SEEDS_SET = frozenset({42, 123, 456, 789, 1024})
 _ROLE_NAMES = ("orchestrator", "floor_agent")
 RoleName = Literal["orchestrator", "floor_agent"]
 FloorSpecialistFamily = Literal["fire", "flood", "gas"]
+TierName = Literal["easy", "medium", "hard", "brutal"]
 _FLOOR_SPECIALIST_FAMILIES = frozenset({"fire", "flood", "gas"})
+_TIER_NAMES = frozenset({"easy", "medium", "hard", "brutal"})
 _FAMILY_ALIASES = {
     "gas_leak": "gas",
     "gasleak": "gas",
@@ -138,6 +140,67 @@ class LoRAConfig(BaseModel):
     )
 
 
+class TierScheduleBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    steps: int
+    mix: dict[TierName, int]
+
+    @field_validator("steps")
+    @classmethod
+    def steps_must_be_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("rollout.tier_schedule[].steps must be > 0")
+        return value
+
+    @field_validator("mix")
+    @classmethod
+    def mix_must_be_nonempty_positive(cls, value: dict[TierName, int]) -> dict[TierName, int]:
+        if not value:
+            raise ValueError("rollout.tier_schedule[].mix must not be empty")
+        for tier, count in value.items():
+            if tier not in _TIER_NAMES:
+                raise ValueError(f"unknown tier {tier!r}")
+            if count <= 0:
+                raise ValueError(
+                    f"rollout.tier_schedule[].mix[{tier!r}] must be > 0"
+                )
+        return value
+
+    @model_validator(mode="after")
+    def mix_total_must_match_steps(self) -> "TierScheduleBlock":
+        total = sum(self.mix.values())
+        if total != self.steps:
+            raise ValueError(
+                "rollout.tier_schedule block mix counts must sum to steps; "
+                f"got mix total {total} for steps {self.steps}"
+            )
+        return self
+
+    def expanded_tiers(self) -> list[TierName]:
+        total = sum(self.mix.values())
+        ordered_tiers = [tier for tier, count in self.mix.items() if count > 0]
+        weights = dict(self.mix)
+        remaining = dict(self.mix)
+        current = {tier: 0 for tier in ordered_tiers}
+        tiers: list[TierName] = []
+
+        # Smooth weighted round-robin keeps replay tiers interleaved instead of
+        # clumping all old-difficulty samples at the start of a stage.
+        for _ in range(total):
+            active = [tier for tier in ordered_tiers if remaining[tier] > 0]
+            for tier in active:
+                current[tier] += weights[tier]
+            chosen = max(
+                active,
+                key=lambda tier: (current[tier], weights[tier], -ordered_tiers.index(tier)),
+            )
+            tiers.append(chosen)
+            current[chosen] -= total
+            remaining[chosen] -= 1
+
+        return tiers
+
+
 class RolloutConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     episodes_per_step: int = 4
@@ -150,6 +213,7 @@ class RolloutConfig(BaseModel):
             "active_threat", "multi_cascade",
         ]
     )
+    tier_schedule: list[TierScheduleBlock] | None = None
 
     @field_validator("seed_retry_limit")
     @classmethod
@@ -157,6 +221,14 @@ class RolloutConfig(BaseModel):
         if value <= 0:
             raise ValueError("rollout.seed_retry_limit must be > 0")
         return value
+
+    def expanded_tier_schedule(self) -> list[TierName]:
+        if not self.tier_schedule:
+            return []
+        tiers: list[TierName] = []
+        for block in self.tier_schedule:
+            tiers.extend(block.expanded_tiers())
+        return tiers
 
 
 class GRPOConfig(BaseModel):
@@ -353,5 +425,12 @@ class TrainingConfig(BaseModel):
                     f"Unsupported rollout.disaster_families={sorted(unsupported_requested)!r} "
                     "require roles.frozen_adapter_paths.floor_agent as a "
                     "generalist fallback."
+                )
+        tier_schedule = self.rollout.expanded_tier_schedule()
+        if tier_schedule:
+            if self.max_steps is not None and len(tier_schedule) != self.max_steps:
+                raise ValueError(
+                    "rollout.tier_schedule must expand to max_steps when max_steps is set; "
+                    f"got {len(tier_schedule)} scheduled steps for max_steps={self.max_steps}"
                 )
         return self

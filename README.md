@@ -30,7 +30,7 @@
 | vLLM lane | `7B + vLLM` | Smoke validated on stronger hardware | [training/](training) |
 | Split-role lane | `7B` orchestrator / `3B` floor agents | Smoke validated on stronger hardware | [training/config.remote-unsloth-7b3b-split-bridge.yaml](training/config.remote-unsloth-7b3b-split-bridge.yaml) |
 | Split-role disaster specialist lanes | `7B/3B` configs scoped to `fire`, `flood`, or `gas` | Implemented / ready to run | [training/config.remote-unsloth-7b3b-fire-specialist.yaml](training/config.remote-unsloth-7b3b-fire-specialist.yaml), [training/config.remote-unsloth-7b3b-flood-specialist.yaml](training/config.remote-unsloth-7b3b-flood-specialist.yaml), [training/config.remote-unsloth-7b3b-gas-specialist.yaml](training/config.remote-unsloth-7b3b-gas-specialist.yaml) |
-| Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / no-download preflight validated | [training/config.remote-unsloth-3b-fire-floor-specialist.yaml](training/config.remote-unsloth-3b-fire-floor-specialist.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist.yaml](training/config.remote-unsloth-3b-flood-floor-specialist.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist.yaml](training/config.remote-unsloth-3b-gas-floor-specialist.yaml) |
+| Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / 100-step smoke and 750-step real-run configs validated | [training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml) |
 | Specialist routing | Deterministic single-disaster router with generalist fallback for mixed/cascade scenarios | Implemented | [training/scope_router.py](training/scope_router.py) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
@@ -224,9 +224,11 @@ Split-role specialist variants keep the `7B/3B` topology but use one disaster fa
 
 Floor-only `3B` specialist variants use a deterministic stub orchestrator and train only the floor-agent adapter:
 
-- fire: [training/config.remote-unsloth-3b-fire-floor-specialist.yaml](training/config.remote-unsloth-3b-fire-floor-specialist.yaml)
-- flood: [training/config.remote-unsloth-3b-flood-floor-specialist.yaml](training/config.remote-unsloth-3b-flood-floor-specialist.yaml)
-- gas: [training/config.remote-unsloth-3b-gas-floor-specialist.yaml](training/config.remote-unsloth-3b-gas-floor-specialist.yaml)
+- fire: [training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml)
+- flood: [training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml)
+- gas: [training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml)
+
+Each 750-step specialist uses a staged replay curriculum: `200` easy, then `160` medium plus `40` easy replay, then `160` hard plus `30` medium and `10` easy replay, then `115` brutal plus `25` hard and `10` medium replay. Replay samples are interleaved inside each stage so the model keeps earlier evacuation behaviors while learning harder disaster dynamics.
 
 Phase-2 orchestrator training supports two frozen-floor modes:
 

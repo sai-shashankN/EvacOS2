@@ -23,6 +23,32 @@ def test_specialist_queue_waits_on_broad_fire_training_patterns():
     assert "fire_training_active()" in script
     assert 'pgrep -f "remote_fire_unsloth_train_call.sh"' in script
     assert 'pgrep -f "remote_fire_train_call.sh"' in script
+    assert 'pgrep -f "config.remote-unsloth-3b-fire-floor-specialist-750.yaml"' in script
     assert 'pgrep -f "config.remote-unsloth-3b-fire-floor-specialist.yaml"' in script
     assert 'pgrep -f "config.fire-hour.yaml"' in script
     assert "while fire_training_active; do" in script
+
+
+def test_specialist_queue_uses_750_step_configs_for_real_runs():
+    script = (ROOT / "remote_specialist_queue.sh").read_text(encoding="utf-8")
+
+    assert 'name="remote-unsloth-3b-${family}-floor-specialist-750"' in script
+    assert "config.remote-unsloth-3b-${family}-floor-specialist-750.yaml" in script
+    assert "${family}_3b_750step_report.json" in script
+    assert "set_max_steps \"$config\" 100" not in script
+    assert "starting $family specialist 750-step run" in script
+
+
+def test_fire_hour_supervisor_targets_750_step_real_run_artifacts():
+    script = (ROOT / "remote_fire_hour_supervisor.sh").read_text(encoding="utf-8")
+
+    assert "config.remote-unsloth-3b-fire-floor-specialist-750.yaml" in script
+    assert "remote-unsloth-3b-fire-floor-specialist-750-metrics.csv" in script
+    assert "remote-unsloth-3b-fire-floor-specialist-750" in script
+    assert "fire_3b_750step_report.json" in script
+    assert 'TARGET_STEPS="${TARGET_STEPS:-750}"' in script
+    assert 'TARGET_SECONDS="${TARGET_SECONDS:-21600}"' in script
+    assert 'pgrep -f "remote_fire_unsloth_train_call.sh"' in script
+    assert "timeout 3300s bash /root/remote_fire_unsloth_train_call.sh" not in script
+    assert "remote-unsloth-3b-fire-floor-specialist-metrics.csv" not in script
+    assert "fire_3b_hour_report.json" not in script
