@@ -369,6 +369,24 @@ def _policy_for_scope(
     return policy_factory()
 
 
+def _cached_policy_for_scope(
+    policy_factory: Callable[[], Policy],
+    scope_decision: ScopeDecision,
+    policy_cache: dict[str, Policy],
+) -> Policy:
+    """Reuse loaded policies across eval episodes.
+
+    Trained HF/LoRA policy factories can load multi-GB checkpoints. The fixed
+    suite evaluates many seeds/tiers per scope, so calling the factory inside
+    the episode loop reloads the model per episode and burns GPU time.
+    """
+    scoped_factory = getattr(policy_factory, "for_scope", None)
+    cache_key = scope_decision.policy_key if callable(scoped_factory) else "__default__"
+    if cache_key not in policy_cache:
+        policy_cache[cache_key] = _policy_for_scope(policy_factory, scope_decision)
+    return policy_cache[cache_key]
+
+
 def run_fixed_suite(
     policy_factory: Callable[[], Policy],
     *,
@@ -384,6 +402,7 @@ def run_fixed_suite(
 ) -> FixedSuiteResult:
     families = [_coerce_family(family) for family in disaster_families]
     episodes: list[EpisodeResult] = []
+    policy_cache: dict[str, Policy] = {}
     resolved_reward_config = _resolve_reward_config(reward_config, rationale_mode)
 
     for tier in tiers:
@@ -397,7 +416,7 @@ def run_fixed_suite(
                         "tier": tier,
                     }
                 )
-                policy = _policy_for_scope(policy_factory, scope_decision)
+                policy = _cached_policy_for_scope(policy_factory, scope_decision, policy_cache)
                 normalizer = _seed_eval_normalizer(tier, snapshot=normalizer_snapshot)
                 log_dir = output_dir / "logs"
                 log_dir.mkdir(parents=True, exist_ok=True)

@@ -246,8 +246,8 @@ def test_fixed_suite_can_use_scope_aware_policy_factory():
     try:
         result = run_fixed_suite(
             factory,
-            tiers=("easy",),
-            seeds=(42,),
+            tiers=("easy", "medium"),
+            seeds=(42, 43),
             disaster_families=("fire", "gas"),
             max_rounds=1,
             label="scope",
@@ -258,9 +258,36 @@ def test_fixed_suite_can_use_scope_aware_policy_factory():
             "fire_specialist",
             "gas_specialist",
         ]
-        assert [episode.scope_policy_key for episode in result.episodes] == [
+        assert len(result.episodes) == 8
+        assert {episode.scope_policy_key for episode in result.episodes} == {
             "fire_specialist",
             "gas_specialist",
-        ]
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_fixed_suite_reuses_default_policy_factory_across_episodes():
+    factory_calls = 0
+
+    def policy_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        return StubPolicy(seed=0)
+
+    tmp_dir = _tmp_dir()
+    try:
+        result = run_fixed_suite(
+            policy_factory,
+            tiers=("easy", "medium"),
+            seeds=(42, 43),
+            disaster_families=("fire", "gas"),
+            max_rounds=1,
+            label="cached",
+            output_dir=tmp_dir,
+        )
+
+        assert len(result.episodes) == 8
+        assert factory_calls == 1
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
