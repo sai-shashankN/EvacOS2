@@ -52,12 +52,18 @@ Hermes-aligned operating principles:
 Known-good remote stack:
 
 ```text
+torch==2.10.0
+torchvision==0.25.0
 transformers==4.56.2
 trl==0.24.0
 peft==0.19.1
+fsspec==2025.9.0
 vllm==0.10.2 when vLLM is used
 Unsloth installed after the baseline deps
 ```
+
+Why: current Unsloth needs `torch.int1`, but `unsloth_zoo==2026.4.9` still
+requires `torch<2.11`; `torch==2.10.0` is the known-good remote midpoint.
 
 ## GPU Plan
 

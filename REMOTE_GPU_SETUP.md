@@ -11,8 +11,12 @@ The remote training stack is sensitive to install order and import order:
 
 - `unsloth` should be installed after the baseline training deps
 - `vllm==0.10.2` should be installed last
+- `torch==2.10.0` and `torchvision==0.25.0` are the tested April 25
+  2026 Vast stack for current Unsloth
 - `transformers==4.56.2` and `peft==0.19.1` are the tested-compatible pair
   for the current Unsloth + vLLM setup
+- `fsspec==2025.9.0` avoids the dataset cache conflict seen after PyTorch
+  repairs
 - `unsloth` should be imported before `trl`, `transformers`, and `peft`
   when probing the environment
 
@@ -91,8 +95,8 @@ box if the goal is the Unsloth + vLLM path.
 Use this order instead:
 
 ```bash
-pip uninstall -y transformers trl peft accelerate bitsandbytes vllm unsloth unsloth_zoo torchcodec >/dev/null 2>&1 || true
-pip install "torch" "transformers==4.56.2" "trl==0.24.0" "peft==0.19.1" "accelerate" "bitsandbytes" "datasets"
+pip uninstall -y torch torchvision transformers trl peft accelerate bitsandbytes vllm unsloth unsloth_zoo torchcodec >/dev/null 2>&1 || true
+pip install "torch==2.10.0" "torchvision==0.25.0" "transformers==4.56.2" "trl==0.24.0" "peft==0.19.1" "accelerate" "bitsandbytes" "datasets" "fsspec==2025.9.0"
 pip install "pydantic>=2,<3" "fastapi>=0.115" "uvicorn>=0.30" "numpy>=1.26" "pyyaml" "nbformat" "wandb>=0.19"
 pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 pip install --no-deps "trl==0.24.0" "peft==0.19.1" "accelerate" "bitsandbytes"
@@ -106,6 +110,8 @@ Notes:
   baseline training deps.
 - `vllm==0.10.2` is the pinned API surface expected by the current notebook and
   rollout path.
+- Current Unsloth expects the `torch.int1` API, while `unsloth_zoo==2026.4.9`
+  requires `torch<2.11`. Pinning `torch==2.10.0` is the safe middle ground.
 - `transformers==4.56.2` and `peft==0.19.1` are the tested pair that avoids the
   `HybridCache` import failure seen with `transformers==5.5.0` and
   `peft==0.17.1`.
@@ -124,6 +130,7 @@ import torch
 print("torch:", torch.__version__)
 print("cuda_available:", torch.cuda.is_available())
 print("cuda_version:", torch.version.cuda)
+print("has_torch_int1:", hasattr(torch, "int1"))
 print("gpu_name:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)
 
 try:
@@ -225,6 +232,22 @@ pip install --upgrade "transformers==4.56.2" "peft==0.19.1"
 ```
 
 Then rerun the warning-aware probe.
+
+If the existing env fails with:
+
+```text
+AttributeError: module 'torch' has no attribute 'int1'
+```
+
+the smallest proven repair on the April 25 2026 Vast 4090 run was:
+
+```bash
+pip install --upgrade --force-reinstall "torch==2.10.0" "torchvision==0.25.0"
+pip install "fsspec==2025.9.0"
+```
+
+Do not jump to `torch==2.11.*` for this stack unless Unsloth Zoo has also
+relaxed its `<2.11` requirement.
 
 ## Optional SSH control path
 

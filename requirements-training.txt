@@ -1,12 +1,14 @@
 # Heavy dependencies for the training pipeline.
 # NOT required for core package or test suite — only for training/ and Colab notebook.
-torch>=2.1
+torch==2.10.0
+torchvision==0.25.0
 transformers==4.56.2
 trl==0.24.0
 peft==0.19.1
 accelerate>=0.25
 bitsandbytes>=0.41
 datasets>=2.14
+fsspec==2025.9.0
 huggingface_hub>=0.24
 pyyaml>=6.0
 nbformat>=5.9

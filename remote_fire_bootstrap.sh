@@ -16,14 +16,14 @@ cd /workspace/EvacOS2
 python3 -m venv .venv || (apt-get update && apt-get install -y python3-venv && python3 -m venv .venv)
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install --index-url https://download.pytorch.org/whl/cu124 "torch==2.5.1"
-python -m pip install "transformers==4.56.2" "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes datasets "pydantic>=2,<3" "fastapi>=0.115" "uvicorn>=0.30" "numpy>=1.26" pyyaml nbformat "wandb>=0.19" matplotlib
+python -m pip install "torch==2.10.0" "torchvision==0.25.0"
+python -m pip install "transformers==4.56.2" "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes datasets "fsspec==2025.9.0" "pydantic>=2,<3" "fastapi>=0.115" "uvicorn>=0.30" "numpy>=1.26" pyyaml nbformat "wandb>=0.19" matplotlib
 python -m pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 python -m pip install --no-deps "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes
 python -m pip install -e .
 python - <<'PY'
 import torch
-print('torch', torch.__version__, torch.cuda.is_available(), torch.version.cuda)
+print('torch', torch.__version__, torch.cuda.is_available(), torch.version.cuda, 'has_int1', hasattr(torch, 'int1'))
 print('gpu', torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)
 try:
     import unsloth
