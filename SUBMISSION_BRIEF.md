@@ -24,6 +24,7 @@ Evidence status: the tracked fixed-suite scorecard is baseline-only; the tracked
 - Headline artifacts:
   - `demo/results/specialist_canary50_report.md`
   - `demo/results/plots/3b_specialist_valid_action_score_comparison.png`
+  - `demo/results/7b_orchestrator_behavior_card.md`
   - `demo/results/submission_scorecard_baseline.md`
   - `demo/results/baseline_fixed_suite.csv`
   - Public canary adapters: `shashankN777/evacos2-7b-orchestrator-artifacts`
@@ -70,7 +71,7 @@ python -m evaluation.demo_bundle \
 
 1. Open the Hugging Face Space and show `/openenv/health`, `/openenv/metadata`, and `/openenv/schema`.
 2. Show the 3B specialist canary score table and training plots.
-3. Explain the current H200 quality lane as a continuation of the verified canary path.
+3. Open `demo/results/7b_orchestrator_behavior_card.md` to explain the global coordinator role and its honest smoke/training-signal status.
 4. Show the hierarchy: `7B` orchestrator, `3B` floor agents, and optional disaster-specialist routing.
 5. Show one live OpenEnv interaction.
 

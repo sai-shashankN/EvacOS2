@@ -147,6 +147,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 | **H200 / HF Jobs specialist artifacts** | Public canary trail | Fire/flood/gas H200 canary adapters, logs, and metrics are hosted on Hugging Face; longer quality-run configs are checked in but not claimed as final results |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
 | **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
+| **`7B` orchestrator behavior card** | Tracked | [behavior card](demo/results/7b_orchestrator_behavior_card.md) explains the orchestrator role, split-role smoke evidence, one trace, and the remaining held-out eval gap |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **Walkthrough video** | External link slot | Link the final public video in this row and in the submission form; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
 | **Hugging Face blog / write-up** | Drafted | Root write-up lives in [Blog.MD](Blog.MD) and is mirrored into the Hugging Face Space |

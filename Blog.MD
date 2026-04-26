@@ -149,6 +149,8 @@ The orchestrator exists for:
 
 This creates a path toward self-healing multi-agent coordination. A local specialist can act quickly; a larger coordinator can notice anomalies, redirect policy choices, request explanations, and escalate cases where the normal route fails. That is a more realistic architecture than a single monolithic model trying to do every decision at every speed.
 
+The public behavior card for this layer is [demo/results/7b_orchestrator_behavior_card.md](demo/results/7b_orchestrator_behavior_card.md). Its status is intentionally precise: the `7B/3B` split-role path is smoke/training-signal validated and checkpoints role-specific adapters, but final held-out `7B` orchestrator convergence is still the next evaluation target.
+
 ## What Makes This Submission Novel
 
 EvacOS2 is not trying to be another grid-world clone. The point is to test a capability gap that matters: can LLM agents coordinate under constrained, evolving, partially observable conditions and get measurably better from RL?
