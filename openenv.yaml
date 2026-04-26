@@ -1,18 +1,27 @@
 env_name: evacos-ma
 version: 0.1.0
-description: Hierarchical Multi-Agent Evacuation Environment (Round 2)
+description: Hierarchical Multi-Agent Evacuation Environment with fixed-task and procedural disaster-family resets.
 tasks:
-  - task_id: task_1_fire_easy
-    name: Single Fire Evacuation
-    difficulty: easy
-  - task_id: task_lh_fire_easy
-    name: Long-Horizon Fire
-    difficulty: easy
+  - task_id: openenv_fire_response
+    name: Fire Response Evacuation
+    reset_mode: procedural_disaster_family
+    disaster_family: fire
+  - task_id: openenv_flood_response
+    name: Flood Response Evacuation
+    reset_mode: procedural_disaster_family
+    disaster_family: flood
+  - task_id: openenv_gas_response
+    name: Gas Response Evacuation
+    reset_mode: procedural_disaster_family
+    disaster_family: gas
 action_schema_ref: evacos_ma.schemas.multi_agent.ActionBundleMA
 observation_schema_ref: evacos_ma.schemas.multi_agent.RoleObservationMA
 debug_state_enabled: false
-supported_tiers:
-  - easy
+supported_disaster_families:
+  - fire
+  - flood
+  - gas
+scenario_contract: default OpenEnv response lane
 agent_topology:
   orchestrator_count: 1
   floor_agent_count: 5

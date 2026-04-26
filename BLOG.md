@@ -8,7 +8,7 @@ Hugging Face Space: [https://huggingface.co/spaces/shashankN777/evacos2-openenv]
 
 ## Why This Is Interesting
 
-Most agent demos can look good even if the model is only producing plausible text. EvacOS2 asks a harder question: can an LLM policy act inside a simulator, receive programmatic feedback, and become more reliable over repeated rollouts?
+Most agent demos can look good even if the model is only producing plausible text. EvacOS2 asks a more demanding question: can an LLM policy act inside a simulator, receive programmatic feedback, and become more reliable over repeated rollouts?
 
 The environment targets three capability gaps:
 
@@ -29,7 +29,7 @@ The OpenEnv-facing API exposes:
 - `/openenv/health`
 - `/openenv/metadata`
 
-This means judges can pull the Space and interact with the same simulator surface used by the training and evaluation pipeline.
+This means judges can pull the Space and interact with the same simulator surface used by the training and evaluation pipeline. The public reset surface supports fixed proof tasks and procedural fire/flood/gas disaster-family resets; it is not presented as a single fire-only demo lane.
 
 ## Training Stack
 
@@ -85,9 +85,9 @@ The reward is not one loose scalar. It combines:
 
 The fixed-suite evaluator is separate from the training-time reward. Training rewards stay useful for GRPO optimization, while judge-facing evaluation reports a bounded `0-100%` score, save rate, invalid-action rate, and scenario outcomes.
 
-## What Is Proven And What Comes Next
+## What The Submitted System Shows
 
-Proven now:
+The submission demonstrates:
 
 - The OpenEnv environment is real and runnable.
 - The multi-agent simulator is deterministic and evaluable.
@@ -95,10 +95,12 @@ Proven now:
 - The `3B` specialist canaries reduce invalid actions and keep route targets valid.
 - The `7B/3B` split-role path has completed smoke training and checkpointing.
 
-Still ongoing:
+The active quality lane extends the same verified path:
 
-- Longer specialist training for stronger held-out performance.
-- Final selected-checkpoint baseline-vs-trained scorecards.
-- A stronger routed `7B` orchestrator run over frozen specialists.
+- HF Jobs runs use H200-class GPUs for faster specialist checkpoints.
+- Selected checkpoints can be evaluated with the fixed-suite `0-100%` scorecard.
+- The routed `7B` orchestrator path is included as the scalable multi-agent extension over frozen specialists.
+
+No flood H200 success is claimed here until the checkpoint, logs, and held-out eval artifact exist.
 
 The core story is already useful for OpenEnv: EvacOS2 is not just a prompt wrapper. It is a trainable, measurable, multi-agent environment for emergency coordination.

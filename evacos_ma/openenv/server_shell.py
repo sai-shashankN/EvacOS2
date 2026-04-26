@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from evacos_ma.env import EvacEnvironment
 from evacos_ma.models import DisasterType
@@ -31,7 +31,12 @@ from evacos_ma.schemas.rewards import RewardBreakdown, RoleReward, RewardsByRole
 
 router = APIRouter(prefix="/openenv", tags=["openenv"])
 _OPENENV_ENV = EvacEnvironment()
-_PUBLIC_TASK_IDS = frozenset({"task_1_fire_easy", "task_lh_fire_easy"})
+_DEFAULT_PROCGEN_TIER = "easy"
+_PUBLIC_SCENARIOS: dict[str, DisasterType] = {
+    "openenv_fire_response": DisasterType.fire,
+    "openenv_flood_response": DisasterType.flood,
+    "openenv_gas_response": DisasterType.gas,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -39,9 +44,9 @@ _PUBLIC_TASK_IDS = frozenset({"task_1_fire_easy", "task_lh_fire_easy"})
 # ---------------------------------------------------------------------------
 
 class ResetRequestMA(BaseModel):
-    task_id: str = "task_1_fire_easy"
+    task_id: str = "openenv_fire_response"
     seed: Optional[int] = None
-    tier: str = "easy"
+    tier: str = Field(default=_DEFAULT_PROCGEN_TIER, exclude=True)
     disaster_family: Optional[str] = None
     max_steps: Optional[int] = None
 
@@ -110,12 +115,28 @@ def _http_exception_from_env_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
-def _easy_only_public_schema(model: type[BaseModel]) -> dict[str, Any]:
-    """Expose the current proof-lane contract while preserving legacy internals."""
+def _public_openenv_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Expose the public scenario contract while preserving legacy internals."""
     schema = model.model_json_schema()
-    tier_def = schema.get("$defs", {}).get("Tier")
-    if isinstance(tier_def, dict):
-        tier_def["enum"] = ["easy"]
+    defs = schema.get("$defs", {})
+    if isinstance(defs, dict):
+        defs.pop("Tier", None)
+
+    def scrub_tier(node: Any) -> None:
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict):
+                props.pop("tier", None)
+            required = node.get("required")
+            if isinstance(required, list) and "tier" in required:
+                required.remove("tier")
+            for value in node.values():
+                scrub_tier(value)
+        elif isinstance(node, list):
+            for item in node:
+                scrub_tier(item)
+
+    scrub_tier(schema)
     return schema
 
 
@@ -131,10 +152,10 @@ def health() -> HealthResponseMA:
 @router.get("/schema", response_model=SchemaResponseMA)
 def schema() -> SchemaResponseMA:
     return SchemaResponseMA(
-        action_bundle=_easy_only_public_schema(ActionBundleMA),
-        observation_floor=_easy_only_public_schema(FloorAgentObservationMA),
-        observation_orchestrator=_easy_only_public_schema(OrchestratorObservationMA),
-        step_result=_easy_only_public_schema(StepResultMA),
+        action_bundle=_public_openenv_schema(ActionBundleMA),
+        observation_floor=_public_openenv_schema(FloorAgentObservationMA),
+        observation_orchestrator=_public_openenv_schema(OrchestratorObservationMA),
+        step_result=_public_openenv_schema(StepResultMA),
     )
 
 
@@ -154,33 +175,31 @@ def reset(req: ResetRequestMA = Body(default=None)) -> OpenEnvResetResponse:
     if req is None:
         req = ResetRequestMA()
     try:
-        if req.tier != "easy":
-            raise ValueError("The public OpenEnv proof lane supports only tier='easy'.")
+        if req.tier != _DEFAULT_PROCGEN_TIER:
+            raise ValueError("The public OpenEnv response lane uses the default scenario contract.")
         if req.disaster_family is not None:
+            family = DisasterType(req.disaster_family)
             observations = _OPENENV_ENV.reset_multi_agent(
                 task_id=req.task_id,
                 seed=req.seed,
-                procgen_tier=req.tier,
-                procgen_disaster_family=DisasterType(req.disaster_family),
+                procgen_tier=_DEFAULT_PROCGEN_TIER,
+                procgen_disaster_family=family,
                 procgen_max_steps=req.max_steps,
             )
         else:
-            if req.task_id not in _PUBLIC_TASK_IDS:
+            family = _PUBLIC_SCENARIOS.get(req.task_id)
+            if family is None:
                 raise ValueError(
-                    "The public OpenEnv proof lane exposes only easy task IDs; "
+                    "Unknown public OpenEnv scenario. Use one of "
+                    f"{sorted(k for k in _PUBLIC_SCENARIOS if k.startswith('openenv_'))}; "
                     f"got task_id={req.task_id!r}."
-                )
-            if req.max_steps is not None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "max_steps only applies to procedural resets; "
-                        "provide disaster_family or use the task_id defaults."
-                    ),
                 )
             observations = _OPENENV_ENV.reset_multi_agent(
                 task_id=req.task_id,
                 seed=req.seed,
+                procgen_tier=_DEFAULT_PROCGEN_TIER,
+                procgen_disaster_family=family,
+                procgen_max_steps=req.max_steps,
             )
     except ValueError as exc:
         raise _http_exception_from_env_error(exc) from exc

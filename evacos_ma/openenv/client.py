@@ -49,10 +49,20 @@ class OpenEnvClient:
             detail = exc.read().decode("utf-8")
             raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
 
-    def reset(self, task_id: str = "task_1_fire_easy", seed: Optional[int] = None, tier: str = "easy") -> dict[str, Any]:
-        payload: dict[str, Any] = {"task_id": task_id, "tier": tier}
+    def reset(
+        self,
+        task_id: str = "openenv_fire_response",
+        seed: Optional[int] = None,
+        disaster_family: Optional[str] = None,
+        max_steps: Optional[int] = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"task_id": task_id}
         if seed is not None:
             payload["seed"] = seed
+        if disaster_family is not None:
+            payload["disaster_family"] = disaster_family
+        if max_steps is not None:
+            payload["max_steps"] = max_steps
         return self._post("/openenv/reset", payload)
 
     def step(self, bundle: ActionBundleMA) -> dict[str, Any]:

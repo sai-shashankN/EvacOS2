@@ -30,7 +30,7 @@ def test_metadata_and_state_agree_on_debug_state(monkeypatch):
 
     monkeypatch.setenv("EVACOS_DEBUG_STATE", "true")
     metadata_true = client.get("/openenv/metadata").json()
-    reset_true = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 1}).json()
+    reset_true = client.post("/openenv/reset", json={"task_id": "openenv_fire_response", "seed": 1}).json()
     state_true = client.get(
         "/openenv/state",
         params={"episode_id": reset_true["episode_id"]},
@@ -40,7 +40,7 @@ def test_metadata_and_state_agree_on_debug_state(monkeypatch):
 
     monkeypatch.delenv("EVACOS_DEBUG_STATE", raising=False)
     metadata_false = client.get("/openenv/metadata").json()
-    reset_false = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 2}).json()
+    reset_false = client.post("/openenv/reset", json={"task_id": "openenv_fire_response", "seed": 2}).json()
     state_false = client.get(
         "/openenv/state",
         params={"episode_id": reset_false["episode_id"]},

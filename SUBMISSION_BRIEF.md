@@ -4,7 +4,7 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 
 ## Why this is a strong submission
 
-- Harder than single-turn tasks: decisions compound over repeated simulator rounds.
+- More demanding than single-turn tasks: decisions compound over repeated simulator rounds.
 - More realistic than toy environments: the task is operational coordination under uncertainty, not just label prediction.
 - More verifiable than judge-only scoring: rewards and evaluation are programmatic, with fixed-suite and baseline-vs-trained comparison support.
 - More extensible than a one-model demo: the training stack supports both shared-role and split-role model configurations.
@@ -20,10 +20,11 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
   - `python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline`
   - `python -m evaluation.demo_bundle --trained-checkpoint /path/to/downloaded/lora_adapter --config training/config.remote-unsloth-7b3b-split-bridge.yaml --output-dir outputs/demo_bundle`
 - Headline artifacts:
-  - `demo/results/a100_7b3b_run_summary.md`
-  - `demo/results/plots/a100_7b3b_training_signal.png`
+  - `demo/results/specialist_canary50_report.md`
+  - `demo/results/plots/3b_specialist_valid_action_score_comparison.png`
   - `demo/results/submission_scorecard_baseline.md`
   - `demo/results/baseline_fixed_suite.csv`
+  - H200 / HF Jobs specialist quality-run artifacts once their checkpoints, logs, and held-out eval reports land
 
 ## Core competitive claims
 
@@ -33,12 +34,13 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 - Specialist-ready disaster routing: fire/flood/gas lanes can be trained independently, including `3B` floor-only local-response specialists, and selected deterministically
 - Baseline-vs-trained evidence, not anecdotal samples only
 - Reward-hacking safeguards, not one loose scalar reward
+- Current quality-run plan uses H200-class HF Jobs; no flood H200 success is claimed until the artifact trail exists
 
 ## Recommended demo order
 
-1. Open `demo/results/a100_7b3b_run_summary.md`.
-2. Show the training-signal plot and fixed-suite baseline scorecard.
-3. Explain what is proven now versus what the final selected-checkpoint comparison will add.
+1. Open the Hugging Face Space and show `/openenv/health`, `/openenv/metadata`, and `/openenv/schema`.
+2. Show the 3B specialist canary score table and training plots.
+3. Explain the current H200 quality lane as a continuation of the verified canary path.
 4. Show the hierarchy: `7B` orchestrator, `3B` floor agents, and optional disaster-specialist routing.
 5. Show one live OpenEnv interaction.
 

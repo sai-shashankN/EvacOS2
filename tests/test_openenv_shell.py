@@ -62,8 +62,7 @@ class TestSchemaEndpoint:
         for key in ("action_bundle", "observation_floor", "observation_orchestrator", "step_result"):
             assert isinstance(data[key], dict)
             tier_def = data[key].get("$defs", {}).get("Tier")
-            if tier_def is not None:
-                assert tier_def["enum"] == ["easy"]
+            assert tier_def is None
 
 
 class TestMetadataEndpoint:
@@ -75,13 +74,14 @@ class TestMetadataEndpoint:
         assert data["version"] == "0.1.0"
         assert "manifest" in data
         assert data["manifest"]["action_schema_ref"].endswith("ActionBundleMA")
-        assert data["manifest"]["supported_tiers"] == ["easy"]
-        assert {task["difficulty"] for task in data["manifest"]["tasks"]} == {"easy"}
+        assert data["manifest"]["supported_disaster_families"] == ["fire", "flood", "gas"]
+        assert {task["disaster_family"] for task in data["manifest"]["tasks"]} == {"fire", "flood", "gas"}
+        assert "supported_tiers" not in data["manifest"]
 
 
 class TestResetEndpoint:
     def test_reset_returns_step_result(self, client):
-        resp = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 42, "tier": "easy"})
+        resp = client.post("/openenv/reset", json={"task_id": "openenv_fire_response", "seed": 42})
         assert resp.status_code == 200
         data = resp.json()
         assert "episode_id" in data
@@ -99,17 +99,17 @@ class TestResetEndpoint:
     def test_reset_rejects_tier_without_procgen_disaster_family(self, client):
         resp = client.post(
             "/openenv/reset",
-            json={"task_id": "task_1_fire_easy", "seed": 42, "tier": "brutal"},
+            json={"task_id": "openenv_fire_response", "seed": 42, "tier": "brutal"},
         )
         assert resp.status_code == 400
-        assert "tier='easy'" in resp.json()["detail"]
+        assert "default scenario contract" in resp.json()["detail"]
 
 
 class TestStepEndpoint:
     def test_step_with_golden_bundle(self, client, action_bundle_fixture):
         reset_resp = client.post(
             "/openenv/reset",
-            json={"task_id": "task_1_fire_easy", "seed": 42, "tier": "easy"},
+            json={"task_id": "openenv_fire_response", "seed": 42},
         )
         assert reset_resp.status_code == 200
         episode_id = reset_resp.json()["episode_id"]
@@ -134,7 +134,7 @@ class TestStepEndpoint:
 class TestStateEndpoint:
     def test_state_without_debug_hides_full_state(self, client, monkeypatch):
         monkeypatch.delenv("EVACOS_DEBUG_STATE", raising=False)
-        reset_resp = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 123})
+        reset_resp = client.post("/openenv/reset", json={"task_id": "openenv_fire_response", "seed": 123})
         episode_id = reset_resp.json()["episode_id"]
         resp = client.get("/openenv/state", params={"episode_id": episode_id})
         assert resp.status_code == 200
@@ -144,7 +144,7 @@ class TestStateEndpoint:
 
     def test_state_with_debug_shows_full_state(self, client, monkeypatch):
         monkeypatch.setenv("EVACOS_DEBUG_STATE", "true")
-        reset_resp = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 456})
+        reset_resp = client.post("/openenv/reset", json={"task_id": "openenv_fire_response", "seed": 456})
         episode_id = reset_resp.json()["episode_id"]
         resp = client.get("/openenv/state", params={"episode_id": episode_id})
         assert resp.status_code == 200
@@ -155,7 +155,7 @@ class TestStateEndpoint:
 
     def test_state_debug_false_does_not_show_full_state(self, client, monkeypatch):
         monkeypatch.setenv("EVACOS_DEBUG_STATE", "false")
-        reset_resp = client.post("/openenv/reset", json={"task_id": "task_1_fire_easy", "seed": 789})
+        reset_resp = client.post("/openenv/reset", json={"task_id": "openenv_fire_response", "seed": 789})
         episode_id = reset_resp.json()["episode_id"]
         resp = client.get("/openenv/state", params={"episode_id": episode_id})
         assert resp.status_code == 200
