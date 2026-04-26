@@ -1,22 +1,21 @@
 # EvacOS2 Training Rollout Plan
 
 This is the short, practical plan for the next training wave after the fixed
-fire 50-step canary.
+fire/flood/gas 50-step canaries.
 
 ## Current Known-Good Checkpoint
 
-The fire 50-step canary on Vast instance `35603298` completed successfully.
+The fire, flood, and gas 50-step canaries completed successfully.
 
-- Run: `remote-unsloth-3b-fire-floor-specialist-canary-50`
-- Result: `TRAIN_EXIT=0`
-- Final step: `49/50`
-- Invalid action rate: `0.1635 -> 0.0096`
-- Last-10 invalid action average: `0.03462`
-- Route action rate: `1.0`
-- Missing target rate: `0.0`
-- Latest checkpoint: present
-- Local artifact: `outputs/vast_fire_canary50_oraclefix_35603298/fire_canary50_artifacts.tgz`
-- Local report: `outputs/vast_fire_canary50_oraclefix_35603298/extracted/fire_canary50_report.json`
+- Fire: `TRAIN_EXIT=0`, final step `49/50`, last-10 invalid `0.03462`.
+- Flood: `TRAIN_EXIT=0`, final step `49/50`, last-10 invalid `0.02463`.
+- Gas: `TRAIN_EXIT=0`, final step `49/50`, last-10 invalid `0.02871`.
+- All three: route action rate `1.0`, missing target rate `0.0`, latest checkpoint present.
+- Tracked summary: `demo/results/specialist_canary50_report.md`.
+- Local artifacts:
+  - `outputs/vast_fire_canary50_oraclefix_35603298/fire_canary50_artifacts.tgz`
+  - `outputs/vast_flood_canary50_35606519/flood_canary50_artifacts.tgz`
+  - `outputs/vast_gas_canary50_35606521/gas_canary50_artifacts.tgz`
 
 This proves the RL/training plumbing is now alive: the floor model receives
 usable observations, the candidate groups have valid contrast, route arguments
@@ -24,6 +23,29 @@ are valid, and the trainer no longer crashes on long prompt windows.
 
 It does **not** prove the final model is strong yet. It proves we can now train
 for strength.
+
+## Throughput Finding
+
+The canaries also exposed the next bottleneck:
+
+```text
+fire:  35.46 min total,  42.6 sec/step, max_rounds_per_episode=4
+flood: 54.03 min total,  64.8 sec/step, max_rounds_per_episode=10
+gas:  105.27 min total, 126.3 sec/step, max_rounds_per_episode=10
+```
+
+Trace summaries show flood episodes actually used `5` rounds, while gas usually
+used `8-10`. Before any 400/550/750-step run, use disaster-specific horizons:
+
+- fire: `max_rounds_per_episode: 4`
+- flood: `max_rounds_per_episode: 5`
+- gas: `max_rounds_per_episode: 10`, or `8` only if a held-out gas smoke proves it is safe
+
+Also reduce long-run checkpoint/eval overhead:
+
+- canaries: checkpoint/eval every `10` steps
+- long runs: checkpoint/eval every `25` or `50` steps
+- keep enough checkpoints for rollback, but do not write six 470MB artifacts every few minutes unless debugging
 
 ## Immediate Commit Gate
 
@@ -72,9 +94,34 @@ A 50-step specialist canary is acceptable only if:
 - last-10 invalid action average is below `0.10`
 - no watchdog crash, no sequence-length crash, no pure-wait collapse
 
-If a canary fails, fix that domain before launching long runs.
+Status: complete. Both flood and gas passed. If future prompt/reward changes land,
+rerun the 50-step canaries before launching long runs.
 
-## Phase 2: Longer 3B Floor Specialist Runs
+## Phase 2: Throughput-Tuned 100-Step Smoke
+
+Before a full specialist run, run the three throughput-tuned `100`-step smokes.
+
+Recommended smoke set:
+
+- fire: `training/config.remote-unsloth-3b-fire-floor-specialist-throughput-smoke-100.yaml`
+- flood: `training/config.remote-unsloth-3b-flood-floor-specialist-throughput-smoke-100.yaml`
+- gas: `training/config.remote-unsloth-3b-gas-floor-specialist-throughput-smoke-100.yaml`
+- checkpoint/eval every `25` steps
+- `candidates_per_floor_prompt: 4`
+- keep oracle candidate enabled for this smoke
+- disaster-specific horizon from the throughput finding above
+
+Pass criteria:
+
+- `TRAIN_EXIT=0`
+- all `100` rows written
+- average step time is materially lower than the canary
+- route/missing-target metrics stay healthy
+- invalid rate remains below `0.10`, ideally below `0.05`
+- `python scripts/check_grpo_contrast.py <metrics.csv>` passes
+- latest checkpoint exists and reloads
+
+## Phase 3: Longer 3B Floor Specialist Runs
 
 After fire/flood/gas all pass 50-step canaries, run longer training.
 
@@ -112,7 +159,7 @@ For each specialist:
 - held-out eval score improves vs baseline
 - no easier-tier forgetting if medium/hard are introduced
 
-## Phase 3: 7B Orchestrator Smoke
+## Phase 4: 7B Orchestrator Smoke
 
 Do not wait for perfect floor specialists before testing the 7B path.
 
@@ -138,7 +185,7 @@ The 7B orchestrator should:
 
 The 3Bs are fast floor responders. The 7B is the slower global coordinator.
 
-## Phase 4: Final Training Story
+## Phase 5: Final Training Story
 
 The submission story should separate three claims:
 
@@ -197,10 +244,10 @@ Use this exact flow:
 
 ```text
 commit/push fixes
--> fire 50-step canary already passed
--> flood 50-step canary
--> gas 50-step canary
--> if both pass, run longer 3B specialist training
+-> fire/flood/gas 50-step canaries passed
+-> create canary report
+-> run throughput-tuned 100-step smoke
+-> if smoke passes, run longer 3B specialist training
 -> run 7B orchestrator smoke with current frozen specialists
 -> replace frozen specialists with stronger checkpoints as they arrive
 -> final held-out eval and plots

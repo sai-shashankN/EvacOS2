@@ -135,3 +135,40 @@ def test_fire_floor_easy_proof_config_is_easy_only_and_eval_heavy():
     assert config.checkpoint.every_steps == 25
     assert config.checkpoint.root_dir.endswith("-easy-proof-300")
     assert config.metrics.csv_path.endswith("-easy-proof-300-metrics.csv")
+
+
+@pytest.mark.parametrize(
+    ("family", "expected_rounds"),
+    [
+        ("fire", 4),
+        ("flood", 5),
+        ("gas", 10),
+    ],
+)
+def test_floor_throughput_smoke_configs_are_easy_only_and_runtime_tuned(
+    family: str,
+    expected_rounds: int,
+):
+    raw = _load_yaml_config(
+        Path(
+            "training/"
+            f"config.remote-unsloth-3b-{family}-floor-specialist-throughput-smoke-100.yaml"
+        )
+    )
+    config = TrainingConfig(**raw)
+
+    assert config.backend == "unsloth"
+    assert config.max_steps == 100
+    assert config.roles.trainable == ["floor_agent"]
+    assert config.roles.orchestrator_policy == "stub"
+    assert config.rollout.disaster_families == [family]
+    assert config.rollout.max_rounds_per_episode == expected_rounds
+    assert config.rollout.expanded_tier_schedule() == ["easy"] * 100
+    assert config.rollout.candidates_per_floor_prompt == 4
+    assert config.rollout.include_oracle_floor_candidate is True
+    assert config.eval.every_steps == 25
+    assert config.eval.tiers == ["easy"]
+    assert config.checkpoint.every_steps == 25
+    assert config.checkpoint.keep_last_n == 4
+    assert config.checkpoint.root_dir.endswith("-throughput-smoke-100")
+    assert config.metrics.csv_path.endswith("-throughput-smoke-100-metrics.csv")

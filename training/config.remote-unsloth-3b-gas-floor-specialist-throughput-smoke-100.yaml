@@ -1,0 +1,56 @@
+backend: "unsloth"
+# Throughput-tuned smoke after the successful gas canary.
+# Gas used nearly the full 10-round horizon, so keep it at 10 until a held-out smoke proves lower is safe.
+max_steps: 100
+unsloth_max_seq_length: 1024
+load_in_4bit: true
+model:
+  base: "Qwen/Qwen2.5-3B-Instruct"
+  dtype: "bfloat16"
+  max_prompt_tokens: 640
+  max_completion_tokens: 96
+roles:
+  trainable: ["floor_agent"]
+  orchestrator_policy: "stub"
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+rollout:
+  episodes_per_step: 1
+  max_rounds_per_episode: 10
+  seed_retry_limit: 200
+  use_vllm: false
+  candidates_per_floor_prompt: 4
+  include_oracle_floor_candidate: true
+  sampling_temperature: 0.7
+  disaster_families: ["gas"]
+  tier_schedule:
+    - steps: 100
+      mix: {easy: 100}
+grpo:
+  learning_rate: 5.0e-6
+  kl_coef: 0.04
+  clip_range: 0.2
+  num_train_epochs_per_step: 1
+reward:
+  rationale_scaling: "linear_capped"
+  alpha: 0.01
+  beta: 0.25
+  cap: 1.0
+  eligible_token_ceiling: 96
+  clip_normalized_to: 1.0
+eval:
+  every_steps: 25
+  tiers: ["easy"]
+  seeds: [42, 123]
+checkpoint:
+  every_steps: 25
+  keep_last_n: 4
+  root_dir: "outputs/training/remote-unsloth-3b-gas-floor-specialist-throughput-smoke-100"
+metrics:
+  csv_path: "outputs/training/remote-unsloth-3b-gas-floor-specialist-throughput-smoke-100-metrics.csv"
+  jsonl_dir: "outputs/logs/remote-unsloth-3b-gas-floor-specialist-throughput-smoke-100"
+seed:
+  training_rng: 12345

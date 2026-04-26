@@ -10,8 +10,15 @@ Produce judge-facing proof that EvacOS2 is not just trainable, but can produce m
 
 - Train strong frozen `3B` floor specialists for `fire`, `flood`, and `gas`.
 - Train one shared `7B` orchestrator against the frozen specialists.
-- Evaluate on held-out seeds and all tiers.
+- Evaluate on held-out seeds across the trained easy/medium/hard operating tiers.
 - Publish/collect adapters, metrics CSVs, plots, README links, HF Space, and demo proof.
+
+Current evidence checkpoint:
+
+- `fire`, `flood`, and `gas` 50-step canaries have all completed successfully with `TRAIN_EXIT=0`.
+- Invalid-action rates dropped into a healthy low range for all three specialists.
+- The remaining bottleneck is runtime/throughput, especially longer flood/gas episode horizons and frequent checkpoint/eval writes.
+- Do a throughput-tuned 100-step smoke before launching any longer specialist run.
 
 ## Non-Negotiable Architecture Choice
 
@@ -160,23 +167,29 @@ Expected cost:
 
 ### 7B Orchestrator GPU
 
-Use HF A100 large credits for the orchestrator/finale, not for 3B specialists.
+Use HF GPU credits for the orchestrator/finale, not for 3B specialists.
 
 Target shape:
 
-- 1x A100 80 GB
+- 1x A100 80 GB, H100 80 GB, or H200 141 GB
 - at least `100 GB` CPU RAM
 - at least `150 GB` disk
+
+Selection rule:
+
+- Prefer H100 over H200 when the run fits comfortably in 80 GB VRAM and H100 is cheaper.
+- Prefer H200 when memory headroom is the risk, for example longer context, larger batch, or loading the 7B orchestrator plus frozen specialist stack in one process.
+- A100 80 GB remains a good budget fallback if H100/H200 availability is poor.
 
 Expected time from our previous A100 evidence:
 
 - `100` steps: about `45 min`
 - `300` steps: about `2.5-3 hr`
 - `500` steps: about `4-5 hr`
-- `750` steps: about `6-7 hr`
-- `1000` steps: about `8-10 hr`
+- `750` steps: about `6-7 hr`, only as a stretch
+- `1000` steps: about `8-10 hr`, only if curves clearly justify it
 
-With `$30` HF credits, target `500` orchestrator steps first. Continue toward `750-1000` only if reward/eval curves are still improving.
+With `$30+` HF credits, target `300-500` orchestrator steps first. Continue beyond that only if reward/eval curves are still improving.
 
 ## Critical Preflight Gate
 
@@ -232,55 +245,100 @@ If this fails, fix locally before renting.
 
 ## Training Order
 
-### Phase 1: Fire Specialist Canary
+### Phase 1: Specialist Canary Triad
 
-Train fire alone first.
+Status: complete.
 
-Reason:
+Fire was the debugging canary, then flood and gas were run in parallel after the shared reward/parser/oracle fixes landed.
 
-- Fire is our debugging canary.
-- If parser/reward/checkpoint/CSV issues show up, fix them once before duplicating the mistake into gas/flood.
-- Fire already showed positive early signal, so it is the lowest-risk place to validate the long run.
-
-Target:
-
-```text
-50-step canary -> 300-step easy proof -> harder curriculum only after proof
-```
-
-Do not jump from a green parser smoke test straight to a full hard/brutal run.
-The first paid proof should establish held-out easy-fire learning.
-
-Available proof configs:
+Completed canary configs:
 
 ```text
 training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml
-training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml
+training/config.remote-unsloth-3b-flood-floor-specialist-canary-50.yaml
+training/config.remote-unsloth-3b-gas-floor-specialist-canary-50.yaml
 ```
 
-Acceptance gate for the 300-step easy proof:
+Acceptance gate met:
 
 - metrics CSV grows through the run
-- checkpoints appear every 25 steps
-- eval rows appear every 25 steps
-- invalid action rate trends under `0.15-0.20`
-- held-out easy-fire eval improves over baseline and early checkpoints
+- checkpoints/artifacts are produced
+- invalid action rate trends under `0.05` in the final window
 - sampled traces show real routing/rescue behavior, not wait spam or parser exploits
 - reward variance stays non-zero enough for GRPO to keep learning
 
-If easy-fire eval is not clearly improving by `200-300` easy steps, stop and
-debug reward/parser/policy rather than spending on medium/hard/brutal.
+Canary artifact summary:
 
-Long-run target after the easy proof passes:
+- Fire: `outputs/vast_fire_canary50_oraclefix_35603298/`
+- Flood: `outputs/vast_flood_canary50_35606519/`
+- Gas: `outputs/vast_gas_canary50_35606521/`
+- Tracked report: `demo/results/specialist_canary50_report.md`
+
+### Phase 2: Throughput-Tuned 100-Step Smoke
+
+Do not jump from green 50-step canaries straight to a full 400-550 step run.
+
+Run a 100-step smoke with the same corrected reward/parser/oracle path, but with cheaper runtime settings.
+
+Disaster-specific rollout horizons:
 
 ```text
-200 easy + 200 medium + 200 hard + 150 brutal = 750 steps
+fire:  max_rounds_per_episode = 4
+flood: max_rounds_per_episode = 5
+gas:   max_rounds_per_episode = 10
 ```
 
-This is a staged curriculum budget, not naive "forget the old tier forever" training.
-Replay tiers are interleaved inside each stage rather than clumped at the beginning.
+Why:
 
-Default exact-750 specialist schedule:
+- Fire actually terminated at 4 rounds in the canary.
+- Flood actually terminated at 5 rounds in the canary, despite being configured for 10.
+- Gas used nearly the full 10-round horizon, so reduce only after a held-out smoke proves 8 rounds is safe.
+
+Use cheaper checkpoint/eval cadence:
+
+```text
+save_every_steps: 25 or 50
+eval_every_steps: 25 or 50
+```
+
+Candidate count:
+
+- Keep `candidates_per_decision = 4` during bootstrap unless a tested config proves `2` keeps reward signal healthy.
+- After invalid-action rates stay below `0.05`, a separate resume/smoke may test `2` candidates for speed.
+- Do not silently change candidate count in the middle of a paid long run unless the code/config explicitly supports that schedule.
+
+100-step smoke acceptance gate:
+
+- metrics reach final step with `TRAIN_EXIT=0`
+- invalid action final-window average stays under `0.08`
+- no missing-target or route-action collapse
+- raw reward and saved-civilian behavior do not regress against the 50-step canary
+- `python scripts/check_grpo_contrast.py <metrics.csv>` passes
+- wall-clock estimate for the next run is affordable
+
+### Phase 3: Longer 3B Specialist Curriculum
+
+After the 100-step smoke passes, scale specialists with easy/medium/hard only.
+
+Default recommended specialist schedule:
+
+```text
+Stage 1: 150 steps
+  150 easy
+
+Stage 2: 150 steps
+  120 medium
+   30 easy replay
+
+Stage 3: 100 steps
+   80 hard
+   15 medium replay
+    5 easy replay
+```
+
+Total: `400` steps per specialist.
+
+Stretch schedule if time, cost, and eval curves are still good:
 
 ```text
 Stage 1: 200 steps
@@ -290,54 +348,57 @@ Stage 2: 200 steps
   160 medium
    40 easy replay
 
-Stage 3: 200 steps
-  160 hard
-   30 medium replay
+Stage 3: 150 steps
+  120 hard
+   20 medium replay
    10 easy replay
-
-Stage 4: 150 steps
-  115 brutal
-   25 hard replay
-   10 medium replay
 ```
+
+Total: `550` steps per specialist.
+
+Do not include a brutal tier in the default hackathon-day run. It is a stretch research tier only if the trained easy/medium/hard path is already strong and time remains.
 
 Why:
 
 - Early easy steps stabilize action format, parser behavior, and basic rescue behavior.
 - Later replay prevents catastrophic forgetting when difficulty increases.
-- The hardest tier should dominate late training, but not erase easier-tier competence.
+- Hard tasks should matter late, but not erase easier-tier competence.
 - This follows the Hermes/GRPO bias toward stable curricula, reward diversity, and avoiding reward collapse.
 
 If the implementation cannot do replay-aware scheduled sampling on a remote clone, use sequential resume blocks as the fallback:
 
 ```text
-200 easy -> resume
-200 medium -> resume
-200 hard -> resume
-150 brutal -> finish
+150 easy -> resume
+150 medium -> resume
+100 hard -> finish
 ```
 
 But that fallback is weaker. Prefer replay-aware scheduling if we can implement it before the long run.
 
-Expected time:
+Expected time must be recalculated from the 100-step smoke. The raw 50-step canaries showed:
 
-- RTX 4090: `4-5 hr`
-- RTX 3090: `5-6 hr`
+```text
+fire:  ~35.5 min for 50 steps
+flood: ~54.0 min for 50 steps
+gas:   ~105.3 min for 50 steps
+```
+
+Those numbers are too slow to extrapolate blindly. Use the throughput smoke before buying multi-hour runs.
 
 Important implementation note:
 
-- Real 750-step specialist configs now use `rollout.tier_schedule`.
+- Real longer-run specialist configs should use `rollout.tier_schedule`.
 - `eval.tiers` still controls evaluation only; training difficulty comes from `rollout.tier_schedule`.
 - The config loader rejects mismatches where `tier_schedule` does not expand to `max_steps`, so a remote run should fail fast instead of silently training the wrong curriculum.
 
-Minimum viable fire execution:
+Minimum viable specialist execution:
 
-1. Create or verify `training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml`.
+1. Create or verify the disaster-specific 100-step smoke config first.
 2. Confirm it trains only `floor_agent`.
 3. Confirm `orchestrator_policy: "stub"`.
-4. Confirm `rollout.disaster_families: ["fire"]`.
-5. Confirm checkpoint root and metrics CSV are fire-specific.
-6. Confirm tier schedule is real, not just documentation.
+4. Confirm `rollout.disaster_families` contains exactly one family.
+5. Confirm checkpoint root and metrics CSV are disaster-specific.
+6. Confirm tier schedule is real for longer configs, not just documentation.
 
 Remote command pattern:
 
@@ -347,10 +408,10 @@ source .venv/bin/activate
 export HF_HOME=/workspace/hf_cache
 export TRANSFORMERS_CACHE=/workspace/hf_cache
 export WANDB_DISABLED=true
-python -c "from pathlib import Path; from training.train import run_training; run_training(Path('training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml'))"
+python -c "from pathlib import Path; from training.train import run_training; run_training(Path('training/config.remote-unsloth-3b-fire-floor-specialist-throughput-smoke-100.yaml'))"
 ```
 
-### Phase 1 Monitoring
+### Phase 3 Monitoring
 
 Monitor every `5 minutes` during the first `30 minutes`, then every `10-15 minutes` if stable.
 
@@ -382,82 +443,24 @@ Track at minimum:
 - latest checkpoint
 - GPU VRAM/utilization
 
-Fire acceptance gate:
+Specialist smoke acceptance gate:
 
-- reaches at least `300` steps cleanly
+- reaches the planned step count cleanly
 - invalid action rate stays low
 - CSV/checkpoint/export are healthy
 - no obvious reward hacking in sampled actions
 - reward/eval signal is not flatlining badly
 
-If fire reveals a bug:
+If any specialist reveals a bug:
 
-- stop fire if the bug affects reward validity, parsing, checkpointing, or CSV integrity
+- stop that run if the bug affects reward validity, parsing, checkpointing, or CSV integrity
 - patch locally
 - run targeted tests
-- redeploy patch before gas/flood
+- redeploy patch before scaling the other specialists
 - restart from scratch if the bug polluted rewards/checkpoints
 - resume only if the fix is clearly non-behavioral
 
-### Phase 2: Gas And Flood Parallel
-
-After fire is stable or complete, run gas and flood in parallel on two separate 24 GB GPUs.
-
-Reason:
-
-- Fire catches bugs first.
-- Gas/flood benefit from the fixes.
-- Parallel execution saves wall-clock time.
-
-Target per specialist:
-
-```text
-200 easy + 200 medium + 200 hard + 150 brutal = 750 steps
-```
-
-Use the same replay-aware schedule as fire:
-
-```text
-200 easy
-160 medium + 40 easy replay
-160 hard + 30 medium replay + 10 easy replay
-115 brutal + 25 hard replay + 10 medium replay
-```
-
-Expected time:
-
-- RTX 4090: `4-5 hr`
-- RTX 3090: `5-6 hr`
-
-Required configs:
-
-- `training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml`
-- `training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml`
-
-Each must have:
-
-- one disaster family only
-- trainable `floor_agent` only
-- stub orchestrator
-- unique checkpoint root
-- unique metrics CSV
-- real tier schedule
-
-Remote commands:
-
-```bash
-python -c "from pathlib import Path; from training.train import run_training; run_training(Path('training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml'))"
-```
-
-```bash
-python -c "from pathlib import Path; from training.train import run_training; run_training(Path('training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml'))"
-```
-
-Monitor both every `5-10 minutes`.
-
-Use the same intervention rules as fire.
-
-### Phase 3: Specialist Artifact Collection
+### Phase 4: Specialist Artifact Collection
 
 For each specialist, collect:
 
@@ -501,15 +504,17 @@ After local verification, destroy the Vast instances immediately.
 
 Do not leave stopped storage running unless artifact recovery is still unresolved.
 
-### Phase 4: Specialist Evaluation
+### Phase 5: Specialist Evaluation
 
 Run held-out fixed-suite eval for each specialist.
 
-Evaluate all tiers:
+Evaluate trained tiers by default:
 
 ```text
-easy, medium, hard, brutal
+easy, medium, hard
 ```
+
+Only evaluate `brutal` as an optional stretch/diagnostic if the model was actually trained or explicitly tested there. Do not make brutal-tier claims in judge-facing material without evidence.
 
 Use held-out seeds:
 
@@ -537,7 +542,7 @@ Generate readable plots:
 
 Commit lightweight plots/CSVs to `demo/results/`, not giant adapters.
 
-## Phase 5: 7B Orchestrator Over Frozen Specialists
+## Phase 6: 7B Orchestrator Over Frozen Specialists
 
 Do this only after the Critical Preflight Gate passes.
 
@@ -549,9 +554,9 @@ train one shared 7B orchestrator while frozen floor specialists handle local act
 
 Target training:
 
-- start with `300` steps if debugging
-- target `500` steps for strong final
-- continue to `750-1000` only if curves improve
+- start with `150-300` steps if debugging
+- target `300-500` steps for a strong final
+- continue beyond `500` only if reward/eval curves are still improving and HF credits remain
 
 Training mix:
 
@@ -560,33 +565,28 @@ Training mix:
 - The frozen floor specialists are already stable, so the orchestrator does not need disaster-by-disaster local bootstrapping in the same way the 3B specialists do.
 - Large single-disaster blocks raise forgetting risk and make the 7B overfit to one specialist's behavior before seeing the others.
 
-Default 500-step orchestrator schedule:
+Default 400-step orchestrator schedule:
 
 ```text
-Stage 1: 90 steps
+Stage 1: 100 steps
   easy mixed fire/flood/gas, roughly round-robin
 
-Stage 2: 140 steps
-  112 medium mixed fire/flood/gas
-   28 easy replay mixed fire/flood/gas
+Stage 2: 150 steps
+  120 medium mixed fire/flood/gas
+   30 easy replay mixed fire/flood/gas
 
 Stage 3: 150 steps
   120 hard mixed fire/flood/gas
    20 medium replay mixed fire/flood/gas
    10 easy replay mixed fire/flood/gas
-
-Stage 4: 120 steps
-   90 brutal mixed fire/flood/gas
-   20 hard replay mixed fire/flood/gas
-   10 medium replay mixed fire/flood/gas
 ```
 
-For a 750-step extension, continue with:
+For a 500-step extension, continue with:
 
 ```text
-175 brutal mixed fire/flood/gas
- 50 hard replay mixed fire/flood/gas
- 25 medium replay mixed fire/flood/gas
+ 80 hard mixed fire/flood/gas
+ 15 medium replay mixed fire/flood/gas
+  5 easy replay mixed fire/flood/gas
 ```
 
 Do not let the family mix collapse. Each tier block should stay close to one-third `fire`, one-third `flood`, one-third `gas`, unless a live bug forces narrowing.
@@ -636,7 +636,7 @@ Stop/repair if:
 - floor specialists are accidentally trainable
 - checkpoint lacks frozen specialist adapter metadata
 
-## Phase 6: Publish Adapters
+## Phase 7: Publish Adapters
 
 Use adapter upload, not Git.
 
@@ -662,7 +662,7 @@ If using one repo, upload under separate paths:
 python scripts/upload_adapter.py outputs/.../fire/lora_adapter your-username/evacos2-adapters --path-in-repo fire-3b-floor
 ```
 
-## Phase 7: Final Demo Bundle
+## Phase 8: Final Demo Bundle
 
 After selected adapters exist locally or on HF:
 
@@ -692,7 +692,7 @@ Required public proof:
 - HF Space URL
 - YouTube/HF blog links
 
-## Phase 8: Submission Lock
+## Phase 9: Submission Lock
 
 Final checks:
 
@@ -738,45 +738,48 @@ If the offer is unverified or low reliability, reject it unless the user explici
 
 ## Expected Total Wall Clock
 
-If using one fire canary GPU first, then two parallel GPUs:
+Current reality after canaries:
 
 ```text
-fire: 4-6 hours
-gas + flood parallel: 4-6 hours
-specialist total wall clock: 8-12 hours
-orchestrator 500 steps: 4-5 hours
+fire canary-50:  ~35.5 min
+flood canary-50: ~54.0 min
+gas canary-50:   ~105.3 min
+```
+
+Next estimate should come from the 100-step throughput smoke, not a naive 750-step extrapolation.
+
+Planning placeholder:
+
+```text
+100-step smoke, all three specialists in parallel: roughly 1.5-3 hours, gas likely limiting
+400-step specialist curriculum after tuning: recalculate from smoke before renting
+orchestrator 300-500 steps: roughly 2.5-5 hours on A100/H100/H200 class GPU
 final eval/submission: 1-2 hours
 ```
 
-Total practical hackathon-day runtime:
+Total practical hackathon-day runtime after canaries:
 
 ```text
-13-19 hours, depending on bugs and GPU speed
+unknown until throughput smoke; do not promise 4-6 hour specialist completion yet
 ```
 
-If all three specialists run in parallel immediately:
-
-```text
-specialist total wall clock: 4-6 hours
-```
-
-But the recommended path is fire canary first because it reduces the risk of duplicating a bug across three paid runs.
+The recommended path is now throughput smoke first because correctness is proven and speed is the risk.
 
 ## Expected Cost
 
 Specialists on Vast:
 
 ```text
-3 x RTX 4090 x 5 hr ~= $4.85
-Budget: $5-7
+100-step smoke on three RTX 4090s: budget about $2-4 depending gas runtime and offer price
+400-step specialist curriculum: recalculate from smoke; do not pre-commit to a fixed dollar number
 ```
 
-Orchestrator on HF A100 large:
+Orchestrator on HF A100/H100/H200 class GPU:
 
 ```text
+300 steps ~= $7-10 on A100-class pricing, more on H100/H200
 500 steps ~= $10-13
-750 steps ~= $15-18
-1000 steps ~= $20-25
+750+ steps only if curves justify it
 ```
 
 With `$30` HF credits, spend HF on the A100 orchestrator/finale only.

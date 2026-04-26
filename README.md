@@ -135,7 +135,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 |---|---|---|
 | **A100 training signal** | Tracked | [run summary](demo/results/a100_7b3b_run_summary.md), [training-signal CSV](demo/results/a100_7b3b_training_signal.csv), [reward plot](demo/results/plots/a100_7b3b_training_signal.png) |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
-| **Fire `3B` specialist eval curve** | Pending extraction | Extract the easy proof/checkpoint eval JSONL into `fire_3b_easy_eval_curve.csv` and `fire_3b_easy_eval_curve.png`; include `training_watchdog.jsonl` whenever present so zero-signal or scout-collapse runs are visible instead of hidden |
+| **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md) covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **YouTube walkthrough video** | Placeholder | Add final video URL here after recording; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
 | **Hugging Face blog / write-up** | Drafted | Local draft lives in [demo/hf_blog.md](demo/hf_blog.md); replace with the published HF post URL before final submission |
@@ -228,16 +228,22 @@ Floor-only `3B` specialist variants use a deterministic stub orchestrator and tr
 
 - fire signal canary: [training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml)
 - fire canary: [training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml)
-- fire easy proof: [training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-easy-proof-300.yaml)
-- fire: [training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml)
-- flood: [training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml)
-- gas: [training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml)
+- fire throughput smoke: [training/config.remote-unsloth-3b-fire-floor-specialist-throughput-smoke-100.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-throughput-smoke-100.yaml)
+- flood throughput smoke: [training/config.remote-unsloth-3b-flood-floor-specialist-throughput-smoke-100.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-throughput-smoke-100.yaml)
+- gas throughput smoke: [training/config.remote-unsloth-3b-gas-floor-specialist-throughput-smoke-100.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-throughput-smoke-100.yaml)
+- legacy/deeper configs: [training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-750.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-750.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-750.yaml)
 
-The specialist lane is intentionally easy-only for the current submission path. Use the `10`-step signal canary to prove same-prompt GRPO plumbing, then the `50`-step canary to prove parser/checkpoint/CSV health, then the `300`-step proof run to show held-out fire improvement. If the easy held-out eval does not clearly improve by `200-300` steps, debug the reward/policy loop before spending more compute.
+The specialist canaries are intentionally easy-only proof runs. Use the `10`-step signal canary to prove same-prompt GRPO plumbing, then the `50`-step canary to prove parser/checkpoint/CSV health. The successful fire/flood/gas canary summary is tracked in [demo/results/specialist_canary50_report.md](demo/results/specialist_canary50_report.md).
 
 Modern GRPO/OpenEnv practice requires candidate contrast inside each prompt group. Before any further paid specialist run, verify that the rollout path samples multiple completions for the same role/agent/prompt, groups them under the same prompt-scoped `group_id`, and logs non-zero `floor_agent_group_raw_reward_std_mean` plus non-zero `floor_agent_advantage_std`. A long run with flat groups is expected to waste compute even if mean normalized reward looks positive.
 
-Each 750-step specialist now runs `750` easy episodes for one disaster family. This is deliberate: the recent failed run showed that broadening the curriculum before the reward/grouping signal is healthy can hide non-learning behind noisy metrics.
+Use [scripts/check_grpo_contrast.py](scripts/check_grpo_contrast.py) as the quick pre-rental/post-run guard for those CSV columns:
+
+```bash
+python scripts/check_grpo_contrast.py outputs/path/to/metrics.csv
+```
+
+Longer specialist runs should now use an easy/medium/hard curriculum only after a throughput-tuned `100`-step smoke. The canaries proved the reward/grouping signal is healthy; the next risk is wall-clock cost, especially for gas.
 
 If the 750-step canary is too noisy, use the deeper quality configs:
 
@@ -245,7 +251,7 @@ If the 750-step canary is too noisy, use the deeper quality configs:
 - flood: [training/config.remote-unsloth-3b-flood-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-2000.yaml)
 - gas: [training/config.remote-unsloth-3b-gas-floor-specialist-2000.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-2000.yaml)
 
-The 2000-step quality schedule is also easy-only: `2000` episodes for the selected disaster family. Use it only after the canary/proof run shows non-zero GRPO signal and held-out eval movement.
+Use the deeper quality configs only after the canary/proof run shows non-zero GRPO signal and held-out eval movement. If they remain easy-only, label them as easy-only quality runs; if they are revised to easy/medium/hard, keep the README and runbook aligned before launch.
 
 After each real specialist run, convert the saved JSONL traces into a bounded judge-facing eval artifact: one CSV and one plot showing `0-100%` held-out easy eval score at each 50-step eval checkpoint. Training rewards stay normalized/noisy for GRPO; the README result should show the cleaner eval score curve plus saved/lost civilian outcomes.
 
