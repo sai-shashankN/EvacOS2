@@ -10,7 +10,7 @@ Produce judge-facing proof that EvacOS2 is not just trainable, but can produce m
 
 - Train strong frozen `3B` floor specialists for `fire`, `flood`, and `gas`.
 - Train one shared `7B` orchestrator against the frozen specialists.
-- Evaluate on held-out seeds across the trained easy/medium/hard operating tiers.
+- Evaluate on held-out seeds across the default fire/flood/gas specialist suite.
 - Publish/collect adapters, metrics CSVs, plots, README links, HF Space, and demo proof.
 
 Current evidence checkpoint:
@@ -276,7 +276,7 @@ Canary artifact summary:
 
 ### Phase 2: Throughput-Tuned 100-Step Smoke
 
-Do not jump from green 50-step canaries straight to a full 400-550 step run.
+Do not jump from green 50-step canaries straight to a full quality run.
 
 Run a 100-step smoke with the same corrected reward/parser/oracle path, but with cheaper runtime settings.
 
@@ -316,64 +316,30 @@ Candidate count:
 - `python scripts/check_grpo_contrast.py <metrics.csv>` passes
 - wall-clock estimate for the next run is affordable
 
-### Phase 3: Longer 3B Specialist Curriculum
+### Phase 3: Longer 3B Specialist Quality Runs
 
-After the 100-step smoke passes, scale specialists with easy/medium/hard only.
+After the 100-step smoke passes, scale specialists on the default scenario suite.
 
-Default recommended specialist schedule:
-
-```text
-Stage 1: 150 steps
-  150 easy
-
-Stage 2: 150 steps
-  120 medium
-   30 easy replay
-
-Stage 3: 100 steps
-   80 hard
-   15 medium replay
-    5 easy replay
-```
-
-Total: `400` steps per specialist.
-
-Stretch schedule if time, cost, and eval curves are still good:
+Active submission schedule:
 
 ```text
-Stage 1: 200 steps
-  200 easy
-
-Stage 2: 200 steps
-  160 medium
-   40 easy replay
-
-Stage 3: 150 steps
-  120 hard
-   20 medium replay
-   10 easy replay
+fire:  400 steps
+flood: 500 steps
+gas:   700 steps
 ```
 
-Total: `550` steps per specialist.
+Use the checked-in quality configs:
 
-Do not include a brutal tier in the default hackathon-day run. It is a stretch research tier only if the trained easy/medium/hard path is already strong and time remains.
+- fire: `training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml`
+- flood: `training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml`
+- gas: `training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml`
 
 Why:
 
-- Early easy steps stabilize action format, parser behavior, and basic rescue behavior.
-- Later replay prevents catastrophic forgetting when difficulty increases.
-- Hard tasks should matter late, but not erase easier-tier competence.
-- This follows the Hermes/GRPO bias toward stable curricula, reward diversity, and avoiding reward collapse.
-
-If the implementation cannot do replay-aware scheduled sampling on a remote clone, use sequential resume blocks as the fallback:
-
-```text
-150 easy -> resume
-150 medium -> resume
-100 hard -> finish
-```
-
-But that fallback is weaker. Prefer replay-aware scheduling if we can implement it before the long run.
+- The canaries showed the GRPO/reward plumbing is finally healthy.
+- The deadline rewards clean evidence more than broad unfinished scope.
+- A single default training distribution converges faster and produces a clearer story.
+- Fire/flood/gas remain meaningful specialization axes without overloading the run.
 
 Expected time must be recalculated from the 100-step smoke. The raw 50-step canaries showed:
 
@@ -387,9 +353,8 @@ Those numbers are too slow to extrapolate blindly. Use the throughput smoke befo
 
 Important implementation note:
 
-- Real longer-run specialist configs should use `rollout.tier_schedule`.
-- `eval.tiers` still controls evaluation only; training difficulty comes from `rollout.tier_schedule`.
-- The config loader rejects mismatches where `tier_schedule` does not expand to `max_steps`, so a remote run should fail fast instead of silently training the wrong curriculum.
+- Real longer-run specialist configs should still use `rollout.tier_schedule` so the loader fails fast if the schedule does not expand to `max_steps`.
+- Treat the internal tier label as an implementation detail of the simulator, not part of the judge-facing story.
 
 Minimum viable specialist execution:
 
@@ -398,7 +363,7 @@ Minimum viable specialist execution:
 3. Confirm `orchestrator_policy: "stub"`.
 4. Confirm `rollout.disaster_families` contains exactly one family.
 5. Confirm checkpoint root and metrics CSV are disaster-specific.
-6. Confirm tier schedule is real for longer configs, not just documentation.
+6. Confirm the schedule expands exactly to `max_steps`.
 
 Remote command pattern:
 
@@ -508,13 +473,13 @@ Do not leave stopped storage running unless artifact recovery is still unresolve
 
 Run held-out fixed-suite eval for each specialist.
 
-Evaluate trained tiers by default:
+Evaluate the default specialist suite:
 
 ```text
-easy, medium, hard
+fire, flood, gas
 ```
 
-Only evaluate `brutal` as an optional stretch/diagnostic if the model was actually trained or explicitly tested there. Do not make brutal-tier claims in judge-facing material without evidence.
+Do not add extra scenario-tier claims in judge-facing material unless the model was actually trained or explicitly tested there.
 
 Use held-out seeds:
 
@@ -565,31 +530,19 @@ Training mix:
 - The frozen floor specialists are already stable, so the orchestrator does not need disaster-by-disaster local bootstrapping in the same way the 3B specialists do.
 - Large single-disaster blocks raise forgetting risk and make the 7B overfit to one specialist's behavior before seeing the others.
 
-Default 400-step orchestrator schedule:
+Default 300-step orchestrator schedule:
 
 ```text
-Stage 1: 100 steps
-  easy mixed fire/flood/gas, roughly round-robin
-
-Stage 2: 150 steps
-  120 medium mixed fire/flood/gas
-   30 easy replay mixed fire/flood/gas
-
-Stage 3: 150 steps
-  120 hard mixed fire/flood/gas
-   20 medium replay mixed fire/flood/gas
-   10 easy replay mixed fire/flood/gas
+300 mixed fire/flood/gas, roughly round-robin
 ```
 
 For a 500-step extension, continue with:
 
 ```text
- 80 hard mixed fire/flood/gas
- 15 medium replay mixed fire/flood/gas
-  5 easy replay mixed fire/flood/gas
+200 additional mixed fire/flood/gas, roughly round-robin
 ```
 
-Do not let the family mix collapse. Each tier block should stay close to one-third `fire`, one-third `flood`, one-third `gas`, unless a live bug forces narrowing.
+Do not let the family mix collapse. Keep the schedule close to one-third `fire`, one-third `flood`, one-third `gas`, unless a live bug forces narrowing.
 
 HF A100 command pattern:
 
@@ -752,7 +705,7 @@ Planning placeholder:
 
 ```text
 100-step smoke, all three specialists in parallel: roughly 1.5-3 hours, gas likely limiting
-400-step specialist curriculum after tuning: recalculate from smoke before renting
+quality specialist run after tuning: recalculate from smoke before renting
 orchestrator 300-500 steps: roughly 2.5-5 hours on A100/H100/H200 class GPU
 final eval/submission: 1-2 hours
 ```
@@ -771,7 +724,7 @@ Specialists on Vast:
 
 ```text
 100-step smoke on three RTX 4090s: budget about $2-4 depending gas runtime and offer price
-400-step specialist curriculum: recalculate from smoke; do not pre-commit to a fixed dollar number
+quality specialist run: recalculate from smoke; do not pre-commit to a fixed dollar number
 ```
 
 Orchestrator on HF A100/H100/H200 class GPU:

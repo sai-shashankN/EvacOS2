@@ -35,7 +35,7 @@ gas:  105.27 min total, 126.3 sec/step, max_rounds_per_episode=10
 ```
 
 Trace summaries show flood episodes actually used `5` rounds, while gas usually
-used `8-10`. Before any 400/550/750-step run, use disaster-specific horizons:
+used `8-10`. Before any quality run, use disaster-specific horizons:
 
 - fire: `max_rounds_per_episode: 4`
 - flood: `max_rounds_per_episode: 5`
@@ -125,27 +125,23 @@ Pass criteria:
 
 After fire/flood/gas all pass 50-step canaries, run longer training.
 
-Recommended curriculum:
+Active submission plan:
 
 ```text
-150 easy
-150 medium
-100 hard
-= 400 steps per specialist
+fire:  400 steps
+flood: 500 steps
+gas:   700 steps
 ```
 
-Stretch curriculum if the curves are still improving strongly:
+Use these configs:
 
-```text
-200 easy
-200 medium
-150 hard
-= 550 steps per specialist
-```
+- fire: `training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml`
+- flood: `training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml`
+- gas: `training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml`
 
-Do **not** use `brutal` for the main hackathon story unless we have enough time
-and evidence. `brutal` raises expectations and can make the project look weaker
-if the results are noisy. Easy/medium/hard is still a credible curriculum story.
+Do **not** expand the active submission scope into extra scenario tiers before
+the deadline. The faster win is to make the default fire/flood/gas specialist
+suite look strong, clean, and well-evaluated.
 
 ### Long-Run Pass Criteria
 
@@ -157,7 +153,6 @@ For each specialist:
 - final and last-10 invalid action rate remain low
 - route/missing-target metrics stay healthy
 - held-out eval score improves vs baseline
-- no easier-tier forgetting if medium/hard are introduced
 
 ## Phase 4: 7B Orchestrator Smoke
 
@@ -167,7 +162,7 @@ Run the 7B orchestrator with frozen floor specialists progressively:
 
 1. Smoke with the 50-step fire specialist and matching flood/gas canary adapters.
 2. Repeat with 100-step or 150-step floor adapters if available.
-3. Repeat with final 400/550-step floor adapters.
+3. Repeat with final quality-run floor adapters.
 
 The point is to catch integration bugs early. The 7B does not need final floor
 models to prove that routing, frozen adapters, and orchestration training work.
@@ -199,7 +194,7 @@ The submission story should separate three claims:
 Avoid claiming theoretical convergence. Aim for:
 
 - clear reward improvement
-- bounded 0-100 eval improvement
+- 0-100 eval improvement
 - low invalid actions
 - readable plots
 - before/after examples
