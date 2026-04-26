@@ -25,6 +25,11 @@ DEFAULT_ASSIGNMENTS = {
     "flood": "HFALT2_TOKEN",
     "gas": "HFALT3_TOKEN",
 }
+DEFAULT_NAMESPACES = {
+    "fire": "hfnasjdjas",
+    "flood": "skjdfndajksndkjs",
+    "gas": "werfasfs",
+}
 
 
 def _load_env(path: Path) -> dict[str, str]:
@@ -105,8 +110,11 @@ def main() -> int:
                 raise SystemExit(f"Missing {token_key} in environment or {args.env_file}")
 
             api = HfApi(token=token)
-            who = api.whoami(cache=True)
-            namespace = who["name"]
+            namespace = (
+                env_values.get(f"{token_key}_NAMESPACE", "").strip()
+                or env_values.get(f"HFALT{['fire', 'flood', 'gas'].index(family) + 1}_NAMESPACE", "").strip()
+                or DEFAULT_NAMESPACES[family]
+            )
             artifact_repo = f"{namespace}/evacos2-h200-specialist-artifacts"
             labels = {
                 "project": "evacos2",
@@ -164,6 +172,7 @@ def main() -> int:
                 flavor=args.flavor,  # type: ignore[arg-type]
                 timeout=args.timeout,
                 labels=labels,
+                namespace=namespace,
                 token=token,
             )
             launched.append(
