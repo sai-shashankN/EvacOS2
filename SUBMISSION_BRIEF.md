@@ -2,6 +2,8 @@
 
 EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and multiple floor agents must coordinate people movement, exits, overrides, and hazard response inside a deterministic simulator.
 
+Evidence status: the tracked fixed-suite scorecard is baseline-only; the tracked learning evidence is the fire/flood/gas `3B` canary and training-signal artifact trail. A full trained held-out comparison is supported after restoring a selected LoRA adapter checkpoint.
+
 ## Why this is a strong submission
 
 - More demanding than single-turn tasks: decisions compound over repeated simulator rounds.
@@ -24,7 +26,35 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
   - `demo/results/plots/3b_specialist_valid_action_score_comparison.png`
   - `demo/results/submission_scorecard_baseline.md`
   - `demo/results/baseline_fixed_suite.csv`
-  - H200 / HF Jobs specialist quality-run artifacts once their checkpoints, logs, and held-out eval reports land
+  - Public canary adapters: `shashankN777/evacos2-7b-orchestrator-artifacts`
+
+## Public adapter paths
+
+The public artifact repo is historically named `evacos2-7b-orchestrator-artifacts`, but the visible submitted checkpoints are `3B` floor-specialist H200 canaries:
+
+- fire: `floor-specialists/fire/h200-canary3-10/checkpoints/latest`
+- flood: `floor-specialists/flood/h200-canary3-10/checkpoints/latest`
+- gas: `floor-specialists/gas/h200-canary-10/checkpoints/latest`
+
+Download example:
+
+```bash
+hf download shashankN777/evacos2-7b-orchestrator-artifacts \
+  --include "floor-specialists/fire/h200-canary3-10/**" \
+  --include "floor-specialists/flood/h200-canary3-10/**" \
+  --include "floor-specialists/gas/h200-canary-10/**" \
+  --local-dir outputs/hf_public_artifacts
+```
+
+Evaluation example:
+
+```bash
+python -m evaluation.demo_bundle \
+  --trained-checkpoint outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/checkpoints/latest \
+  --config outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/generated.remote-unsloth-3b-fire-floor-specialist-h200-canary3-10.yaml \
+  --training-metrics-path outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/remote-unsloth-3b-fire-floor-specialist-h200-canary3-10-metrics.csv \
+  --output-dir outputs/demo_bundle_fire_h200_canary
+```
 
 ## Core competitive claims
 
@@ -32,9 +62,9 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 - Multi-agent coordination, not single-policy one-shot response
 - Hierarchical model allocation: stronger orchestrator for long-horizon coordination, faster floor agents for local response
 - Specialist-ready disaster routing: fire/flood/gas lanes can be trained independently, including `3B` floor-only local-response specialists, and selected deterministically
-- Baseline-vs-trained evidence, not anecdotal samples only
+- Baseline scorecards plus canary learning evidence, not anecdotal samples only
 - Reward-hacking safeguards, not one loose scalar reward
-- Current quality-run plan uses H200-class HF Jobs; no flood H200 success is claimed until the artifact trail exists
+- Public H200 canary adapters are linked explicitly; no final quality-run success is claimed without checkpoint, log, and eval artifacts
 
 ## Recommended demo order
 

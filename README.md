@@ -28,6 +28,8 @@ pinned: false
 
 **Bottom line:** real simulator, real training loop, real evaluation pipeline. This is not a prompt wrapper or a config-only stub.
 
+**Evidence status:** the tracked fixed-suite scorecard is baseline-only; the tracked learning evidence is the fire/flood/gas `3B` canary and training-signal artifact trail. A full trained held-out comparison is supported by the evaluator once a selected LoRA adapter checkpoint is restored.
+
 ## Validated Evidence
 
 | Component | Configuration | Status | Evidence |
@@ -40,7 +42,7 @@ pinned: false
 | Split-role disaster specialist lanes | `7B/3B` configs scoped to `fire`, `flood`, or `gas` | Implemented / ready to run | [training/config.remote-unsloth-7b3b-fire-specialist.yaml](training/config.remote-unsloth-7b3b-fire-specialist.yaml), [training/config.remote-unsloth-7b3b-flood-specialist.yaml](training/config.remote-unsloth-7b3b-flood-specialist.yaml), [training/config.remote-unsloth-7b3b-gas-specialist.yaml](training/config.remote-unsloth-7b3b-gas-specialist.yaml) |
 | Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / canary and quality-run configs ready | [training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
 | Specialist routing | Deterministic single-disaster router with generalist fallback for mixed/cascade scenarios | Implemented | [training/scope_router.py](training/scope_router.py) |
-| H200 / HF Jobs quality specialist runs | Focused fire/flood/gas floor-specialist configs sized by observed runtime: `400/500/700` steps | Active quality-run lane; completion claims land only after checkpoints and eval artifacts are captured | [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
+| H200 / HF Jobs specialist artifacts | Public fire/flood/gas `3B` floor-specialist canary adapters plus logs and metrics | Public canary artifact trail is linked below; longer quality-run configs are checked in but not claimed as final results | [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics, with `metrics_window.csv`, `metrics_to_date.csv`, and `metrics_summary.json` saved beside each checkpoint | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
@@ -134,7 +136,7 @@ The validated stronger configurations each completed:
 
 The split-role lane (`7B` orchestrator / `3B` floor agents) emits separate `orchestrator_loss` and `floor_agent_loss` diagnostics, confirming that the training stack tracks each role independently rather than only globally.
 
-These smoke runs prove computational fit and end-to-end training integrity. Current submission-quality work is positioned on H200-class HF Jobs runs for stronger fire/flood/gas specialist checkpoints, and held-out trained-vs-baseline claims are added only from selected checkpoints, logs, and eval artifacts.
+These smoke runs prove computational fit and end-to-end training integrity. The public submission artifact trail includes H200 canary adapters, logs, and metrics for the floor-specialist lanes; held-out trained-vs-baseline claims should only be made from selected checkpoints, logs, and eval artifacts.
 
 ## Submission Artifacts
 
@@ -142,12 +144,48 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 
 | Artifact | Current status | What will land here |
 |---|---|---|
-| **H200 / HF Jobs specialist quality lane** | Active run lane | Fire/flood/gas quality configs are staged for current quality runs; this README does not claim a completed flood H200 result until a checkpoint, logs, and held-out eval artifact are captured |
+| **H200 / HF Jobs specialist artifacts** | Public canary trail | Fire/flood/gas H200 canary adapters, logs, and metrics are hosted on Hugging Face; longer quality-run configs are checked in but not claimed as final results |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
 | **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **Walkthrough video** | External link slot | Link the final public video in this row and in the submission form; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
 | **Hugging Face blog / write-up** | Drafted | Root write-up lives in [Blog.MD](Blog.MD) and is mirrored into the Hugging Face Space |
+
+## Public Adapter Artifacts
+
+The public adapter repository is [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). Despite the historical repository name, the visible submitted artifacts here are `3B` floor-specialist H200 canaries, not a final `7B` orchestrator quality checkpoint.
+
+| Specialist | Public checkpoint path | Run type |
+|---|---|---|
+| Fire floor specialist | `floor-specialists/fire/h200-canary3-10/checkpoints/latest` | `10`-step H200 canary |
+| Flood floor specialist | `floor-specialists/flood/h200-canary3-10/checkpoints/latest` | `10`-step H200 canary |
+| Gas floor specialist | `floor-specialists/gas/h200-canary-10/checkpoints/latest` | `10`-step H200 canary |
+
+Download the public canary artifacts with:
+
+```bash
+hf download shashankN777/evacos2-7b-orchestrator-artifacts \
+  --include "floor-specialists/fire/h200-canary3-10/**" \
+  --include "floor-specialists/flood/h200-canary3-10/**" \
+  --include "floor-specialists/gas/h200-canary-10/**" \
+  --local-dir outputs/hf_public_artifacts
+```
+
+Example trained-checkpoint evaluation command after download:
+
+```bash
+CHECKPOINT_DIR=outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/checkpoints/latest
+CONFIG_PATH=outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/generated.remote-unsloth-3b-fire-floor-specialist-h200-canary3-10.yaml
+METRICS_PATH=outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/remote-unsloth-3b-fire-floor-specialist-h200-canary3-10-metrics.csv
+
+python -m evaluation.demo_bundle \
+  --trained-checkpoint "$CHECKPOINT_DIR" \
+  --config "$CONFIG_PATH" \
+  --training-metrics-path "$METRICS_PATH" \
+  --output-dir outputs/demo_bundle_fire_h200_canary
+```
+
+For the checked-in baseline-only fixed suite, use [demo/results/submission_scorecard_baseline.md](demo/results/submission_scorecard_baseline.md). For the tracked learning-signal summary, use [demo/results/specialist_canary50_report.md](demo/results/specialist_canary50_report.md) and [demo/results/3b_specialist_canary50_scores.csv](demo/results/3b_specialist_canary50_scores.csv).
 
 ## 3B Specialist Training Evidence
 
