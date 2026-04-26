@@ -114,6 +114,8 @@ EvacOS2 supports two complementary training stories:
 
 This routing is meant to model realistic incident classification, not hidden omniscience. In a real deployment, fire mode can be raised by smoke/heat/fire-alarm signals, flood mode by water or moisture sensors plus facility reports, and gas mode by gas/CO/air-quality detectors or manual dispatch metadata. EvacOS2 represents that already-known incident context as scenario metadata, then uses it to select the matching frozen floor specialist while the `7B` orchestrator focuses on building-level coordination.
 
+The `7B` orchestrator is included as a proof of concept for a practical multi-agent workflow: it does not need to slow down every local floor decision. Fast `3B` specialists handle routine floor-level routing, while the larger coordinator can be reserved for global priorities, cross-floor conflicts, stalled evacuations, sensor disagreement, and outlier scenarios that do not fit a single specialist lane. This creates a natural future path toward self-healing coordination: specialist fallback, anomaly escalation, policy repair suggestions, and human-in-the-loop override review can sit above the fast local responders without replacing them.
+
 ## What Smoke Testing Showed
 
 The validated stronger configurations each completed:
@@ -135,10 +137,28 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 |---|---|---|
 | **A100 training signal** | Tracked | [run summary](demo/results/a100_7b3b_run_summary.md), [training-signal CSV](demo/results/a100_7b3b_training_signal.csv), [reward plot](demo/results/plots/a100_7b3b_training_signal.png) |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
-| **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md) covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
+| **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **YouTube walkthrough video** | Placeholder | Add final video URL here after recording; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
-| **Hugging Face blog / write-up** | Drafted | Local draft lives in [demo/hf_blog.md](demo/hf_blog.md); replace with the published HF post URL before final submission |
+| **Hugging Face blog / write-up** | Drafted | Root write-up lives in [BLOG.md](BLOG.md) and is mirrored into the Hugging Face Space |
+
+## 3B Specialist Training Evidence
+
+The cleanest completed specialist evidence is the `50`-step fire/flood/gas floor-agent canary suite. These are not final convergence claims; they are checkpointed proof that the `3B` local responders receive valid observations, produce valid route actions, preserve target IDs, and receive non-zero GRPO contrast.
+
+| Specialist | Start valid-action score | Trained checkpoint score | Delta | Last-10 invalid rate | Last-10 GRPO reward std |
+|---|---:|---:|---:|---:|---:|
+| Fire `3B` | `83.65%` | `96.54%` | `+12.89 pp` | `3.46%` | `0.7168` |
+| Flood `3B` | `88.46%` | `97.54%` | `+9.08 pp` | `2.46%` | `1.3848` |
+| Gas `3B` | `89.62%` | `97.13%` | `+7.51 pp` | `2.87%` | `0.9769` |
+
+`valid-action score = 100 * (1 - invalid_action_rate)`. The start score is step `0`; the trained checkpoint score is the last-10 average ending at checkpoint `ckpt_49`.
+
+![3B specialist valid-action score comparison](demo/results/plots/3b_specialist_valid_action_score_comparison.png)
+
+![3B specialist invalid action rate across checkpoints](demo/results/plots/3b_specialist_invalid_action_checkpoints.png)
+
+![3B specialist raw reward across checkpoints](demo/results/plots/3b_specialist_raw_reward_checkpoints.png)
 
 ## Agent Behavior
 

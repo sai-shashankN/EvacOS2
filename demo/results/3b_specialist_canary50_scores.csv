@@ -1,0 +1,4 @@
+disaster,baseline_step,trained_checkpoint_step,baseline_invalid_action_rate,trained_last10_invalid_action_rate,invalid_delta,baseline_valid_action_score_pct,trained_last10_valid_action_score_pct,valid_action_score_delta_pct,baseline_raw_reward_floor,trained_last10_raw_reward_floor,baseline_route_action_rate,trained_last10_route_action_rate,baseline_missing_target_rate,trained_last10_missing_target_rate,trained_last10_group_reward_std,trained_last10_advantage_std
+fire,0,49,0.1635,0.03462,-0.12888,83.65,96.538,12.888,8.54,8.01,1.0,1.0,0.0,0.0,0.7168115392424618,1.0050378084182738
+flood,0,49,0.1154,0.02463,-0.09077,88.46000000000001,97.53699999999999,9.076999999999991,9.18,7.01,1.0,1.0,0.0,0.0,1.3848193325944376,1.0040241718292235
+gas,0,49,0.1038,0.028710000000000003,-0.07509,89.62,97.129,7.508999999999999,33.82,28.412,1.0,1.0,0.0,0.0,0.9768524086237302,1.0020787477493287
