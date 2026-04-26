@@ -147,7 +147,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 | **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **Walkthrough video** | External link slot | Link the final public video in this row and in the submission form; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
-| **Hugging Face blog / write-up** | Drafted | Root write-up lives in [BLOG.md](BLOG.md) and is mirrored into the Hugging Face Space |
+| **Hugging Face blog / write-up** | Drafted | Root write-up lives in [Blog.MD](Blog.MD) and is mirrored into the Hugging Face Space |
 
 ## 3B Specialist Training Evidence
 
