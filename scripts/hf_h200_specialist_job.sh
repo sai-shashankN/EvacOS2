@@ -7,9 +7,11 @@ export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME}"
 export WANDB_DISABLED="${WANDB_DISABLED:-true}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 export EVACOS_LOGPROB_MICROBATCH_SIZE="${EVACOS_LOGPROB_MICROBATCH_SIZE:-8}"
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}"
 export LD_LIBRARY_PATH="/usr/local/nvidia/lib64:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
+if [[ "${CUDA_VISIBLE_DEVICES:-}" == "-1" || "${CUDA_VISIBLE_DEVICES:-}" == "none" ]]; then
+  unset CUDA_VISIBLE_DEVICES
+fi
 
 DISASTER_FAMILY="${DISASTER_FAMILY:-fire}"
 case "$DISASTER_FAMILY" in
@@ -64,9 +66,6 @@ repair_torch_cuda_if_needed() {
   if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; then
     echo "No GPU visible to nvidia-smi; cannot repair PyTorch CUDA from inside the job." >&2
     return 1
-  fi
-  if [[ "${CUDA_VISIBLE_DEVICES:-}" == "-1" || "${CUDA_VISIBLE_DEVICES:-}" == "none" ]]; then
-    unset CUDA_VISIBLE_DEVICES
   fi
   python - <<'PY' && return 0
 import os
@@ -123,7 +122,11 @@ print(
     flush=True,
 )
 if not torch.cuda.is_available():
-    raise SystemExit("CUDA still unavailable after torch cu126 reinstall")
+    raise SystemExit(
+        "CUDA still unavailable after torch cu126 reinstall; "
+        "if logs contain cudaGetDeviceCount Error 802 this is a host fabric/runtime issue, "
+        "not a Python dependency issue. Retry a fresh HF allocation."
+    )
 print("gpu", torch.cuda.get_device_name(0), flush=True)
 PY
 }
