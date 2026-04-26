@@ -43,7 +43,7 @@ reward:
   clip_normalized_to: 1.0
 eval:
   every_steps: 20
-  tiers: ["easy", "medium"]
+  tiers: ["easy"]
   seeds: [42, 123]
 checkpoint:
   every_steps: 10

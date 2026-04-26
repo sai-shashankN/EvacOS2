@@ -20,7 +20,7 @@ from typing import Any
 
 from training.compat import patch_transformers_cache_exports
 from training.config_schema import TrainingConfig
-from training.metrics import append_training_metrics_row
+from training.metrics import append_training_metrics_row, write_trace_row
 
 _TRAINER_DIAGNOSTIC_KEYS: tuple[str, ...] = (
     "loss",
@@ -438,6 +438,58 @@ def _resolved_model_name_tag(config: TrainingConfig) -> str:
     )
 
 
+def _set_policy_sampling_temperature(policy: Any, temperature: float) -> list[tuple[Any, str, Any]]:
+    """Set nested policy generation to a temperature and return restore tokens."""
+
+    restore_tokens: list[tuple[Any, str, Any]] = []
+    seen: set[int] = set()
+
+    def _visit(candidate: Any) -> None:
+        if candidate is None:
+            return
+        candidate_id = id(candidate)
+        if candidate_id in seen:
+            return
+        seen.add(candidate_id)
+
+        if hasattr(candidate, "_temperature"):
+            restore_tokens.append((candidate, "_temperature", getattr(candidate, "_temperature")))
+            setattr(candidate, "_temperature", float(temperature))
+
+        gen_kwargs = getattr(candidate, "_gen_kwargs", None)
+        if isinstance(gen_kwargs, dict):
+            restore_tokens.append((gen_kwargs, "temperature", gen_kwargs.get("temperature")))
+            restore_tokens.append((gen_kwargs, "do_sample", gen_kwargs.get("do_sample")))
+            gen_kwargs["temperature"] = float(temperature)
+            gen_kwargs["do_sample"] = float(temperature) > 0.0
+
+        role_policies = getattr(candidate, "_role_policies", None)
+        if isinstance(role_policies, dict):
+            for child in role_policies.values():
+                _visit(child)
+
+        specialist_policies = getattr(candidate, "_specialist_policies", None)
+        if isinstance(specialist_policies, dict):
+            for child in specialist_policies.values():
+                _visit(child)
+
+        _visit(getattr(candidate, "_generalist_policy", None))
+
+    _visit(policy)
+    return restore_tokens
+
+
+def _restore_policy_sampling_temperature(tokens: list[tuple[Any, str, Any]]) -> None:
+    for target, key, value in reversed(tokens):
+        if isinstance(target, dict):
+            if value is None:
+                target.pop(key, None)
+            else:
+                target[key] = value
+        else:
+            setattr(target, key, value)
+
+
 def _merge_trainer_diagnostics_into_metrics(
     metrics_row: dict[str, Any],
     trainer_diagnostics: dict[str, Any],
@@ -582,6 +634,32 @@ class MultiAgentGRPOTrainer:
     # Tokenisation helpers
     # ------------------------------------------------------------------
 
+    def _effective_max_length(self) -> int:
+        """Return the usable sequence length for trainer forward passes.
+
+        Some Unsloth wrappers keep ``tokenizer.model_max_length`` very large
+        even when the loaded model was initialized with a shorter
+        ``max_seq_length``.  The trainer must respect the model-side limit or
+        labels can become wider than logits during log-prob gathering.
+        """
+
+        candidates: list[int] = []
+        tokenizer_limit = getattr(self.tokenizer, "model_max_length", None)
+        if isinstance(tokenizer_limit, int) and 0 < tokenizer_limit < 1_000_000_000:
+            candidates.append(tokenizer_limit)
+        else:
+            candidates.append(4096)
+
+        for owner in (self.model, getattr(self.model, "config", None)):
+            if owner is None:
+                continue
+            for attr in ("max_seq_length", "max_position_embeddings", "seq_length"):
+                value = getattr(owner, attr, None)
+                if isinstance(value, int) and value > 0:
+                    candidates.append(value)
+
+        return max(2, min(candidates))
+
     def _tokenize_batch(
         self,
         prompts: list[Any],
@@ -617,7 +695,7 @@ class MultiAgentGRPOTrainer:
             ]
 
             has_direct_completion_ids = any(bool(ids) for ids in completion_token_ids)
-            max_len = getattr(self.tokenizer, "model_max_length", 4096)
+            max_len = self._effective_max_length()
 
             if not has_direct_completion_ids:
                 if not self._warned_missing_completion_token_ids:
@@ -712,8 +790,22 @@ class MultiAgentGRPOTrainer:
                         self.tokenizer(completion, add_special_tokens=False)["input_ids"]
                     )
 
-                full_ids = (prompt_ids + completion_ids)[:max_len]
-                truncated_prompt_len = min(len(prompt_ids), max_len)
+                if len(prompt_ids) + len(completion_ids) > max_len:
+                    # Preserve the completion/reward-bearing action and keep
+                    # as much recent prompt context as fits.  Right truncation
+                    # would drop the action entirely on long observations.
+                    if len(completion_ids) >= max_len:
+                        prompt_tail = prompt_ids[-1:] if prompt_ids else []
+                        completion_budget = max_len - len(prompt_tail)
+                        completion_ids = completion_ids[-completion_budget:]
+                    else:
+                        prompt_budget = max_len - len(completion_ids)
+                        prompt_tail = prompt_ids[-prompt_budget:]
+                    full_ids = prompt_tail + completion_ids
+                    truncated_prompt_len = len(prompt_tail)
+                else:
+                    full_ids = prompt_ids + completion_ids
+                    truncated_prompt_len = len(prompt_ids)
                 prompt_lengths.append(truncated_prompt_len)
                 if truncated_prompt_len >= len(full_ids):
                     logger.warning(
@@ -1377,6 +1469,10 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     def _is_valid_action(sample: Any) -> bool:
         return "fallback_reason" not in _parsed_action(sample)
 
+    def _is_metric_action_sample(sample: Any) -> bool:
+        parsed = _parsed_action(sample)
+        return bool(parsed.get("selected_for_execution", True))
+
     def _is_wait_action(sample: Any) -> bool:
         return _action_type(sample) == "wait"
 
@@ -1399,31 +1495,39 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
             return "room"
         return "missing"
 
-    floor_samples = [sample for sample in samples if getattr(sample, "role", "") == "floor_agent"]
+    metric_samples = [sample for sample in samples if _is_metric_action_sample(sample)]
+    valid_metric_samples = [sample for sample in metric_samples if _is_valid_action(sample)]
+    floor_samples = [sample for sample in valid_metric_samples if getattr(sample, "role", "") == "floor_agent"]
     orchestrator_samples = [
-        sample for sample in samples if getattr(sample, "role", "") == "orchestrator"
+        sample for sample in valid_metric_samples if getattr(sample, "role", "") == "orchestrator"
     ]
-    wait_count = sum(1 for sample in samples if _is_wait_action(sample))
+    wait_count = sum(1 for sample in valid_metric_samples if _is_wait_action(sample))
     floor_wait_count = sum(1 for sample in floor_samples if _is_wait_action(sample))
     orchestrator_wait_count = sum(
         1 for sample in orchestrator_samples if _is_wait_action(sample)
     )
-    empty_args_count = sum(1 for sample in samples if _has_empty_arguments(sample))
+    empty_args_count = sum(1 for sample in valid_metric_samples if _has_empty_arguments(sample))
     floor_active_count = sum(1 for sample in floor_samples if not _is_wait_action(sample))
     active_empty_args_count = sum(
         1
-        for sample in samples
+        for sample in valid_metric_samples
         if not _is_wait_action(sample) and _has_empty_arguments(sample)
     )
     valid_but_hollow_count = sum(
         1
-        for sample in samples
+        for sample in valid_metric_samples
         if _is_valid_action(sample)
         and _is_wait_action(sample)
         and _has_empty_arguments(sample)
     )
     floor_route_samples = [sample for sample in floor_samples if _is_floor_route(sample)]
     floor_route_count = len(floor_route_samples)
+    floor_scout_count = sum(
+        1 for sample in floor_samples if _action_type(sample) == "scout"
+    )
+    floor_evacuate_count = sum(
+        1 for sample in floor_samples if _action_type(sample) == "evacuate_floor_priority"
+    )
     floor_route_exit_count = sum(1 for sample in floor_route_samples if _route_target_kind(sample) == "exit")
     floor_route_stairwell_count = sum(1 for sample in floor_route_samples if _route_target_kind(sample) == "stairwell")
     floor_route_room_count = sum(1 for sample in floor_route_samples if _route_target_kind(sample) == "room")
@@ -1435,21 +1539,29 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     )
 
     return {
-        "wait_rate": round(wait_count / max(len(samples), 1), 4),
+        "wait_rate": round(wait_count / max(len(valid_metric_samples), 1), 4),
         "floor_agent_wait_rate": round(floor_wait_count / max(len(floor_samples), 1), 4),
         "orchestrator_wait_rate": round(
             orchestrator_wait_count / max(len(orchestrator_samples), 1), 4
         ),
-        "empty_args_rate": round(empty_args_count / max(len(samples), 1), 4),
+        "empty_args_rate": round(empty_args_count / max(len(valid_metric_samples), 1), 4),
         "floor_agent_active_action_rate": round(
             floor_active_count / max(len(floor_samples), 1), 4
         ),
-        "active_empty_args_rate": round(active_empty_args_count / max(len(samples), 1), 4),
+        "active_empty_args_rate": round(active_empty_args_count / max(len(valid_metric_samples), 1), 4),
         "valid_but_hollow_action_rate": round(
-            valid_but_hollow_count / max(len(samples), 1),
+            valid_but_hollow_count / max(len(valid_metric_samples), 1),
+            4,
+        ),
+        "floor_scout_action_rate": round(
+            floor_scout_count / max(len(floor_samples), 1),
             4,
         ),
         "floor_route_action_rate": round(floor_route_count / max(len(floor_samples), 1), 4),
+        "floor_evacuate_action_rate": round(
+            floor_evacuate_count / max(len(floor_samples), 1),
+            4,
+        ),
         "floor_route_exit_rate": round(floor_route_exit_count / max(floor_route_count, 1), 4),
         "floor_route_stairwell_rate": round(
             floor_route_stairwell_count / max(floor_route_count, 1),
@@ -1476,6 +1588,66 @@ def _population_std(values: list[float]) -> float:
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / len(values)
     return variance ** 0.5
+
+
+def _as_float(row: dict[str, Any], key: str, default: float = 0.0) -> float:
+    value = row.get(key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _training_watchdog_reason(
+    *,
+    step: int,
+    metrics_row: dict[str, Any],
+    config: TrainingConfig,
+    zero_signal_streak: int,
+) -> str | None:
+    """Return a stop reason when a paid run is no longer producing signal."""
+    watchdog = config.watchdog
+    if not watchdog.enabled or step + 1 <= watchdog.warmup_steps:
+        return None
+
+    if zero_signal_streak >= watchdog.zero_signal_window:
+        return (
+            "zero_grpo_signal:"
+            f"advantage_std={_as_float(metrics_row, 'advantage_std'):.6g},"
+            f"group_raw_reward_std_mean={_as_float(metrics_row, 'group_raw_reward_std_mean'):.6g},"
+            f"policy_loss={_as_float(metrics_row, 'policy_loss'):.6g},"
+            f"streak={zero_signal_streak}"
+        )
+
+    hollow_rate = _as_float(metrics_row, "valid_but_hollow_action_rate")
+    if hollow_rate >= watchdog.max_valid_but_hollow_action_rate:
+        return (
+            "valid_but_hollow_dominance:"
+            f"valid_but_hollow_action_rate={hollow_rate:.4f}"
+        )
+
+    scout_rate = _as_float(metrics_row, "floor_scout_action_rate")
+    route_rate = _as_float(metrics_row, "floor_route_action_rate")
+    if (
+        scout_rate >= watchdog.max_floor_scout_action_rate
+        and route_rate < watchdog.min_floor_route_action_rate
+    ):
+        return (
+            "scout_dominance:"
+            f"floor_scout_action_rate={scout_rate:.4f},"
+            f"floor_route_action_rate={route_rate:.4f}"
+        )
+
+    if step + 1 >= watchdog.route_required_after_steps:
+        evacuate_rate = _as_float(metrics_row, "floor_evacuate_action_rate")
+        if route_rate < watchdog.min_floor_route_action_rate and evacuate_rate <= 0.0:
+            return (
+                "route_starvation:"
+                f"floor_route_action_rate={route_rate:.4f},"
+                f"floor_evacuate_action_rate={evacuate_rate:.4f}"
+            )
+
+    return None
 
 
 def _copy_adapter_tree(source_dir: Path, target_dir: Path) -> None:
@@ -1647,6 +1819,8 @@ def _build_policy(
             )
 
     backend = config.backend
+    sampling_temperature = float(config.rollout.sampling_temperature)
+    do_sample = sampling_temperature > 0.0
     if backend == "unsloth":
         from training.policy_adapter import (
             RoleRoutedPolicy,
@@ -1671,7 +1845,7 @@ def _build_policy(
                     max_prompt_tokens=config.model.max_prompt_tokens,
                     use_vllm=config.rollout.use_vllm,
                     max_new_tokens=config.model.max_completion_tokens,
-                    temperature=0.0,
+                    temperature=sampling_temperature,
                     seed=config.seed.training_rng,
                 )
             def _build_unsloth_floor_policy(adapter_path: str | None) -> Any:
@@ -1687,7 +1861,7 @@ def _build_policy(
                     max_prompt_tokens=config.model.max_prompt_tokens,
                     use_vllm=config.rollout.use_vllm,
                     max_new_tokens=config.model.max_completion_tokens,
-                    temperature=0.0,
+                    temperature=sampling_temperature,
                     seed=config.seed.training_rng,
                 )
 
@@ -1724,7 +1898,7 @@ def _build_policy(
             max_prompt_tokens=config.model.max_prompt_tokens,
             use_vllm=config.rollout.use_vllm,
             max_new_tokens=config.model.max_completion_tokens,
-            temperature=0.0,
+            temperature=sampling_temperature,
             seed=config.seed.training_rng,
         )
     if backend == "hf":
@@ -1778,7 +1952,8 @@ def _build_policy(
                     torch_dtype=config.model.dtype,
                     max_prompt_tokens=config.model.max_prompt_tokens,
                     max_new_tokens=config.model.max_completion_tokens,
-                    do_sample=False,
+                    do_sample=do_sample,
+                    temperature=sampling_temperature,
                 )
             def _build_hf_floor_policy(
                 adapter_path: str | None,
@@ -1791,7 +1966,8 @@ def _build_policy(
                     torch_dtype=config.model.dtype,
                     max_prompt_tokens=config.model.max_prompt_tokens,
                     max_new_tokens=config.model.max_completion_tokens,
-                    do_sample=False,
+                    do_sample=do_sample,
+                    temperature=sampling_temperature,
                 )
 
             if floor_specialist_adapter_paths:
@@ -1823,7 +1999,8 @@ def _build_policy(
             torch_dtype=config.model.dtype,
             max_prompt_tokens=config.model.max_prompt_tokens,
             max_new_tokens=config.model.max_completion_tokens,
-            do_sample=False,
+            do_sample=do_sample,
+            temperature=sampling_temperature,
         )
     raise ValueError(f"Unknown training.backend: {backend!r}")
 
@@ -1843,31 +2020,35 @@ def _run_eval(
     eval_results: list[Any] = []
     family_count = len(disaster_families)
     reward_config = config.reward.model_dump(mode="python")
-    for tier in config.eval.tiers:
-        fixed_curriculum = _FixedTierCurriculum(tier)
-        seeds: list[int] = []
-        for seed in config.eval.seeds:
-            seeds.extend([seed] * family_count)
-        seed_iter = iter(seeds)
-        eval_results.extend(
-            collect_batch(
-                env,
-                policy,
-                fixed_curriculum,
-                num_episodes=len(seeds),
-                seed_generator=lambda: next(seed_iter),
-                disaster_families=disaster_families,
-                max_rounds=config.rollout.max_rounds_per_episode,
-                checkpoint_tag=checkpoint_tag,
-                model_name=model_name,
-                is_eval=True,
-                normalizer=normalizer,
-                jsonl_dir=jsonl_dir,
-                seed_collision_retry_limit=config.rollout.seed_retry_limit,
-                rationale_mode=config.reward.rationale_scaling,
-                reward_config=reward_config,
+    restore_tokens = _set_policy_sampling_temperature(policy, 0.0)
+    try:
+        for tier in config.eval.tiers:
+            fixed_curriculum = _FixedTierCurriculum(tier)
+            seeds: list[int] = []
+            for seed in config.eval.seeds:
+                seeds.extend([seed] * family_count)
+            seed_iter = iter(seeds)
+            eval_results.extend(
+                collect_batch(
+                    env,
+                    policy,
+                    fixed_curriculum,
+                    num_episodes=len(seeds),
+                    seed_generator=lambda: next(seed_iter),
+                    disaster_families=disaster_families,
+                    max_rounds=config.rollout.max_rounds_per_episode,
+                    checkpoint_tag=checkpoint_tag,
+                    model_name=model_name,
+                    is_eval=True,
+                    normalizer=normalizer,
+                    jsonl_dir=jsonl_dir,
+                    seed_collision_retry_limit=config.rollout.seed_retry_limit,
+                    rationale_mode=config.reward.rationale_scaling,
+                    reward_config=reward_config,
+                )
             )
-        )
+    finally:
+        _restore_policy_sampling_temperature(restore_tokens)
     return eval_results
 
 
@@ -2007,6 +2188,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
     stop_requested = False
     last_completed_step = start_step - 1
+    zero_signal_streak = 0
 
     def _signal_handler(signum: int, frame: Any) -> None:
         del signum, frame
@@ -2123,6 +2305,8 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 seed_collision_retry_limit=config.rollout.seed_retry_limit,
                 rationale_mode=config.reward.rationale_scaling,
                 reward_config=reward_config,
+                candidates_per_floor_prompt=config.rollout.candidates_per_floor_prompt,
+                include_oracle_floor_candidate=config.rollout.include_oracle_floor_candidate,
             )
 
             grouped_inputs = _group_for_grpo(results)
@@ -2148,7 +2332,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                         all_norm_floor.append(value)
                 for sample in result.samples:
                     total_samples += 1
-                    if sample.parsed_action.get("fallback_reason") == "parse_error":
+                    if sample.parsed_action.get("fallback_reason"):
                         invalid_count += 1
 
             rollout_metrics = _compute_rollout_metrics(results)
@@ -2162,6 +2346,9 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 "disaster_families": ";".join(item.value for item in disaster_families),
                 "episodes_per_step": config.rollout.episodes_per_step,
                 "max_rounds_per_episode": config.rollout.max_rounds_per_episode,
+                "candidates_per_floor_prompt": config.rollout.candidates_per_floor_prompt,
+                "include_oracle_floor_candidate": config.rollout.include_oracle_floor_candidate,
+                "sampling_temperature": config.rollout.sampling_temperature,
                 "mean_raw_reward_orch": round(sum(all_raw_orch) / max(len(all_raw_orch), 1), 4),
                 "mean_raw_reward_floor": round(sum(all_raw_floor) / max(len(all_raw_floor), 1), 4),
                 "raw_reward_std_orch": round(_population_std(all_raw_orch), 4),
@@ -2175,9 +2362,70 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 "episodes_seen": (step + 1) * config.rollout.episodes_per_step,
             }
             _merge_trainer_diagnostics_into_metrics(metrics_row, trainer_diagnostics)
+
+            watchdog = config.watchdog
+            if watchdog.enabled and step + 1 > watchdog.warmup_steps:
+                no_advantage = (
+                    _as_float(metrics_row, "advantage_std")
+                    <= watchdog.min_advantage_std
+                )
+                no_reward_contrast = (
+                    _as_float(metrics_row, "group_raw_reward_std_mean")
+                    <= watchdog.min_group_raw_reward_std_mean
+                )
+                no_policy_update = abs(_as_float(metrics_row, "policy_loss")) <= 1e-12
+                zero_signal_streak = (
+                    zero_signal_streak + 1
+                    if no_advantage and no_reward_contrast and no_policy_update
+                    else 0
+                )
+            else:
+                zero_signal_streak = 0
+
+            watchdog_reason = _training_watchdog_reason(
+                step=step,
+                metrics_row=metrics_row,
+                config=config,
+                zero_signal_streak=zero_signal_streak,
+            )
+            metrics_row["watchdog_status"] = (
+                "triggered" if watchdog_reason else "healthy"
+            )
+            metrics_row["watchdog_reason"] = watchdog_reason or ""
             append_training_metrics_row(metrics_path, metrics_row)
             if wandb_run is not None:
                 wandb_run.log(metrics_row, step=step)
+
+            last_completed_step = step
+
+            if watchdog_reason:
+                write_trace_row(
+                    jsonl_dir / "training_watchdog.jsonl",
+                    {
+                        "step": step,
+                        "run_name": ckpt_root.name,
+                        "status": "triggered",
+                        "reason": watchdog_reason,
+                        "zero_signal_streak": zero_signal_streak,
+                        "metrics": {
+                            key: metrics_row.get(key)
+                            for key in (
+                                "policy_loss",
+                                "advantage_std",
+                                "group_raw_reward_std_mean",
+                                "valid_but_hollow_action_rate",
+                                "floor_scout_action_rate",
+                                "floor_route_action_rate",
+                                "floor_evacuate_action_rate",
+                            )
+                        },
+                    },
+                )
+                if config.watchdog.abort_on_trigger:
+                    raise RuntimeError(
+                        "Training watchdog stopped this run before more GPU "
+                        f"time was wasted: {watchdog_reason}"
+                    )
 
             if (step + 1) % config.eval.every_steps == 0:
                 _run_eval(
@@ -2194,8 +2442,6 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
             if (step + 1) % config.checkpoint.every_steps == 0:
                 _write_checkpoint(step)
-
-            last_completed_step = step
 
             if stop_requested:
                 break

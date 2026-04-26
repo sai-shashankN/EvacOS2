@@ -58,6 +58,9 @@ _METRICS_COLUMNS: list[str] = [
     "disaster_families",
     "episodes_per_step",
     "max_rounds_per_episode",
+    "candidates_per_floor_prompt",
+    "include_oracle_floor_candidate",
+    "sampling_temperature",
     "mean_raw_reward_orch",
     "mean_raw_reward_floor",
     "raw_reward_std_orch",
@@ -74,7 +77,9 @@ _METRICS_COLUMNS: list[str] = [
     "floor_agent_active_action_rate",
     "active_empty_args_rate",
     "valid_but_hollow_action_rate",
+    "floor_scout_action_rate",
     "floor_route_action_rate",
+    "floor_evacuate_action_rate",
     "floor_route_exit_rate",
     "floor_route_stairwell_rate",
     "floor_route_room_rate",
@@ -84,6 +89,8 @@ _METRICS_COLUMNS: list[str] = [
     "override_win_rate",
     "rationale_bonus_mean",
     "episodes_seen",
+    "watchdog_status",
+    "watchdog_reason",
     # Trainer diagnostics (merged from MultiAgentGRPOTrainer.step return)
     *_TRAINER_DIAGNOSTIC_COLUMNS,
     # Split-role trainer diagnostics (kept alongside aggregate fields).

@@ -26,12 +26,12 @@ from evacos_ma.schemas.multi_agent import (
     OrchestratorObservationMA,
     StepResultMA,
     StepResultInfo,
-    Tier,
 )
 from evacos_ma.schemas.rewards import RewardBreakdown, RoleReward, RewardsByRole
 
 router = APIRouter(prefix="/openenv", tags=["openenv"])
 _OPENENV_ENV = EvacEnvironment()
+_PUBLIC_TASK_IDS = frozenset({"task_1_fire_easy", "task_lh_fire_easy"})
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +110,15 @@ def _http_exception_from_env_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
+def _easy_only_public_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Expose the current proof-lane contract while preserving legacy internals."""
+    schema = model.model_json_schema()
+    tier_def = schema.get("$defs", {}).get("Tier")
+    if isinstance(tier_def, dict):
+        tier_def["enum"] = ["easy"]
+    return schema
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
@@ -122,10 +131,10 @@ def health() -> HealthResponseMA:
 @router.get("/schema", response_model=SchemaResponseMA)
 def schema() -> SchemaResponseMA:
     return SchemaResponseMA(
-        action_bundle=ActionBundleMA.model_json_schema(),
-        observation_floor=FloorAgentObservationMA.model_json_schema(),
-        observation_orchestrator=OrchestratorObservationMA.model_json_schema(),
-        step_result=StepResultMA.model_json_schema(),
+        action_bundle=_easy_only_public_schema(ActionBundleMA),
+        observation_floor=_easy_only_public_schema(FloorAgentObservationMA),
+        observation_orchestrator=_easy_only_public_schema(OrchestratorObservationMA),
+        step_result=_easy_only_public_schema(StepResultMA),
     )
 
 
@@ -145,6 +154,8 @@ def reset(req: ResetRequestMA = Body(default=None)) -> OpenEnvResetResponse:
     if req is None:
         req = ResetRequestMA()
     try:
+        if req.tier != "easy":
+            raise ValueError("The public OpenEnv proof lane supports only tier='easy'.")
         if req.disaster_family is not None:
             observations = _OPENENV_ENV.reset_multi_agent(
                 task_id=req.task_id,
@@ -154,11 +165,16 @@ def reset(req: ResetRequestMA = Body(default=None)) -> OpenEnvResetResponse:
                 procgen_max_steps=req.max_steps,
             )
         else:
-            if req.max_steps is not None or req.tier != "easy":
+            if req.task_id not in _PUBLIC_TASK_IDS:
+                raise ValueError(
+                    "The public OpenEnv proof lane exposes only easy task IDs; "
+                    f"got task_id={req.task_id!r}."
+                )
+            if req.max_steps is not None:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "tier and max_steps only apply to procedural resets; "
+                        "max_steps only applies to procedural resets; "
                         "provide disaster_family or use the task_id defaults."
                     ),
                 )

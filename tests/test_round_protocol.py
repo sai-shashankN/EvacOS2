@@ -96,3 +96,67 @@ def test_override_with_missing_target_floor_agent_is_rejected():
         rejection["reason"] == "invalid_override_target: floor_99_agent"
         for rejection in result.rejected_actions
     )
+
+
+def test_route_with_unknown_placeholder_room_target_is_rejected():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+
+    floor_action = ActionEnvelopeMA(
+        episode_id=episode_id,
+        round_id=ep.step,
+        agent_id="floor_0_agent",
+        action_id="route_none",
+        action_type=ActionTypeMA.route_within_floor,
+        arguments={"to_room_id": "none"},
+    )
+
+    result = RoundProtocol().run_round(
+        env=env,
+        ep=ep,
+        orchestrator_action=None,
+        floor_actions={"floor_0_agent": floor_action},
+        round_id=ep.step,
+        directive_store=env._directive_stores[episode_id],
+        handoff_store=env._handoff_stores[episode_id],
+    )
+
+    assert not any(action.action_id == "route_none" for action in result.accepted_actions)
+    assert any(
+        rejection["action_id"] == "route_none"
+        and rejection["reason"] == "unknown_route_target_id: none"
+        for rejection in result.rejected_actions
+    )
+
+
+def test_route_with_real_room_target_is_accepted():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+    room_id = ep.building.floors[0].rooms[0].room_id
+
+    floor_action = ActionEnvelopeMA(
+        episode_id=episode_id,
+        round_id=ep.step,
+        agent_id="floor_0_agent",
+        action_id="route_real_room",
+        action_type=ActionTypeMA.route_within_floor,
+        arguments={"to_room_id": room_id},
+    )
+
+    result = RoundProtocol().run_round(
+        env=env,
+        ep=ep,
+        orchestrator_action=None,
+        floor_actions={"floor_0_agent": floor_action},
+        round_id=ep.step,
+        directive_store=env._directive_stores[episode_id],
+        handoff_store=env._handoff_stores[episode_id],
+    )
+
+    assert any(action.action_id == "route_real_room" for action in result.accepted_actions)
+    assert not any(
+        rejection["action_id"] == "route_real_room"
+        for rejection in result.rejected_actions
+    )

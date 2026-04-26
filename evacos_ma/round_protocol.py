@@ -210,6 +210,56 @@ def _route_stairwell_id(action: ActionEnvelopeMA, stairwell_lookup: dict[str, An
     return str(to_room_id) if to_room_id in stairwell_lookup else ""
 
 
+def _validate_known_action_targets(env: Any, ep: Any, action: ActionEnvelopeMA) -> str | None:
+    """Reject syntactically valid actions that point at non-existent resources."""
+    room_lookup = env._room_lookup(ep.building)
+    exit_lookup = env._exit_lookup(ep.building)
+    stairwell_lookup = env._stairwell_lookup(ep.building)
+
+    if action.action_type == ActionTypeMA.route_within_floor:
+        exit_id = str(action.arguments.get("exit_id") or "")
+        stairwell_id = str(action.arguments.get("stairwell_id") or "")
+        to_room_id = str(action.arguments.get("to_room_id") or "")
+
+        if exit_id and exit_id not in exit_lookup:
+            return f"unknown_exit_id: {exit_id}"
+        if stairwell_id and stairwell_id not in stairwell_lookup:
+            return f"unknown_stairwell_id: {stairwell_id}"
+        if to_room_id and (
+            to_room_id not in room_lookup
+            and to_room_id not in exit_lookup
+            and to_room_id not in stairwell_lookup
+        ):
+            return f"unknown_route_target_id: {to_room_id}"
+        if not (exit_id or stairwell_id or to_room_id):
+            return "route_within_floor_missing_target"
+        return None
+
+    if action.action_type in {ActionTypeMA.prioritize_room, ActionTypeMA.lockdown_room}:
+        room_id = str(action.arguments.get("room_id") or "")
+        if not room_id:
+            return f"{action.action_type.value}_missing_room_id"
+        if room_id not in room_lookup:
+            return f"unknown_room_id: {room_id}"
+        return None
+
+    if action.action_type == ActionTypeMA.open_exit:
+        exit_id = str(action.arguments.get("exit_id") or "")
+        if not exit_id:
+            return "open_exit_missing_exit_id"
+        if exit_id not in exit_lookup:
+            return f"unknown_exit_id: {exit_id}"
+        return None
+
+    if action.action_type == ActionTypeMA.route_between_floors:
+        stairwell_id = str(action.arguments.get("stairwell_id") or "")
+        if stairwell_id and stairwell_id not in stairwell_lookup:
+            return f"unknown_stairwell_id: {stairwell_id}"
+        return None
+
+    return None
+
+
 def _lookup_elevator_for_action(env: Any, ep_copy: Any, action: ActionEnvelopeMA) -> Any | None:
     elevator_lookup = env._elevator_lookup(ep_copy.building)
     elevator_id = action.arguments.get("elevator_id", "")
@@ -437,6 +487,13 @@ class RoundProtocol:
                     "action_id": action.action_id,
                     "action_type": action.action_type.value,
                     "reason": vr.reason,
+                })
+            elif target_reason := _validate_known_action_targets(env, ep, action):
+                rejections.append({
+                    "agent_id": agent_id,
+                    "action_id": action.action_id,
+                    "action_type": action.action_type.value,
+                    "reason": target_reason,
                 })
             else:
                 validated_floor_actions[agent_id] = action

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import types
 from typing import Any
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -154,3 +155,48 @@ class TestTokenizeBatchCompletionIds:
         assert encoded_full["input_ids"][1].tolist()[:4] == [21, 22, 41, 42]
         assert shifted_labels[0].tolist() == [-100, 7, 8, 9]
         assert shifted_labels[1].tolist()[:4] == [-100, 41, 42, -100]
+
+    def test_tokenize_batch_respects_model_limit_and_preserves_completion_ids(self):
+        from training.train import MultiAgentGRPOTrainer
+
+        param_mock = MagicMock()
+        param_mock.device = "cpu"
+        param_mock.requires_grad = True
+
+        model = MagicMock()
+        model.config = SimpleNamespace(max_seq_length=5)
+        model.parameters.side_effect = lambda *a, **kw: iter([param_mock])
+        model.named_parameters.side_effect = lambda *a, **kw: iter([("lora_a.weight", param_mock)])
+
+        class FakeTokenizer:
+            padding_side = "left"
+            model_max_length = 100
+            pad_token = "<pad>"
+            pad_token_id = 0
+            eos_token = "<eos>"
+            eos_token_id = 99
+
+            def apply_chat_template(self, prompt, tokenize=False, add_generation_prompt=True):
+                del prompt, add_generation_prompt
+                if tokenize:
+                    return [10, 11, 12, 13, 14, 15]
+                return "long-prompt"
+
+        trainer = MultiAgentGRPOTrainer(
+            model=model,
+            tokenizer=FakeTokenizer(),
+            learning_rate=1e-4,
+            kl_coef=0.04,
+            clip_range=0.2,
+            num_train_epochs_per_step=1,
+        )
+
+        encoded_full, shifted_labels = trainer._tokenize_batch(
+            [[{"role": "user", "content": "prompt"}]],
+            ["unused"],
+            completion_token_ids=[[91, 92, 93]],
+        )
+
+        assert encoded_full["input_ids"].shape[1] == 5
+        assert encoded_full["input_ids"][0].tolist() == [14, 15, 91, 92, 93]
+        assert shifted_labels[0].tolist() == [-100, 91, 92, 93]

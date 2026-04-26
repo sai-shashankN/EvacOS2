@@ -192,6 +192,31 @@ def test_dual_role_trainer_skips_untrainable_role_groups() -> None:
     assert diagnostics["floor_agent_loss"] == 1.5
 
 
+def test_policy_sampling_temperature_can_be_temporarily_zeroed_and_restored() -> None:
+    hf_like = SimpleNamespace(_gen_kwargs={"temperature": 0.7, "do_sample": True})
+    unsloth_like = SimpleNamespace(_temperature=0.7)
+    nested = SimpleNamespace(
+        _role_policies={
+            "orchestrator": hf_like,
+            "floor_agent": SimpleNamespace(
+                _specialist_policies={"fire_specialist": unsloth_like},
+                _generalist_policy=None,
+            ),
+        }
+    )
+
+    tokens = train_mod._set_policy_sampling_temperature(nested, 0.0)
+
+    assert hf_like._gen_kwargs["temperature"] == 0.0
+    assert hf_like._gen_kwargs["do_sample"] is False
+    assert unsloth_like._temperature == 0.0
+
+    train_mod._restore_policy_sampling_temperature(tokens)
+
+    assert hf_like._gen_kwargs == {"temperature": 0.7, "do_sample": True}
+    assert unsloth_like._temperature == 0.7
+
+
 def test_build_policy_uses_stub_orchestrator_without_loading_orchestrator_model(
     monkeypatch,
 ):
@@ -788,16 +813,149 @@ def test_compute_rollout_metrics_tracks_wait_and_hollow_behavior() -> None:
     assert metrics["override_rate"] == 0.5
     assert metrics["override_win_rate"] == 1.0
     assert metrics["rationale_bonus_mean"] == 0.25
-    assert metrics["wait_rate"] == pytest.approx(3 / 7, rel=0, abs=1e-4)
-    assert metrics["floor_agent_wait_rate"] == pytest.approx(2 / 5, rel=0, abs=1e-4)
+    assert metrics["wait_rate"] == pytest.approx(2 / 6, rel=0, abs=1e-4)
+    assert metrics["floor_agent_wait_rate"] == pytest.approx(1 / 4, rel=0, abs=1e-4)
     assert metrics["orchestrator_wait_rate"] == 0.5
-    assert metrics["empty_args_rate"] == pytest.approx(4 / 7, rel=0, abs=1e-4)
-    assert metrics["floor_agent_active_action_rate"] == pytest.approx(3 / 5, rel=0, abs=1e-4)
-    assert metrics["active_empty_args_rate"] == pytest.approx(1 / 7, rel=0, abs=1e-4)
-    assert metrics["valid_but_hollow_action_rate"] == pytest.approx(2 / 7, rel=0, abs=1e-4)
-    assert metrics["floor_route_action_rate"] == pytest.approx(2 / 5, rel=0, abs=1e-4)
+    assert metrics["empty_args_rate"] == pytest.approx(3 / 6, rel=0, abs=1e-4)
+    assert metrics["floor_agent_active_action_rate"] == pytest.approx(3 / 4, rel=0, abs=1e-4)
+    assert metrics["active_empty_args_rate"] == pytest.approx(1 / 6, rel=0, abs=1e-4)
+    assert metrics["valid_but_hollow_action_rate"] == pytest.approx(2 / 6, rel=0, abs=1e-4)
+    assert metrics["floor_scout_action_rate"] == 0.0
+    assert metrics["floor_route_action_rate"] == pytest.approx(2 / 4, rel=0, abs=1e-4)
+    assert metrics["floor_evacuate_action_rate"] == 0.0
     assert metrics["floor_route_exit_rate"] == pytest.approx(1 / 2, rel=0, abs=1e-4)
     assert metrics["floor_route_legacy_egress_alias_rate"] == pytest.approx(1 / 2, rel=0, abs=1e-4)
+
+
+def test_compute_rollout_metrics_uses_selected_candidates_for_action_rates() -> None:
+    results = [
+        SimpleNamespace(
+            override_count=0,
+            orchestrator_action_count=0,
+            override_win_count=0,
+            rationale_bonus_total=0.0,
+            rationale_bonus_count=0,
+            samples=[
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={
+                        "action_type": "wait",
+                        "arguments": {},
+                        "candidate_index": 0,
+                        "selected_for_execution": False,
+                    },
+                ),
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={
+                        "action_type": "route_within_floor",
+                        "arguments": {"from_room_id": "room_1", "exit_id": "exit_1"},
+                        "candidate_index": 1,
+                        "selected_for_execution": True,
+                    },
+                ),
+            ],
+        )
+    ]
+
+    metrics = train_mod._compute_rollout_metrics(results)
+
+    assert metrics["wait_rate"] == 0.0
+    assert metrics["floor_agent_wait_rate"] == 0.0
+    assert metrics["valid_but_hollow_action_rate"] == 0.0
+    assert metrics["floor_route_action_rate"] == 1.0
+    assert metrics["floor_route_exit_rate"] == 1.0
+
+
+def test_compute_rollout_metrics_excludes_rejected_selected_actions_from_behavior_rates() -> None:
+    results = [
+        SimpleNamespace(
+            override_count=0,
+            orchestrator_action_count=0,
+            override_win_count=0,
+            rationale_bonus_total=0.0,
+            rationale_bonus_count=0,
+            samples=[
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={
+                        "action_type": "route_within_floor",
+                        "arguments": {"to_room_id": "none"},
+                        "selected_for_execution": True,
+                        "fallback_reason": "env_rejected",
+                        "rejection_reason": "unknown_route_target_id: none",
+                    },
+                ),
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={
+                        "action_type": "wait",
+                        "arguments": {},
+                        "selected_for_execution": True,
+                    },
+                ),
+            ],
+        )
+    ]
+
+    metrics = train_mod._compute_rollout_metrics(results)
+
+    assert metrics["wait_rate"] == 1.0
+    assert metrics["floor_route_action_rate"] == 0.0
+    assert metrics["floor_route_room_rate"] == 0.0
+    assert metrics["valid_but_hollow_action_rate"] == 1.0
+
+
+def test_training_watchdog_flags_zero_grpo_signal_after_window() -> None:
+    config = TrainingConfig(
+        watchdog={"warmup_steps": 1, "zero_signal_window": 2},
+        rollout={"use_vllm": False},
+    )
+    metrics_row = {
+        "policy_loss": 0.0,
+        "advantage_std": 0.0,
+        "group_raw_reward_std_mean": 0.0,
+        "valid_but_hollow_action_rate": 0.0,
+        "floor_scout_action_rate": 0.0,
+        "floor_route_action_rate": 0.2,
+        "floor_evacuate_action_rate": 0.0,
+    }
+
+    reason = train_mod._training_watchdog_reason(
+        step=5,
+        metrics_row=metrics_row,
+        config=config,
+        zero_signal_streak=2,
+    )
+
+    assert reason is not None
+    assert reason.startswith("zero_grpo_signal")
+
+
+def test_training_watchdog_flags_scout_dominance() -> None:
+    config = TrainingConfig(
+        watchdog={"warmup_steps": 1, "max_floor_scout_action_rate": 0.8},
+        rollout={"use_vllm": False},
+    )
+    metrics_row = {
+        "policy_loss": -0.1,
+        "advantage_std": 0.5,
+        "group_raw_reward_std_mean": 0.2,
+        "valid_but_hollow_action_rate": 0.0,
+        "floor_scout_action_rate": 0.9,
+        "floor_route_action_rate": 0.0,
+        "floor_evacuate_action_rate": 0.0,
+    }
+
+    reason = train_mod._training_watchdog_reason(
+        step=5,
+        metrics_row=metrics_row,
+        config=config,
+        zero_signal_streak=0,
+    )
+
+    assert reason is not None
+    assert reason.startswith("scout_dominance")
 
 
 def test_population_std_uses_zero_for_singleton_and_population_variance() -> None:

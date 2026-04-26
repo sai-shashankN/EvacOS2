@@ -139,6 +139,16 @@ def build_floor_observation(
         room_id for room_id in vis_state.scouted_rooms_this_round
         if room_id in room_lookup and room_lookup[room_id].floor_id == floor_num
     )
+    if not anchor_rooms and not vis_state.last_observed_round_by_room:
+        # Bootstrap each floor agent with one current occupied room from its own floor.
+        # Without this, reset can expose no room IDs at all, making evacuation
+        # actions impossible to ground even on easy tasks.
+        first_occupied_room = next(
+            (room.room_id for room in sorted(floor_rooms, key=lambda item: item.room_id) if room.occupancy.total > 0),
+            None,
+        )
+        if first_occupied_room is not None:
+            anchor_rooms.add(first_occupied_room)
 
     fresh_room_ids = _graph_neighborhood(
         building,

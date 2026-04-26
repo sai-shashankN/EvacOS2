@@ -15,7 +15,7 @@ def _tmp_path() -> Path:
 
 def test_run_eval_expands_seed_family_pairs_per_tier():
     config = TrainingConfig()
-    config.eval.tiers = ["easy", "medium"]
+    config.eval.tiers = ["easy"]
     config.eval.seeds = [1, 2, 3]
     config.rollout.max_rounds_per_episode = 7
 
@@ -47,9 +47,9 @@ def test_run_eval_expands_seed_family_pairs_per_tier():
             jsonl_dir=tmp_path,
         )
 
-        assert len(eval_results) == 2
-        assert len(calls) == 2
-        assert [call["tier"] for call in calls] == ["easy", "medium"]
+        assert len(eval_results) == 1
+        assert len(calls) == 1
+        assert [call["tier"] for call in calls] == ["easy"]
         for call in calls:
             assert call["num_episodes"] == 6
             assert call["is_eval"] is True

@@ -23,7 +23,12 @@ from evaluation._training_contract import (
 )
 
 SCHEMA_VERSION = "2026.04.24"
-DEFAULT_DISASTER_FAMILIES: tuple[DisasterType, ...] = tuple(DisasterType)
+DEFAULT_DISASTER_FAMILIES: tuple[DisasterType, ...] = (
+    DisasterType.fire,
+    DisasterType.flood,
+    DisasterType.gas,
+)
+SUPPORTED_EVAL_TIERS = frozenset({"easy"})
 _MIN_EVAL_ZSCORE_SAMPLES = 30
 _DEFAULT_REWARD_CONFIG: dict[str, float | str] = {
     "rationale_scaling": "linear_capped",
@@ -121,6 +126,19 @@ def _coerce_family(family: DisasterType | str) -> DisasterType:
     if isinstance(family, DisasterType):
         return family
     return DisasterType(str(family))
+
+
+def _validate_easy_only_tiers(tiers: Sequence[str]) -> tuple[str, ...]:
+    normalized = tuple(str(tier).strip().lower() for tier in tiers if str(tier).strip())
+    unsupported = sorted(set(normalized) - SUPPORTED_EVAL_TIERS)
+    if unsupported:
+        raise ValueError(
+            "EvacOS2's current specialist proof lane supports only tier='easy'; "
+            f"got unsupported tiers {unsupported!r}."
+        )
+    if not normalized:
+        raise ValueError("At least one eval tier is required; use tier='easy'.")
+    return normalized
 
 
 def _deterministic_episode_id(label: str, rationale_mode: str, tier: str, seed: int, family: str) -> str:
@@ -390,7 +408,7 @@ def _cached_policy_for_scope(
 def run_fixed_suite(
     policy_factory: Callable[[], Policy],
     *,
-    tiers: Sequence[str] = ("easy", "medium"),
+    tiers: Sequence[str] = ("easy",),
     seeds: Sequence[int] = EVAL_SEEDS,
     disaster_families: Sequence[DisasterType | str] = DEFAULT_DISASTER_FAMILIES,
     max_rounds: int = 500,
@@ -400,6 +418,7 @@ def run_fixed_suite(
     normalizer_snapshot: dict | None = None,
     reward_config: Mapping[str, object] | None = None,
 ) -> FixedSuiteResult:
+    tiers = _validate_easy_only_tiers(tiers)
     families = [_coerce_family(family) for family in disaster_families]
     episodes: list[EpisodeResult] = []
     policy_cache: dict[str, Policy] = {}

@@ -1,7 +1,7 @@
 backend: "unsloth"
 # Fire-only 300-step easy proof lane for the 3B floor specialist.
 # Use after the 50-step canary proves parser/checkpoint/CSV health. This run is
-# meant to prove held-out easy-fire learning before spending on harder curricula.
+# meant to prove held-out fire learning before spending on longer runs.
 max_steps: 300
 unsloth_max_seq_length: 1024
 load_in_4bit: true
@@ -9,7 +9,7 @@ model:
   base: "Qwen/Qwen2.5-3B-Instruct"
   dtype: "bfloat16"
   max_prompt_tokens: 640
-  max_completion_tokens: 64
+  max_completion_tokens: 96
 roles:
   trainable: ["floor_agent"]
   orchestrator_policy: "stub"
@@ -23,6 +23,9 @@ rollout:
   max_rounds_per_episode: 4
   seed_retry_limit: 200
   use_vllm: false
+  candidates_per_floor_prompt: 4
+  include_oracle_floor_candidate: true
+  sampling_temperature: 0.7
   disaster_families: ["fire"]
   tier_schedule:
     - steps: 300

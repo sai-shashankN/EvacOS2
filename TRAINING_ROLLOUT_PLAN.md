@@ -1,0 +1,210 @@
+# EvacOS2 Training Rollout Plan
+
+This is the short, practical plan for the next training wave after the fixed
+fire 50-step canary.
+
+## Current Known-Good Checkpoint
+
+The fire 50-step canary on Vast instance `35603298` completed successfully.
+
+- Run: `remote-unsloth-3b-fire-floor-specialist-canary-50`
+- Result: `TRAIN_EXIT=0`
+- Final step: `49/50`
+- Invalid action rate: `0.1635 -> 0.0096`
+- Last-10 invalid action average: `0.03462`
+- Route action rate: `1.0`
+- Missing target rate: `0.0`
+- Latest checkpoint: present
+- Local artifact: `outputs/vast_fire_canary50_oraclefix_35603298/fire_canary50_artifacts.tgz`
+- Local report: `outputs/vast_fire_canary50_oraclefix_35603298/extracted/fire_canary50_report.json`
+
+This proves the RL/training plumbing is now alive: the floor model receives
+usable observations, the candidate groups have valid contrast, route arguments
+are valid, and the trainer no longer crashes on long prompt windows.
+
+It does **not** prove the final model is strong yet. It proves we can now train
+for strength.
+
+## Immediate Commit Gate
+
+Before renting more GPUs:
+
+1. Review the working tree and stage only intentional source/docs changes.
+2. Run focused tests for the current fixes.
+3. Run `openenv validate . --json`.
+4. Commit and push.
+
+Suggested local verification:
+
+```bash
+python -m pytest tests/test_visibility.py tests/test_prompts.py tests/test_config_schema.py tests/test_group_for_grpo.py tests/test_rollout_collector.py tests/test_train_build_grpo_trainer.py tests/test_train_tokenize_batch.py tests/test_round_protocol.py -q
+openenv validate . --json
+```
+
+Do not launch long runs from an unpushed local-only fix unless explicitly doing
+a disposable smoke test.
+
+## Phase 1: Flood And Gas Canary Runs
+
+Run cheap 50-step canaries for flood and gas before any long training.
+
+The fire fixes should transfer because all three specialists share:
+
+- `evacos_ma/observability.py`
+- `training/prompts.py`
+- `training/rollout.py`
+- `training/train.py`
+- route action parsing and reward metrics
+
+But flood/gas can still reveal disaster-specific reward or action issues, so
+they need their own proof runs.
+
+### Canary Pass Criteria
+
+A 50-step specialist canary is acceptable only if:
+
+- `TRAIN_EXIT=0`
+- metrics CSV has `50` rows
+- latest checkpoint exists
+- `floor_route_action_rate` is consistently high, ideally `~1.0`
+- `floor_route_missing_target_rate` is `0.0` or near-zero
+- `active_empty_args_rate` is `0.0` or near-zero
+- last-10 invalid action average is below `0.10`
+- no watchdog crash, no sequence-length crash, no pure-wait collapse
+
+If a canary fails, fix that domain before launching long runs.
+
+## Phase 2: Longer 3B Floor Specialist Runs
+
+After fire/flood/gas all pass 50-step canaries, run longer training.
+
+Recommended curriculum:
+
+```text
+150 easy
+150 medium
+100 hard
+= 400 steps per specialist
+```
+
+Stretch curriculum if the curves are still improving strongly:
+
+```text
+200 easy
+200 medium
+150 hard
+= 550 steps per specialist
+```
+
+Do **not** use `brutal` for the main hackathon story unless we have enough time
+and evidence. `brutal` raises expectations and can make the project look weaker
+if the results are noisy. Easy/medium/hard is still a credible curriculum story.
+
+### Long-Run Pass Criteria
+
+For each specialist:
+
+- train artifact downloaded locally
+- metrics CSV downloaded locally
+- checkpoint exists
+- final and last-10 invalid action rate remain low
+- route/missing-target metrics stay healthy
+- held-out eval score improves vs baseline
+- no easier-tier forgetting if medium/hard are introduced
+
+## Phase 3: 7B Orchestrator Smoke
+
+Do not wait for perfect floor specialists before testing the 7B path.
+
+Run the 7B orchestrator with frozen floor specialists progressively:
+
+1. Smoke with the 50-step fire specialist and matching flood/gas canary adapters.
+2. Repeat with 100-step or 150-step floor adapters if available.
+3. Repeat with final 400/550-step floor adapters.
+
+The point is to catch integration bugs early. The 7B does not need final floor
+models to prove that routing, frozen adapters, and orchestration training work.
+
+### 7B Job Definition
+
+The 7B orchestrator should:
+
+- reason across floors
+- set priorities
+- resolve cross-floor conflicts
+- coordinate evacuation flow
+- use deterministic disaster routing rather than guessing fire/flood/gas
+- train against frozen 3B floor responders
+
+The 3Bs are fast floor responders. The 7B is the slower global coordinator.
+
+## Phase 4: Final Training Story
+
+The submission story should separate three claims:
+
+1. **Environment claim:** EvacOS2 is a multi-agent emergency-response environment
+   with partial observability, floor specialists, and global orchestration.
+2. **Training claim:** GRPO training improves floor-agent action quality, shown by
+   route validity, invalid-action reduction, reward curves, and held-out eval.
+3. **Architecture claim:** Small 3B models handle fast local floor response while
+   a larger 7B model handles slower cross-floor planning.
+
+Avoid claiming theoretical convergence. Aim for:
+
+- clear reward improvement
+- bounded 0-100 eval improvement
+- low invalid actions
+- readable plots
+- before/after examples
+
+## GPU Plan
+
+For 3B specialists:
+
+- preferred: cheap 3090/4090/A5000-class GPUs
+- minimum practical VRAM: 24 GB
+- 4090 is faster but not strictly required if cost matters
+- run fire first as the canary domain
+- then run flood and gas in parallel only after canaries pass
+
+For 7B orchestrator:
+
+- preferred: A100 80GB or H100/H200 if Hugging Face credits are available
+- H100 is probably the better default than H200 for cost unless sequence length
+  or batch size requires the extra H200 memory
+- keep 3B specialists frozen during 7B training
+
+## Monitoring Rules
+
+Monitor every 5 minutes for active paid GPU runs.
+
+Notify or intervene on:
+
+- no metrics growth for more than 10 minutes after training starts
+- process death
+- GPU idle while process is alive for more than 10 minutes after metrics start
+- disk usage above 80%
+- invalid action regression above the canary threshold
+- route/missing-target metrics collapse
+- checkpoint movement stalls
+- final artifact ready
+
+After successful artifact download, destroy the Vast instance immediately.
+
+## Decision Gates
+
+Use this exact flow:
+
+```text
+commit/push fixes
+-> fire 50-step canary already passed
+-> flood 50-step canary
+-> gas 50-step canary
+-> if both pass, run longer 3B specialist training
+-> run 7B orchestrator smoke with current frozen specialists
+-> replace frozen specialists with stronger checkpoints as they arrive
+-> final held-out eval and plots
+```
+
+If a longer run regresses badly, keep the canary artifact as proof that the
+system works and debug the curriculum or reward before spending more compute.

@@ -16,3 +16,17 @@ def test_easy_fire_oracle_canary_saves_civilians() -> None:
     assert summary["pass"] is True
     assert summary["total_saved"] > 0
     assert summary["save_rate"] > 0.0
+
+
+def test_oracle_canary_enforces_minimum_save_rate() -> None:
+    summary = run_oracle_canary(
+        seeds=[42],
+        max_rounds=1,
+        task_id="procgen_easy_fire",
+        tier="easy",
+        disaster_family=DisasterType.fire,
+        min_save_rate=1.1,
+    )
+
+    assert summary["pass"] is False
+    assert summary["min_save_rate"] == 1.1

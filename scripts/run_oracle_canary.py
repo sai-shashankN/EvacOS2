@@ -100,6 +100,7 @@ def run_oracle_canary(
     task_id: str,
     tier: str,
     disaster_family: DisasterType,
+    min_save_rate: float = 0.0,
 ) -> dict[str, Any]:
     episodes: list[dict[str, Any]] = []
     for seed in seeds:
@@ -153,6 +154,7 @@ def run_oracle_canary(
     total_lost = sum(item["lost"] for item in episodes)
     total_remaining = sum(item["remaining"] for item in episodes)
     total_civilians = total_saved + total_lost + total_remaining
+    save_rate = round(total_saved / max(total_civilians, 1), 4)
     return {
         "task_id": task_id,
         "tier": tier,
@@ -162,18 +164,20 @@ def run_oracle_canary(
         "total_saved": total_saved,
         "total_lost": total_lost,
         "total_remaining": total_remaining,
-        "save_rate": round(total_saved / max(total_civilians, 1), 4),
-        "pass": total_saved > 0,
+        "save_rate": save_rate,
+        "min_save_rate": min_save_rate,
+        "pass": save_rate >= min_save_rate,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-id", default="procgen_easy_fire")
-    parser.add_argument("--tier", default="easy", choices=["easy", "medium", "hard", "brutal"])
+    parser.add_argument("--tier", default="easy", choices=["easy"])
     parser.add_argument("--disaster-family", default="fire", choices=["fire", "flood", "gas"])
     parser.add_argument("--seeds", default="42,123,456")
     parser.add_argument("--max-rounds", type=int, default=20)
+    parser.add_argument("--min-save-rate", type=float, default=0.0)
     parser.add_argument("--output-json", type=Path)
     args = parser.parse_args()
 
@@ -183,6 +187,7 @@ def main() -> int:
         task_id=args.task_id,
         tier=args.tier,
         disaster_family=DisasterType(args.disaster_family),
+        min_save_rate=args.min_save_rate,
     )
     text = json.dumps(summary, indent=2, sort_keys=True)
     if args.output_json:

@@ -416,6 +416,66 @@ class TestParseFallback:
         finally:
             shutil.rmtree(logs_dir, ignore_errors=True)
 
+    def test_env_rejected_floor_action_marks_selected_sample_invalid(self):
+        class UnknownTargetPolicy:
+            def act(self, prompt, agent_id, role):
+                del prompt
+                if role == "orchestrator":
+                    return json.dumps(
+                        {
+                            "episode_id": "ep_trace",
+                            "round_id": 0,
+                            "agent_id": "orchestrator",
+                            "action_id": "orch_wait",
+                            "action_type": "wait",
+                            "arguments": {},
+                        }
+                    )
+                return json.dumps(
+                    {
+                        "episode_id": "ep_trace",
+                        "round_id": 0,
+                        "agent_id": agent_id,
+                        "action_id": f"{agent_id}_bad_route",
+                        "action_type": "route_within_floor",
+                        "arguments": {"to_room_id": "none"},
+                    }
+                )
+
+        env = _make_env()
+        logs_dir = _tmp_logs_dir()
+        try:
+            result = collect_episode(
+                env,
+                UnknownTargetPolicy(),
+                seed=31,
+                tier="easy",
+                disaster_family=DisasterType.fire,
+                max_rounds=1,
+                jsonl_dir=logs_dir,
+            )
+            floor_samples = [sample for sample in result.samples if sample.role == "floor_agent"]
+
+            assert any(
+                sample.parsed_action.get("fallback_reason") == "env_rejected"
+                and sample.parsed_action.get("rejection_reason") == "unknown_route_target_id: none"
+                for sample in floor_samples
+            )
+
+            rows = [
+                json.loads(line)
+                for line in (logs_dir / "action_trace.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            assert any(
+                row["agent_id"] != "orchestrator"
+                and row["valid"] is False
+                and row["rejection_reason"] == "env_rejected"
+                for row in rows
+            )
+        finally:
+            shutil.rmtree(logs_dir, ignore_errors=True)
+
 
 class TestCiviliansSavedLost:
     def test_episode_summary_has_real_civilian_counts(self):

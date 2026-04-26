@@ -383,7 +383,7 @@ def _write_scorecard_artifacts(
 def build_demo_bundle(
     trained_checkpoint: Path | None = None,
     *,
-    tiers: Sequence[str] = ("easy", "medium"),
+    tiers: Sequence[str] = ("easy",),
     seeds: Sequence[int] = (42, 123, 456, 789, 1024),
     disaster_families: Sequence[DisasterType | str] = tuple(DisasterType),
     max_rounds: int = 50,

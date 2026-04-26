@@ -1,5 +1,5 @@
 backend: "unsloth"
-# Fire-only 2000-step floor-specialist quality lane with deeper staged replay.
+# Fire-only 2000-step floor-specialist quality lane. Easy-only by design.
 max_steps: 2000
 unsloth_max_seq_length: 2048
 load_in_4bit: true
@@ -21,16 +21,13 @@ rollout:
   max_rounds_per_episode: 4
   seed_retry_limit: 200
   use_vllm: false
+  candidates_per_floor_prompt: 4
+  include_oracle_floor_candidate: true
+  sampling_temperature: 0.7
   disaster_families: ["fire"]
   tier_schedule:
-    - steps: 500
-      mix: {easy: 500}
-    - steps: 500
-      mix: {medium: 400, easy: 100}
-    - steps: 500
-      mix: {hard: 400, medium: 75, easy: 25}
-    - steps: 500
-      mix: {brutal: 375, hard: 100, medium: 25}
+    - steps: 2000
+      mix: {easy: 2000}
 grpo:
   learning_rate: 5.0e-6
   kl_coef: 0.04
@@ -45,7 +42,7 @@ reward:
   clip_normalized_to: 1.0
 eval:
   every_steps: 50
-  tiers: ["easy", "medium", "hard", "brutal"]
+  tiers: ["easy"]
   seeds: [42, 123]
 checkpoint:
   every_steps: 25

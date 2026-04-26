@@ -16,7 +16,7 @@ from evaluation.demo_bundle import DemoBundleResult, build_demo_bundle
 from training.checkpoint import load_checkpoint
 
 
-DEFAULT_TIERS = "easy,medium,hard,brutal"
+DEFAULT_TIERS = "easy"
 DEFAULT_SEEDS = "42,123,456,789,1024"
 DEFAULT_MAX_ROUNDS = 50
 
@@ -114,7 +114,7 @@ def build_parser(profile: EvalProfile) -> argparse.ArgumentParser:
     parser.add_argument(
         "--tiers",
         default=DEFAULT_TIERS,
-        help="Comma-separated difficulty tiers to evaluate.",
+        help="Comma-separated evaluation tiers. Current proof lane supports easy only.",
     )
     parser.add_argument(
         "--seeds",

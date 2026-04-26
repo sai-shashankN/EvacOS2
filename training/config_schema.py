@@ -15,9 +15,9 @@ _EVAL_SEEDS_SET = frozenset({42, 123, 456, 789, 1024})
 _ROLE_NAMES = ("orchestrator", "floor_agent")
 RoleName = Literal["orchestrator", "floor_agent"]
 FloorSpecialistFamily = Literal["fire", "flood", "gas"]
-TierName = Literal["easy", "medium", "hard", "brutal"]
+TierName = Literal["easy"]
 _FLOOR_SPECIALIST_FAMILIES = frozenset({"fire", "flood", "gas"})
-_TIER_NAMES = frozenset({"easy", "medium", "hard", "brutal"})
+_TIER_NAMES = frozenset({"easy"})
 _FAMILY_ALIASES = {
     "gas_leak": "gas",
     "gasleak": "gas",
@@ -184,8 +184,8 @@ class TierScheduleBlock(BaseModel):
         current = {tier: 0 for tier in ordered_tiers}
         tiers: list[TierName] = []
 
-        # Smooth weighted round-robin keeps replay tiers interleaved instead of
-        # clumping all old-difficulty samples at the start of a stage.
+        # Smooth weighted round-robin keeps any future replay buckets interleaved
+        # instead of clumping repeated samples at the start of a stage.
         for _ in range(total):
             active = [tier for tier in ordered_tiers if remaining[tier] > 0]
             for tier in active:
@@ -207,13 +207,45 @@ class RolloutConfig(BaseModel):
     max_rounds_per_episode: int = 80
     seed_retry_limit: int = 1000
     use_vllm: bool = True
+    candidates_per_floor_prompt: int = Field(
+        default=1,
+        description=(
+            "Training-only number of sampled floor-agent completions per identical "
+            "floor prompt. Values >1 give GRPO same-prompt candidate contrast."
+        ),
+    )
+    include_oracle_floor_candidate: bool = Field(
+        default=False,
+        description=(
+            "Training-only bootstrap: append one exact-ID floor expert action to each "
+            "candidate group so GRPO has a valid positive completion to compare against."
+        ),
+    )
+    sampling_temperature: float = Field(
+        default=0.7,
+        description=(
+            "Policy generation temperature. Keep >0 when "
+            "candidates_per_floor_prompt >1 so candidate groups are not deterministic."
+        ),
+    )
     disaster_families: list[str] = Field(
-        default_factory=lambda: [
-            "fire", "flood", "gas", "structural",
-            "active_threat", "multi_cascade",
-        ]
+        default_factory=lambda: ["fire", "flood", "gas"]
     )
     tier_schedule: list[TierScheduleBlock] | None = None
+
+    @field_validator("candidates_per_floor_prompt")
+    @classmethod
+    def candidates_per_floor_prompt_must_be_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("rollout.candidates_per_floor_prompt must be > 0")
+        return value
+
+    @field_validator("sampling_temperature")
+    @classmethod
+    def sampling_temperature_must_be_nonnegative(cls, value: float) -> float:
+        if value < 0.0:
+            raise ValueError("rollout.sampling_temperature must be >= 0")
+        return value
 
     @field_validator("seed_retry_limit")
     @classmethod
@@ -240,6 +272,44 @@ class GRPOConfig(BaseModel):
     prefer_trl: bool = False
 
 
+class WatchdogConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    warmup_steps: int = 10
+    zero_signal_window: int = 5
+    min_advantage_std: float = 1e-6
+    min_group_raw_reward_std_mean: float = 1e-6
+    max_valid_but_hollow_action_rate: float = 0.7
+    max_floor_scout_action_rate: float = 0.8
+    min_floor_route_action_rate: float = 0.05
+    route_required_after_steps: int = 25
+    abort_on_trigger: bool = True
+
+    @field_validator(
+        "warmup_steps",
+        "zero_signal_window",
+        "route_required_after_steps",
+    )
+    @classmethod
+    def nonnegative_integer_thresholds(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("watchdog integer thresholds must be >= 0")
+        return value
+
+    @field_validator(
+        "min_advantage_std",
+        "min_group_raw_reward_std_mean",
+        "max_valid_but_hollow_action_rate",
+        "max_floor_scout_action_rate",
+        "min_floor_route_action_rate",
+    )
+    @classmethod
+    def nonnegative_float_thresholds(cls, value: float) -> float:
+        if value < 0.0:
+            raise ValueError("watchdog float thresholds must be >= 0")
+        return value
+
+
 class RewardConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     rationale_scaling: str = "linear_capped"
@@ -263,7 +333,7 @@ class RewardConfig(BaseModel):
 class EvalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     every_steps: int = 20
-    tiers: list[str] = Field(default_factory=lambda: ["easy", "medium"])
+    tiers: list[TierName] = Field(default_factory=lambda: ["easy"])
     seeds: list[int] = Field(default_factory=lambda: [42, 123, 456, 789, 1024])
 
     @field_validator("seeds")
@@ -323,6 +393,7 @@ class TrainingConfig(BaseModel):
     lora: LoRAConfig = Field(default_factory=LoRAConfig)
     rollout: RolloutConfig = Field(default_factory=RolloutConfig)
     grpo: GRPOConfig = Field(default_factory=GRPOConfig)
+    watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)
     reward: RewardConfig = Field(default_factory=RewardConfig)
     eval: EvalConfig = Field(default_factory=EvalConfig)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)

@@ -21,6 +21,9 @@ rollout:
   max_rounds_per_episode: 4
   seed_retry_limit: 200
   use_vllm: false
+  candidates_per_floor_prompt: 4
+  include_oracle_floor_candidate: true
+  sampling_temperature: 0.7
   disaster_families: ["gas"]
 grpo:
   learning_rate: 5.0e-6

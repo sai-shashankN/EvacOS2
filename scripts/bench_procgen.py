@@ -13,7 +13,7 @@ from procgen import regenerate_until_valid
 
 
 def main() -> None:
-    tiers = ("easy", "medium", "hard", "brutal")
+    tiers = ("easy",)
     families = ("fire", "flood", "gas", "structural", "active_threat", "multi_cascade")
     seeds = range(5)
     started = time.perf_counter()

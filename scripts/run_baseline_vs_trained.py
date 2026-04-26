@@ -34,9 +34,9 @@ def _load_latest_checkpoint_snapshot(config_path: Path = Path("training/config.y
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--trained-checkpoint")
-    parser.add_argument("--tiers", default="easy,medium")
+    parser.add_argument("--tiers", default="easy")
     parser.add_argument("--seeds", default="42,123,456,789,1024")
-    parser.add_argument("--families", default="fire,flood,gas,structural,active_threat,multi_cascade")
+    parser.add_argument("--families", default="fire,flood,gas")
     parser.add_argument("--rationale-mode", default="linear_capped")
     parser.add_argument(
         "--max-rounds",

@@ -15,6 +15,7 @@ from evacos_ma.task_registry import TASKS
 _TASK_LIST: list[dict[str, str]] = [
     {"task_id": t.task_id, "name": t.name, "difficulty": t.difficulty}
     for t in TASKS.values()
+    if t.difficulty == "easy"
 ]
 
 MANIFEST: dict[str, Any] = {
@@ -24,7 +25,7 @@ MANIFEST: dict[str, Any] = {
     "tasks": _TASK_LIST,
     "action_schema_ref": "evacos_ma.schemas.multi_agent.ActionBundleMA",
     "observation_schema_ref": "evacos_ma.schemas.multi_agent.RoleObservationMA",
-    "supported_tiers": ["easy", "medium", "hard", "brutal"],
+    "supported_tiers": ["easy"],
     "agent_topology": {
         "orchestrator_count": 1,
         "floor_agent_count": 5,

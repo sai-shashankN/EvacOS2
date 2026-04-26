@@ -8,16 +8,32 @@ export WANDB_DISABLED=true
 export PYTORCH_ALLOC_CONF=expandable_segments:True
 export EVACOS_LOGPROB_MICROBATCH_SIZE="${EVACOS_LOGPROB_MICROBATCH_SIZE:-4}"
 
+DISASTER_FAMILY="${DISASTER_FAMILY:-fire}"
+case "$DISASTER_FAMILY" in
+  fire|flood|gas) ;;
+  *)
+    echo "DISASTER_FAMILY must be one of fire, flood, gas; got $DISASTER_FAMILY" >&2
+    exit 2
+    ;;
+esac
+
 REPO_ZIP="/root/evacos2_remote_upload.zip"
 REPO_TGZ="/root/evacos2_source_canary50.tgz"
 WORKDIR="/workspace/EvacOS2"
-CONFIG="training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml"
-METRICS="outputs/training/remote-unsloth-3b-fire-floor-specialist-canary-50-metrics.csv"
-ARTIFACT_DIR="/root/evacos2_fire_canary50_artifacts"
-ARTIFACT_TGZ="$ARTIFACT_DIR/fire_canary50_artifacts.tgz"
-JSONL_DIR="outputs/logs/remote-unsloth-3b-fire-floor-specialist-canary-50"
-CHECKPOINT_DIR="outputs/training/remote-unsloth-3b-fire-floor-specialist-canary-50"
-REPORT="$ARTIFACT_DIR/fire_canary50_report.json"
+RUN_NAME="remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-canary-50"
+CONFIG="training/config.remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-canary-50.yaml"
+METRICS="outputs/training/${RUN_NAME}-metrics.csv"
+ARTIFACT_DIR="/root/evacos2_${DISASTER_FAMILY}_canary50_artifacts"
+ARTIFACT_TGZ="$ARTIFACT_DIR/${DISASTER_FAMILY}_canary50_artifacts.tgz"
+JSONL_DIR="outputs/logs/${RUN_NAME}"
+CHECKPOINT_DIR="outputs/training/${RUN_NAME}"
+REPORT="$ARTIFACT_DIR/${DISASTER_FAMILY}_canary50_report.json"
+if [[ -z "${ORACLE_MIN_SAVE_RATE:-}" ]]; then
+  ORACLE_MIN_SAVE_RATE="0.35"
+  if [[ "$DISASTER_FAMILY" == "gas" ]]; then
+    ORACLE_MIN_SAVE_RATE="0.75"
+  fi
+fi
 
 mkdir -p /workspace /workspace/hf_cache "$ARTIFACT_DIR"
 
@@ -79,8 +95,6 @@ python -m pip install \
   "numpy>=1.26" pyyaml nbformat "wandb>=0.19" matplotlib pytest
 python -m pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 python -m pip install --no-deps "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes
-# Vast CUDA base images may still ship Python 3.10. The repo metadata targets
-# Python >=3.11 for local/dev parity, but the training code path is 3.10-safe.
 python -m pip install --ignore-requires-python -e .
 
 python - <<'PY'
@@ -91,14 +105,15 @@ import unsloth
 print("unsloth", getattr(unsloth, "__version__", "no_version"))
 PY
 
-python -m pytest tests/test_config_schema.py tests/test_group_for_grpo.py tests/test_policy_adapter.py tests/test_prompts.py tests/test_train_build_grpo_trainer.py tests/test_visibility.py -q --basetemp .pytest_tmp_remote_canary
+python -m pytest tests/test_config_schema.py tests/test_group_for_grpo.py tests/test_policy_adapter.py tests/test_prompts.py tests/test_train_build_grpo_trainer.py tests/test_train_tokenize_batch.py tests/test_visibility.py -q --basetemp .pytest_tmp_remote_canary
 python scripts/run_oracle_canary.py \
-  --task-id procgen_easy_fire \
+  --task-id "procgen_easy_${DISASTER_FAMILY}" \
   --tier easy \
-  --disaster-family fire \
+  --disaster-family "$DISASTER_FAMILY" \
   --seeds 42,123,456 \
   --max-rounds 20 \
-  --output-json outputs/oracle_canary/easy_fire_route_fix_remote.json
+  --min-save-rate "$ORACLE_MIN_SAVE_RATE" \
+  --output-json "outputs/oracle_canary/easy_${DISASTER_FAMILY}_route_fix_remote.json"
 
 set +e
 echo "TRAIN_START $(date -Is)"
@@ -107,12 +122,12 @@ TRAIN_EXIT=$?
 set -e
 echo "TRAIN_EXIT=$TRAIN_EXIT $(date -Is)"
 
-python - <<'PY'
+python - <<PY
 from pathlib import Path
 import csv
 import json
 
-metrics = Path("outputs/training/remote-unsloth-3b-fire-floor-specialist-canary-50-metrics.csv")
+metrics = Path("$METRICS")
 rows = []
 if metrics.exists():
     with metrics.open(newline="", encoding="utf-8") as f:
@@ -141,9 +156,10 @@ watch = [
     "floor_route_room_rate",
     "floor_route_legacy_egress_alias_rate",
     "floor_route_missing_target_rate",
+    "include_oracle_floor_candidate",
 ]
 
-summary = {"metrics_path": str(metrics), "rows": len(rows)}
+summary = {"metrics_path": str(metrics), "rows": len(rows), "disaster_family": "$DISASTER_FAMILY"}
 if rows:
     summary["first"] = {k: rows[0].get(k) for k in watch if k in rows[0]}
     summary["last"] = {k: rows[-1].get(k) for k in watch if k in rows[-1]}
@@ -157,14 +173,12 @@ if rows:
         if vals:
             summary[f"last10_avg_{key}"] = sum(vals) / len(vals)
 
-ckpt = Path("outputs/training/remote-unsloth-3b-fire-floor-specialist-canary-50/latest")
+ckpt = Path("$CHECKPOINT_DIR/latest")
 summary["latest_checkpoint_exists"] = ckpt.exists()
 summary["latest_checkpoint_files"] = (
     [str(p.relative_to(ckpt)) for p in ckpt.rglob("*")][:80] if ckpt.exists() else []
 )
-Path("/root/evacos2_fire_canary50_artifacts/fire_canary50_report.json").write_text(
-    json.dumps(summary, indent=2), encoding="utf-8"
-)
+Path("$REPORT").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 print(json.dumps(summary, indent=2))
 PY
 
@@ -172,9 +186,9 @@ cp -f "$METRICS" "$ARTIFACT_DIR/" 2>/dev/null || true
 cp -rf "$JSONL_DIR" "$ARTIFACT_DIR/logs" 2>/dev/null || true
 cp -rf "$CHECKPOINT_DIR" "$ARTIFACT_DIR/checkpoints" 2>/dev/null || true
 cp -f "$CONFIG" "$ARTIFACT_DIR/" 2>/dev/null || true
-cp -f outputs/oracle_canary/easy_fire_route_fix_remote.json "$ARTIFACT_DIR/" 2>/dev/null || true
-tar -C "$ARTIFACT_DIR" -czf /root/fire_canary50_artifacts.tmp.tgz . 2>/tmp/fire_canary50_tar_warnings.log || true
-mv /root/fire_canary50_artifacts.tmp.tgz "$ARTIFACT_TGZ" 2>/dev/null || true
-cp /tmp/fire_canary50_tar_warnings.log "$ARTIFACT_DIR/" || true
+cp -f "outputs/oracle_canary/easy_${DISASTER_FAMILY}_route_fix_remote.json" "$ARTIFACT_DIR/" 2>/dev/null || true
+tar -C "$ARTIFACT_DIR" -czf "/root/${DISASTER_FAMILY}_canary50_artifacts.tmp.tgz" . 2>"/tmp/${DISASTER_FAMILY}_canary50_tar_warnings.log" || true
+mv "/root/${DISASTER_FAMILY}_canary50_artifacts.tmp.tgz" "$ARTIFACT_TGZ" 2>/dev/null || true
+cp "/tmp/${DISASTER_FAMILY}_canary50_tar_warnings.log" "$ARTIFACT_DIR/" || true
 echo "$TRAIN_EXIT" > "$ARTIFACT_DIR/train_exit_code.txt"
 exit "$TRAIN_EXIT"

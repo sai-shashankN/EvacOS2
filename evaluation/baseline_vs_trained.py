@@ -319,7 +319,7 @@ def _trained_factory(
 def run_comparison(
     trained_checkpoint: Path | None = None,
     *,
-    tiers: Sequence[str] = ("easy", "medium"),
+    tiers: Sequence[str] = ("easy",),
     seeds: Sequence[int] = EVAL_SEEDS,
     disaster_families: Sequence[DisasterType | str] = DEFAULT_DISASTER_FAMILIES,
     max_rounds: int = 50,

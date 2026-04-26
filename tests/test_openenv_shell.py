@@ -61,6 +61,9 @@ class TestSchemaEndpoint:
         # Each should be a dict with at least "properties" or "title"
         for key in ("action_bundle", "observation_floor", "observation_orchestrator", "step_result"):
             assert isinstance(data[key], dict)
+            tier_def = data[key].get("$defs", {}).get("Tier")
+            if tier_def is not None:
+                assert tier_def["enum"] == ["easy"]
 
 
 class TestMetadataEndpoint:
@@ -72,6 +75,8 @@ class TestMetadataEndpoint:
         assert data["version"] == "0.1.0"
         assert "manifest" in data
         assert data["manifest"]["action_schema_ref"].endswith("ActionBundleMA")
+        assert data["manifest"]["supported_tiers"] == ["easy"]
+        assert {task["difficulty"] for task in data["manifest"]["tasks"]} == {"easy"}
 
 
 class TestResetEndpoint:
@@ -97,7 +102,7 @@ class TestResetEndpoint:
             json={"task_id": "task_1_fire_easy", "seed": 42, "tier": "brutal"},
         )
         assert resp.status_code == 400
-        assert "disaster_family" in resp.json()["detail"]
+        assert "tier='easy'" in resp.json()["detail"]
 
 
 class TestStepEndpoint:

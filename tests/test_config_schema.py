@@ -204,26 +204,51 @@ class TestVllmBackendGate:
         assert config.rollout.use_vllm is True
 
 
+class TestRolloutSamplingConfig:
+    def test_rollout_candidate_sampling_defaults_are_backward_compatible(self):
+        config = RolloutConfig()
+
+        assert config.candidates_per_floor_prompt == 1
+        assert config.sampling_temperature == 0.7
+
+    def test_rollout_candidate_count_must_be_positive(self):
+        with pytest.raises(ValidationError) as excinfo:
+            RolloutConfig(candidates_per_floor_prompt=0)
+
+        assert "candidates_per_floor_prompt" in str(excinfo.value)
+
+    def test_rollout_sampling_temperature_must_be_nonnegative(self):
+        with pytest.raises(ValidationError) as excinfo:
+            RolloutConfig(sampling_temperature=-0.1)
+
+        assert "sampling_temperature" in str(excinfo.value)
+
+
 class TestTierScheduleConfig:
-    def test_tier_schedule_expands_with_balanced_replay_inside_each_stage(self):
+    def test_tier_schedule_expands_easy_only_schedule(self):
         config = TrainingConfig(
             max_steps=5,
             rollout={
                 "use_vllm": True,
                 "tier_schedule": [
-                    {"steps": 2, "mix": {"easy": 2}},
-                    {"steps": 3, "mix": {"hard": 2, "medium": 1}},
+                    {"steps": 5, "mix": {"easy": 5}},
                 ],
             },
         )
 
-        assert config.rollout.expanded_tier_schedule() == [
-            "easy",
-            "easy",
-            "hard",
-            "medium",
-            "hard",
-        ]
+        assert config.rollout.expanded_tier_schedule() == ["easy"] * 5
+
+    def test_tier_schedule_rejects_non_easy_tiers(self):
+        with pytest.raises(ValidationError) as excinfo:
+            TrainingConfig(
+                max_steps=3,
+                rollout={
+                    "use_vllm": True,
+                    "tier_schedule": [{"steps": 3, "mix": {"medium": 3}}],
+                },
+            )
+
+        assert "medium" in str(excinfo.value)
 
     def test_tier_schedule_rejects_step_mismatch_inside_block(self):
         with pytest.raises(ValidationError) as excinfo:
@@ -271,21 +296,8 @@ class TestTierScheduleConfig:
         assert config.roles.orchestrator_policy == "stub"
         assert config.rollout.disaster_families == [family]
         assert len(schedule) == 750
-        assert Counter(schedule[:200]) == Counter({"easy": 200})
-        assert Counter(schedule[200:400]) == Counter({"medium": 160, "easy": 40})
-        assert Counter(schedule[400:600]) == Counter(
-            {"hard": 160, "medium": 30, "easy": 10}
-        )
-        assert Counter(schedule[600:750]) == Counter(
-            {"brutal": 115, "hard": 25, "medium": 10}
-        )
-        assert schedule[200:400].count("easy") == 40
-        assert schedule[200] == "medium"
-        assert "easy" in schedule[360:400]
-        assert schedule[400] == "hard"
-        assert {"easy", "medium", "hard"} <= set(schedule[400:600])
-        assert schedule[600] == "brutal"
-        assert {"medium", "hard", "brutal"} <= set(schedule[600:750])
+        assert Counter(schedule) == Counter({"easy": 750})
+        assert config.eval.tiers == ["easy"]
 
     @pytest.mark.parametrize(
         ("path", "family"),
@@ -303,14 +315,20 @@ class TestTierScheduleConfig:
         assert config.max_steps == 2000
         assert config.rollout.disaster_families == [family]
         assert len(schedule) == 2000
-        assert Counter(schedule[:500]) == Counter({"easy": 500})
-        assert Counter(schedule[500:1000]) == Counter({"medium": 400, "easy": 100})
-        assert Counter(schedule[1000:1500]) == Counter(
-            {"hard": 400, "medium": 75, "easy": 25}
+        assert Counter(schedule) == Counter({"easy": 2000})
+        assert config.eval.tiers == ["easy"]
+
+    def test_fire_signal_canary_config_exercises_same_prompt_candidate_groups(self):
+        raw = _load_yaml_config(
+            Path("training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml")
         )
-        assert Counter(schedule[1500:2000]) == Counter(
-            {"brutal": 375, "hard": 100, "medium": 25}
-        )
+        config = TrainingConfig(**raw)
+
+        assert config.max_steps == 10
+        assert config.rollout.max_rounds_per_episode == 2
+        assert config.rollout.candidates_per_floor_prompt == 4
+        assert config.rollout.sampling_temperature == 0.7
+        assert config.rollout.expanded_tier_schedule() == ["easy"] * 10
 
     def test_config_path_identity_rejects_mislabeled_step_count(self):
         config = TrainingConfig(

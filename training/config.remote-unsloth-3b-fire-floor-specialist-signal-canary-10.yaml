@@ -1,13 +1,14 @@
 backend: "unsloth"
-# Flood-only floor-specialist lane: deterministic stub orchestrator, trainable 3B floor policy only.
-max_steps: 100
-unsloth_max_seq_length: 2048
+# Cheapest paid signal canary for the fire-only 3B floor specialist.
+# This proves same-prompt GRPO plumbing before running the 50/300-step lanes.
+max_steps: 10
+unsloth_max_seq_length: 1024
 load_in_4bit: true
 model:
   base: "Qwen/Qwen2.5-3B-Instruct"
   dtype: "bfloat16"
-  max_prompt_tokens: 1024
-  max_completion_tokens: 128
+  max_prompt_tokens: 640
+  max_completion_tokens: 96
 roles:
   trainable: ["floor_agent"]
   orchestrator_policy: "stub"
@@ -18,13 +19,16 @@ lora:
   target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
 rollout:
   episodes_per_step: 1
-  max_rounds_per_episode: 4
+  max_rounds_per_episode: 2
   seed_retry_limit: 200
   use_vllm: false
   candidates_per_floor_prompt: 4
   include_oracle_floor_candidate: true
   sampling_temperature: 0.7
-  disaster_families: ["flood"]
+  disaster_families: ["fire"]
+  tier_schedule:
+    - steps: 10
+      mix: {easy: 10}
 grpo:
   learning_rate: 5.0e-6
   kl_coef: 0.04
@@ -38,15 +42,15 @@ reward:
   eligible_token_ceiling: 96
   clip_normalized_to: 1.0
 eval:
-  every_steps: 20
+  every_steps: 5
   tiers: ["easy"]
   seeds: [42, 123]
 checkpoint:
   every_steps: 5
-  keep_last_n: 5
-  root_dir: "outputs/training/remote-unsloth-3b-flood-floor-specialist"
+  keep_last_n: 4
+  root_dir: "outputs/training/remote-unsloth-3b-fire-floor-specialist-signal-canary-10"
 metrics:
-  csv_path: "outputs/training/remote-unsloth-3b-flood-floor-specialist-metrics.csv"
-  jsonl_dir: "outputs/logs/remote-unsloth-3b-flood-floor-specialist"
+  csv_path: "outputs/training/remote-unsloth-3b-fire-floor-specialist-signal-canary-10-metrics.csv"
+  jsonl_dir: "outputs/logs/remote-unsloth-3b-fire-floor-specialist-signal-canary-10"
 seed:
   training_rng: 12345

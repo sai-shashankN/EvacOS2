@@ -49,32 +49,30 @@ Cost-aware specialist plan for future runs:
   parallel 3090-style lanes for fire/flood/gas, then move the selected artifacts
   into the A100 finale.
 
-Future 3B specialist curriculum:
+Current 3B specialist training rule:
 
-- For real specialist training, run all tiers: `easy`, `medium`, `hard`, then
-  `brutal`. Do not introduce alternate names for the hardest tier.
-- Prefer staged curriculum blocks over per-step round-robin. Do not alternate
-  `easy -> medium -> hard -> brutal` every single step at the start; that makes
-  the reward distribution noisy before the policy has stable behavior.
-- Default real specialist run:
-  - 200 steps `easy`
-  - 160 steps `medium` + 40 steps `easy` replay
-  - 160 steps `hard` + 30 steps `medium` replay + 10 steps `easy` replay
-  - 115 steps `brutal` + 25 steps `hard` replay + 10 steps `medium` replay
-  - Total: 750 steps per disaster specialist
-- Use the checked-in `*-750.yaml` configs for real runs. They use
-  `rollout.tier_schedule`, and the config loader validates that the expanded
-  schedule exactly matches `max_steps`.
-- Replay samples are balanced/interleaved inside each stage so the floor policy
-  does not forget easier behaviors while the main difficulty increases.
-- A cheaper smoke run may still use 100-160 steps, but do not treat that as the
-  final specialist quality target.
-- If only running a 100-step proof, use a staged mini-curriculum such as
-  30 easy / 30 medium / 25 hard / 15 brutal, but expect noisier graphs than the
-  easy-only proof run.
-- Always evaluate the final checkpoint on fixed held-out seeds for every tier,
-  even if training used a curriculum. Training curves show learning; held-out
-  tier eval proves generalization.
+- Keep the paid specialist path easy-only until the reward/grouping signal is
+  proven healthy. The earlier broad curriculum hid non-learning behind noisy
+  metrics, so do not launch broader runs from these configs.
+- First run the `10`-step signal canary to verify same-prompt GRPO signal:
+  `floor_agent_group_raw_reward_std_mean > 0`, `floor_agent_advantage_std > 0`,
+  and non-zero `floor_agent_policy_loss`.
+- Then run the `50`-step canary to verify parser, checkpoint, metrics CSV, and
+  watchdog behavior over a slightly longer window.
+- Then run the `300`-step proof config and evaluate held-out easy seeds. Continue
+  only if the trained checkpoint beats baseline and the watchdog stays green.
+- Do not treat "watchdog green" as enough by itself. Before a paid proof/quality
+  run, confirm same-prompt grouped candidates are active: multiple completions
+  for the same role/agent/prompt must share a prompt-scoped `group_id`, with
+  non-zero `floor_agent_group_raw_reward_std_mean` and
+  `floor_agent_advantage_std` in the metrics.
+- The checked-in `*-750.yaml` configs now run `750` easy episodes for one
+  disaster family. The `*-2000.yaml` quality configs run `2000` easy episodes.
+- Treat watchdog triggers as stop signs, not warnings. In particular, abort on
+  zero GRPO signal, high valid-but-hollow action rate, or scout-heavy floor
+  collapse before spending more GPU time.
+- Always save the final metrics CSV, `training_watchdog.jsonl`, held-out eval
+  CSV/JSON/plots, and LoRA adapter artifact before destroying the instance.
 
 ## Repo bootstrap
 

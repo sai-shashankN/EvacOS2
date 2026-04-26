@@ -23,6 +23,125 @@ PROMPT_TEMPLATE_VERSION = "2026.04.20"
 # ---------------------------------------------------------------------------
 
 
+def _compact_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, separators=(",", ":"))
+
+
+def _floor_action_examples(obs: FloorAgentObservationMA) -> str:
+    """Build few-shot actions from the current observation IDs.
+
+    Static IDs in examples are surprisingly dangerous here: small models copy
+    them literally. Keep examples grounded in the exact IDs visible now.
+    """
+
+    allowed = {str(getattr(item, "value", item)) for item in (obs.action_mask or [])}
+    visible_rooms = [room.room_id for room in (obs.visible_rooms or [])]
+    civilian_rooms = [
+        group.location_room_id
+        for group in (obs.visible_civilian_groups or [])
+        if int(getattr(group, "count", 0) or 0) > 0 and group.location_room_id
+    ]
+    from_room = civilian_rooms[0] if civilian_rooms else (visible_rooms[0] if visible_rooms else None)
+    scout_room = visible_rooms[-1] if visible_rooms else from_room
+
+    exits = list(obs.exits_on_floor or [])
+    preferred_exit = next((exit_view for exit_view in exits if not exit_view.blocked), None)
+    preferred_exit = preferred_exit or (exits[0] if exits else None)
+    stairwells = list(obs.stairwell_entries or [])
+    preferred_stair = next((stair for stair in stairwells if not stair.blocked), None)
+    preferred_stair = preferred_stair or (stairwells[0] if stairwells else None)
+
+    base = {
+        "episode_id": obs.episode_id,
+        "round_id": obs.round_id,
+        "agent_id": obs.agent_id,
+    }
+    examples: list[dict[str, Any]] = []
+    if "route_within_floor" in allowed and from_room and preferred_exit is not None:
+        examples.append(
+            {
+                **base,
+                "action_id": "route_to_exit",
+                "action_type": "route_within_floor",
+                "arguments": {"from_room_id": from_room, "exit_id": preferred_exit.exit_id},
+            }
+        )
+    if "route_within_floor" in allowed and from_room and preferred_stair is not None:
+        examples.append(
+            {
+                **base,
+                "action_id": "route_to_stair",
+                "action_type": "route_within_floor",
+                "arguments": {"from_room_id": from_room, "stairwell_id": preferred_stair.stairwell_id},
+            }
+        )
+    if (
+        "open_exit" in allowed
+        and preferred_exit is not None
+        and bool(getattr(preferred_exit, "requires_open_action", False))
+    ):
+        examples.append(
+            {
+                **base,
+                "action_id": "open_exit",
+                "action_type": "open_exit",
+                "arguments": {"exit_id": preferred_exit.exit_id},
+            }
+        )
+    if "scout" in allowed and scout_room:
+        examples.append(
+            {
+                **base,
+                "action_id": "scout_room",
+                "action_type": "scout",
+                "arguments": {"target_room_id": scout_room},
+            }
+        )
+    if not examples:
+        examples.append(
+            {
+                **base,
+                "action_id": "wait_safe",
+                "action_type": "wait",
+                "arguments": {},
+            }
+        )
+    return " ".join(_compact_json(example) for example in examples)
+
+
+def _floor_route_argument_menu(obs: FloorAgentObservationMA) -> str:
+    """Return copyable route argument bundles grounded in visible IDs."""
+
+    allowed = {str(getattr(item, "value", item)) for item in (obs.action_mask or [])}
+    if "route_within_floor" not in allowed:
+        return "[]"
+
+    visible_rooms = [room.room_id for room in (obs.visible_rooms or [])]
+    civilian_rooms = [
+        group.location_room_id
+        for group in (obs.visible_civilian_groups or [])
+        if int(getattr(group, "count", 0) or 0) > 0 and group.location_room_id
+    ]
+    source_rooms = civilian_rooms or visible_rooms
+    bundles: list[dict[str, str]] = []
+
+    for from_room in source_rooms[:3]:
+        for exit_view in (obs.exits_on_floor or []):
+            if not bool(getattr(exit_view, "blocked", False)):
+                bundles.append({"from_room_id": from_room, "exit_id": exit_view.exit_id})
+        for stair in (obs.stairwell_entries or []):
+            if not bool(getattr(stair, "blocked", False)):
+                bundles.append({"from_room_id": from_room, "stairwell_id": stair.stairwell_id})
+
+    if not bundles and len(visible_rooms) > 1:
+        for from_room in source_rooms[:2]:
+            for to_room in visible_rooms[:4]:
+                if to_room != from_room:
+                    bundles.append({"from_room_id": from_room, "to_room_id": to_room})
+
+    return _compact_json({"route_within_floor_arguments": bundles[:12]})
+
+
 def build_floor_prompt(
     obs: FloorAgentObservationMA,
     *,
@@ -55,6 +174,28 @@ def build_floor_prompt(
         [{"exit_id": e.exit_id, "blocked": e.blocked, "requires_open": e.requires_open_action}
          for e in (obs.exits_on_floor or [])]
     )
+    stairwells_str = json.dumps(
+        [
+            {
+                "stairwell_id": stair.stairwell_id,
+                "blocked": stair.blocked,
+                "capacity": stair.capacity_per_step,
+            }
+            for stair in (obs.stairwell_entries or [])
+        ]
+    )
+    corridors_str = json.dumps(
+        [
+            {
+                "corridor_id": corridor.corridor_id,
+                "from_node_id": corridor.from_node_id,
+                "to_node_id": corridor.to_node_id,
+                "hazard_severity": corridor.hazard_severity,
+                "passable": corridor.passable,
+            }
+            for corridor in (obs.visible_corridors or [])
+        ]
+    )
     civilians_str = json.dumps(
         [{"group_id": c.civilian_group_id, "room": c.location_room_id,
           "count": c.count, "status": c.status, "mobility": c.mobility_profile}
@@ -69,6 +210,8 @@ def build_floor_prompt(
     user_parts: list[str] = [
         f"Rooms: {rooms_str}",
         f"Exits: {exits_str}",
+        f"Stairwells: {stairwells_str}",
+        f"Corridors: {corridors_str}",
         f"Civilians: {civilians_str}",
         f"Hazards: {hazards_str}",
     ]
@@ -97,11 +240,27 @@ def build_floor_prompt(
         "or stairwell, put it in exit_id or stairwell_id so the action changes evacuation state."
     )
     user_parts.append(
-        "Examples when allowed by the action mask: "
-        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"route_1","action_type":"route_within_floor","arguments":{"from_room_id":"room_201","exit_id":"exit_floor_2"}} '
-        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"route_stair_1","action_type":"route_within_floor","arguments":{"from_room_id":"room_201","stairwell_id":"stairwell_2"}} '
-        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"open_1","action_type":"open_exit","arguments":{"exit_id":"exit_floor_2"}} '
-        '{"episode_id":"ep_prompt_floor","round_id":3,"agent_id":"floor_2_agent","action_id":"scout_1","action_type":"scout","arguments":{"target_room_id":"room_205"}}'
+        "Valid route_within_floor argument bundles you may copy exactly: "
+        + _floor_route_argument_menu(obs)
+    )
+    user_parts.append(
+        "When civilians and a usable exit or stairwell are visible, prefer route_within_floor "
+        "with exit_id or stairwell_id. Use room-to-room routes only as a temporary safe-room move."
+    )
+    user_parts.append(
+        "For gas or flood, avoid routes through Corridors where passable=false or hazard_severity is high."
+    )
+    user_parts.append(
+        "Do not use open_exit unless an exit has requires_open=true. If requires_open=false, "
+        "route civilians to that exit with route_within_floor instead."
+    )
+    user_parts.append(
+        "Copy IDs exactly from Rooms, Exits, Stairwells, and Civilians. Never invent IDs, "
+        "and never use floor_id, agent_id, any_room, all_rooms, none, or undefined as a room/exit target."
+    )
+    user_parts.append(
+        "Examples using current observation IDs when allowed by the action mask: "
+        + _floor_action_examples(obs)
     )
 
     user_msg = "\n".join(user_parts)
@@ -114,7 +273,7 @@ def build_floor_prompt(
         "action_type (one of the allowed actions), arguments (dict).\n"
         "round_id must be the integer shown above, not a string or composite id.\n"
         "client_metadata must be omitted or {}, never null.\n"
-        "Optional keys: rationale, client_metadata. Omit optional keys unless they are needed.\n"
+        "Omit optional keys during training; especially omit rationale to keep the JSON short.\n"
         f"Prompt template version: {version}"
     )
 

@@ -4,6 +4,8 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from training.policy_adapter import StubPolicy
 
 from evaluation.fixed_suite import (
@@ -47,6 +49,17 @@ def test_run_fixed_suite_returns_single_episode():
         assert 0.0 <= result.episodes[0].wait_rate <= 1.0
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_run_fixed_suite_rejects_non_easy_tiers():
+    with pytest.raises(ValueError, match="supports only tier='easy'"):
+        run_fixed_suite(
+            lambda: StubPolicy(seed=0),
+            tiers=("medium",),
+            seeds=(42,),
+            disaster_families=("fire",),
+            max_rounds=1,
+        )
 
 
 def test_action_diagnostics_count_current_and_legacy_action_names():
@@ -246,7 +259,7 @@ def test_fixed_suite_can_use_scope_aware_policy_factory():
     try:
         result = run_fixed_suite(
             factory,
-            tiers=("easy", "medium"),
+            tiers=("easy",),
             seeds=(42, 43),
             disaster_families=("fire", "gas"),
             max_rounds=1,
@@ -258,7 +271,7 @@ def test_fixed_suite_can_use_scope_aware_policy_factory():
             "fire_specialist",
             "gas_specialist",
         ]
-        assert len(result.episodes) == 8
+        assert len(result.episodes) == 4
         assert {episode.scope_policy_key for episode in result.episodes} == {
             "fire_specialist",
             "gas_specialist",
@@ -279,7 +292,7 @@ def test_fixed_suite_reuses_default_policy_factory_across_episodes():
     try:
         result = run_fixed_suite(
             policy_factory,
-            tiers=("easy", "medium"),
+            tiers=("easy",),
             seeds=(42, 43),
             disaster_families=("fire", "gas"),
             max_rounds=1,
@@ -287,7 +300,7 @@ def test_fixed_suite_reuses_default_policy_factory_across_episodes():
             output_dir=tmp_dir,
         )
 
-        assert len(result.episodes) == 8
+        assert len(result.episodes) == 4
         assert factory_calls == 1
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

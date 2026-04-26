@@ -47,7 +47,7 @@ def test_routes_object_metadata():
         disaster_family: str
         tier: str
 
-    decision = route_scope(Metadata(disaster_family="flood", tier="hard"))
+    decision = route_scope(Metadata(disaster_family="flood", tier="easy"))
 
     assert decision.policy_key == "flood_specialist"
-    assert decision.tier == "hard"
+    assert decision.tier == "easy"

@@ -44,7 +44,7 @@ def test_3b_fire_profile_defaults_to_fire_only(monkeypatch):
         )
 
         assert calls[0]["disaster_families"] == ("fire",)
-        assert calls[0]["tiers"] == ("easy", "medium", "hard", "brutal")
+        assert calls[0]["tiers"] == ("easy",)
         assert calls[0]["max_rounds"] == 50
         assert calls[0]["config_path"] == Path(
             "training/config.remote-unsloth-3b-fire-floor-specialist.yaml"

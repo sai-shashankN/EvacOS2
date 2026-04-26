@@ -5,6 +5,7 @@ from evacos_ma.schemas.multi_agent import (
     AgentRole,
     BeliefRollup,
     CivilianGroupView,
+    CorridorView,
     Directive,
     DirectiveOutcome,
     DirectivePriority,
@@ -126,8 +127,8 @@ def _make_orch_obs(**overrides) -> OrchestratorObservationMA:
         step=5,
         max_steps=12,
         seed=42,
-        tier=SchemaTier.medium,
-        disaster_family="earthquake",
+        tier=SchemaTier.easy,
+        disaster_family="fire",
         action_mask=["broadcast_directive", "override_floor_agent", "wait"],
         last_reward_breakdown={"coordination_bonus": 0.2},
         done_last_round=False,
@@ -226,16 +227,108 @@ def test_build_floor_prompt_includes_identity_contract_and_action_mask():
     assert f"Prompt template version: {PROMPT_TEMPLATE_VERSION}" in user_message
     assert "Rooms:" in user_message
     assert "Exits:" in user_message
+    assert "Stairwells:" in user_message
+    assert "Corridors:" in user_message
     assert "Civilians:" in user_message
     assert "Hazards:" in user_message
     assert "Decision policy:" in user_message
     assert "choose that active action instead of wait" in user_message
     assert "Use wait only when no safe/useful action is available" in user_message
     assert "put it in exit_id or stairwell_id" in user_message
+    assert "Valid route_within_floor argument bundles" in user_message
+    assert '"route_within_floor_arguments":[{"from_room_id":"room_201","exit_id":"exit_floor_2"}' in user_message
+    assert "Copy IDs exactly" in user_message
     assert '"action_type":"route_within_floor"' in user_message
     assert '"exit_id":"exit_floor_2"' in user_message
+    assert '"stairwell_id":"stair_A"' in user_message
     assert '"action_type":"open_exit"' in user_message
-    assert '"action_type":"scout"' in user_message
+    assert '"action_type":"scout"' not in user_message
+
+
+def test_build_floor_prompt_includes_corridor_hazard_for_gas():
+    obs = _make_floor_obs(
+        disaster_family="gas",
+        visible_corridors=[
+            CorridorView(
+                corridor_id="corridor_gas_1",
+                from_node_id="room_201",
+                to_node_id="room_202",
+                hazard_severity=0.8,
+                passable=False,
+            )
+        ],
+    )
+
+    user_message = build_floor_prompt(obs)[1]["content"]
+
+    assert "Corridors:" in user_message
+    assert '"corridor_id": "corridor_gas_1"' in user_message
+    assert '"passable": false' in user_message
+    assert "avoid routes through Corridors where passable=false" in user_message
+
+
+def test_build_floor_prompt_examples_use_current_observation_ids():
+    obs = _make_floor_obs(
+        action_mask=["route_within_floor", "open_exit", "scout", "wait"],
+        exits_on_floor=[
+            ExitView(
+                exit_id="EX0",
+                floor_id=2,
+                exit_type="stair",
+                blocked=False,
+                requires_open_action=True,
+            )
+        ],
+        visible_rooms=[
+            RoomView(
+                room_id="R_ACTUAL",
+                floor_id="floor_2",
+                occupancy_mobile=2,
+                occupancy_injured=0,
+                hazard_severity=0.1,
+                smoke_level=0.0,
+                accessible=True,
+                passable=True,
+            )
+        ],
+        visible_civilian_groups=[
+            CivilianGroupView(
+                civilian_group_id="cg_actual",
+                location_room_id="R_ACTUAL",
+                mobility_profile="mobile",
+                count=2,
+                status="waiting",
+            )
+        ],
+    )
+
+    user_message = build_floor_prompt(obs)[1]["content"]
+
+    assert '"exit_id":"EX0"' in user_message
+    assert '"from_room_id":"R_ACTUAL"' in user_message
+    assert '"target_room_id":"R_ACTUAL"' in user_message
+    assert '"exit_id":"exit_floor_2"' not in user_message
+    assert '"from_room_id":"room_201"' not in user_message
+
+
+def test_build_floor_prompt_omits_open_exit_example_when_exit_does_not_need_opening():
+    obs = _make_floor_obs(
+        exits_on_floor=[
+            ExitView(
+                exit_id="already_open_exit",
+                floor_id=2,
+                exit_type="stair",
+                blocked=False,
+                requires_open_action=False,
+            )
+        ],
+    )
+
+    user_message = build_floor_prompt(obs)[1]["content"]
+
+    assert '"action_id":"open_exit"' not in user_message
+    assert '"exit_id":"already_open_exit"' in user_message
+    assert "Do not use open_exit unless an exit has requires_open=true" in user_message
 
 
 def test_build_floor_prompt_handles_empty_lists():
@@ -270,7 +363,7 @@ def test_build_orchestrator_prompt_includes_identity_contract_and_action_mask():
 
     assert "Episode: ep_prompt_orch" in system_message
     assert "Agent ID: orchestrator" in system_message
-    assert "Disaster: earthquake" in system_message
+    assert "Disaster: fire" in system_message
     assert "Round: 5" in system_message
     assert "Step: 5/12" in system_message
     assert f"Allowed actions: {json.dumps(obs.action_mask)}" in system_message
