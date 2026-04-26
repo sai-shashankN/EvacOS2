@@ -25,7 +25,11 @@ esac
 
 REPO_URL="${EVACOS_REPO_URL:-https://github.com/sai-shashankN/EvacOS2.git}"
 REPO_REF="${EVACOS_REPO_REF:-main}"
-WORKDIR="${EVACOS_WORKDIR:-/workspace/EvacOS2}"
+if [[ "${EVACOS_USE_EXISTING_SOURCE:-0}" == "1" ]]; then
+  WORKDIR="${EVACOS_WORKDIR:-$(pwd)}"
+else
+  WORKDIR="${EVACOS_WORKDIR:-/workspace/EvacOS2}"
+fi
 RUN_NAME="remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-quality-${STEPS}"
 CONFIG="training/config.remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-quality-${STEPS}.yaml"
 METRICS="outputs/training/${RUN_NAME}-metrics.csv"
@@ -58,12 +62,16 @@ python -m pip install \
 python -m pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 python -m pip install --no-deps "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes
 
-rm -rf "$WORKDIR"
-git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$WORKDIR" || {
-  git clone "$REPO_URL" "$WORKDIR"
-  cd "$WORKDIR"
-  git checkout "$REPO_REF"
-}
+if [[ "${EVACOS_USE_EXISTING_SOURCE:-0}" == "1" ]]; then
+  echo "Using existing source tree at $WORKDIR"
+else
+  rm -rf "$WORKDIR"
+  git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$WORKDIR" || {
+    git clone "$REPO_URL" "$WORKDIR"
+    cd "$WORKDIR"
+    git checkout "$REPO_REF"
+  }
+fi
 cd "$WORKDIR"
 
 python -m pip install --ignore-requires-python -e .

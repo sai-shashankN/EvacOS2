@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 
 from huggingface_hub import HfApi
@@ -44,14 +46,28 @@ def _job_command(repo_ref: str) -> list[str]:
         "bash",
         "-lc",
         (
-            "apt-get update && "
-            "apt-get install -y --no-install-recommends git ca-certificates && "
-            "git clone --depth 1 --branch \"$EVACOS_REPO_REF\" "
-            "\"$EVACOS_REPO_URL\" /workspace/EvacOS2_boot && "
+            "python -m pip install -q 'huggingface_hub>=1.7.2' && "
+            "mkdir -p /workspace/source /workspace/EvacOS2_boot && "
+            "python -c \"import os; from huggingface_hub import hf_hub_download; "
+            "p=hf_hub_download(repo_id=os.environ['HF_SOURCE_REPO'], "
+            "filename=os.environ['HF_SOURCE_FILENAME'], repo_type='model', "
+            "token=os.environ['HF_TOKEN'], local_dir='/workspace/source'); print(p)\" && "
+            "tar -xzf \"/workspace/source/$HF_SOURCE_FILENAME\" -C /workspace/EvacOS2_boot && "
             "cd /workspace/EvacOS2_boot && "
-            "bash scripts/hf_h200_specialist_job.sh"
+            "EVACOS_USE_EXISTING_SOURCE=1 bash scripts/hf_h200_specialist_job.sh"
         ),
     ]
+
+
+def _git_sha() -> str:
+    return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+
+
+def _create_source_archive(target: Path) -> None:
+    subprocess.run(
+        ["git", "archive", "--format=tar.gz", "-o", str(target), "HEAD"],
+        check=True,
+    )
 
 
 def main() -> int:
@@ -63,73 +79,108 @@ def main() -> int:
     parser.add_argument("--flavor", default="h200")
     parser.add_argument("--timeout", default="4h")
     parser.add_argument("--only", choices=["fire", "flood", "gas"], action="append")
+    parser.add_argument("--source-tgz", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     env_values = {**os.environ, **_load_env(args.env_file)}
     families = args.only or ["fire", "flood", "gas"]
     launched: list[dict[str, str]] = []
+    sha = _git_sha()
 
-    for family in families:
-        token_key = DEFAULT_ASSIGNMENTS[family]
-        token = env_values.get(token_key, "").strip()
-        if not token:
-            raise SystemExit(f"Missing {token_key} in environment or {args.env_file}")
+    temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
+    if args.source_tgz is None:
+        temp_dir_obj = tempfile.TemporaryDirectory()
+        source_tgz = Path(temp_dir_obj.name) / f"evacos2_source_{sha}.tgz"
+        _create_source_archive(source_tgz)
+    else:
+        source_tgz = args.source_tgz
+    source_filename = f"source/{source_tgz.name}"
 
-        api = HfApi(token=token)
-        who = api.whoami()
-        namespace = who["name"]
-        labels = {
-            "project": "evacos2",
-            "run": f"{family}-quality",
-            "family": family,
-        }
-        job_env = {
-            "DISASTER_FAMILY": family,
-            "EVACOS_REPO_URL": args.repo_url,
-            "EVACOS_REPO_REF": args.repo_ref,
-            "HF_ARTIFACT_REPO": f"{namespace}/evacos2-h200-specialist-artifacts",
-        }
-        print(
-            json.dumps(
+    try:
+        for family in families:
+            token_key = DEFAULT_ASSIGNMENTS[family]
+            token = env_values.get(token_key, "").strip()
+            if not token:
+                raise SystemExit(f"Missing {token_key} in environment or {args.env_file}")
+
+            api = HfApi(token=token)
+            who = api.whoami(cache=True)
+            namespace = who["name"]
+            artifact_repo = f"{namespace}/evacos2-h200-specialist-artifacts"
+            labels = {
+                "project": "evacos2",
+                "run": f"{family}-quality",
+                "family": family,
+            }
+            job_env = {
+                "DISASTER_FAMILY": family,
+                "EVACOS_REPO_URL": args.repo_url,
+                "EVACOS_REPO_REF": args.repo_ref,
+                "HF_ARTIFACT_REPO": artifact_repo,
+                "HF_SOURCE_REPO": artifact_repo,
+                "HF_SOURCE_FILENAME": source_filename,
+            }
+            print(
+                json.dumps(
+                    {
+                        "family": family,
+                        "token_key": token_key,
+                        "namespace": namespace,
+                        "flavor": args.flavor,
+                        "timeout": args.timeout,
+                        "repo_ref": args.repo_ref,
+                        "source": f"{artifact_repo}/{source_filename}",
+                        "artifact_repo": artifact_repo,
+                        "dry_run": args.dry_run,
+                    },
+                    indent=2,
+                )
+            )
+            if args.dry_run:
+                continue
+
+            api.create_repo(
+                repo_id=artifact_repo,
+                repo_type="model",
+                private=True,
+                exist_ok=True,
+                token=token,
+            )
+            api.upload_file(
+                repo_id=artifact_repo,
+                repo_type="model",
+                path_or_fileobj=str(source_tgz),
+                path_in_repo=source_filename,
+                commit_message=f"Upload EvacOS2 source {sha}",
+                token=token,
+            )
+
+            job = api.run_job(
+                image=args.image,
+                command=_job_command(args.repo_ref),
+                env=job_env,
+                secrets={"HF_TOKEN": token},
+                flavor=args.flavor,  # type: ignore[arg-type]
+                timeout=args.timeout,
+                labels=labels,
+                token=token,
+            )
+            launched.append(
                 {
                     "family": family,
-                    "token_key": token_key,
+                    "job_id": job.id,
                     "namespace": namespace,
-                    "flavor": args.flavor,
-                    "timeout": args.timeout,
-                    "repo_ref": args.repo_ref,
-                    "artifact_repo": job_env["HF_ARTIFACT_REPO"],
-                    "dry_run": args.dry_run,
-                },
-                indent=2,
+                    "artifact_repo": artifact_repo,
+                }
             )
-        )
-        if args.dry_run:
-            continue
+            print(json.dumps(launched[-1], indent=2))
 
-        job = api.run_job(
-            image=args.image,
-            command=_job_command(args.repo_ref),
-            env=job_env,
-            secrets={"HF_TOKEN": token},
-            flavor=args.flavor,  # type: ignore[arg-type]
-            timeout=args.timeout,
-            labels=labels,
-            token=token,
-        )
-        launched.append(
-            {
-                "family": family,
-                "job_id": job.id,
-                "namespace": namespace,
-                "artifact_repo": job_env["HF_ARTIFACT_REPO"],
-            }
-        )
-        print(json.dumps(launched[-1], indent=2))
-
-    print("LAUNCHED", json.dumps(launched, indent=2))
-    return 0
+        print("LAUNCHED", json.dumps(launched, indent=2))
+        return 0
+    finally:
+        if temp_dir_obj is not None:
+            temp_dir_obj.cleanup()
 
 
 if __name__ == "__main__":
