@@ -1,3 +1,11 @@
+---
+title: EvacOS2 OpenEnv
+sdk: docker
+app_port: 7860
+license: mit
+pinned: false
+---
+
 # EvacOS2
 
 **OpenEnv-compatible hierarchical multi-agent evacuation benchmark - deterministic simulator, role-aware GRPO, baseline-to-scorecard evaluation.**
