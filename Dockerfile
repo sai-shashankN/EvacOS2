@@ -7,6 +7,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY pyproject.toml /app/pyproject.toml
+COPY README.md /app/README.md
 COPY requirements.txt /app/requirements.txt
 COPY openenv.yaml /app/openenv.yaml
 COPY curriculum /app/curriculum
