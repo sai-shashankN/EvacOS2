@@ -18,10 +18,13 @@ case "$DISASTER_FAMILY" in
 esac
 
 case "$DISASTER_FAMILY" in
-  fire) STEPS=400 ;;
-  flood) STEPS=500 ;;
-  gas) STEPS=700 ;;
+  fire) DEFAULT_STEPS=400 ;;
+  flood) DEFAULT_STEPS=500 ;;
+  gas) DEFAULT_STEPS=700 ;;
 esac
+STEPS="${HF_SPECIALIST_STEPS:-$DEFAULT_STEPS}"
+RUN_LABEL="${HF_SPECIALIST_RUN_LABEL:-quality}"
+BASE_CONFIG="training/config.remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-quality-${DEFAULT_STEPS}.yaml"
 
 REPO_URL="${EVACOS_REPO_URL:-https://github.com/sai-shashankN/EvacOS2.git}"
 REPO_REF="${EVACOS_REPO_REF:-main}"
@@ -30,16 +33,16 @@ if [[ "${EVACOS_USE_EXISTING_SOURCE:-0}" == "1" ]]; then
 else
   WORKDIR="${EVACOS_WORKDIR:-/workspace/EvacOS2}"
 fi
-RUN_NAME="remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-quality-${STEPS}"
-CONFIG="training/config.remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-quality-${STEPS}.yaml"
+RUN_NAME="remote-unsloth-3b-${DISASTER_FAMILY}-floor-specialist-${RUN_LABEL}-${STEPS}"
+CONFIG="training/generated.${RUN_NAME}.yaml"
 METRICS="outputs/training/${RUN_NAME}-metrics.csv"
 JSONL_DIR="outputs/logs/${RUN_NAME}"
 CHECKPOINT_DIR="outputs/training/${RUN_NAME}"
-ARTIFACT_DIR="/workspace/evacos2_${DISASTER_FAMILY}_quality_${STEPS}_artifacts"
-REPORT="$ARTIFACT_DIR/${DISASTER_FAMILY}_quality_${STEPS}_report.json"
+ARTIFACT_DIR="/workspace/evacos2_${DISASTER_FAMILY}_${RUN_LABEL}_${STEPS}_artifacts"
+REPORT="$ARTIFACT_DIR/${DISASTER_FAMILY}_${RUN_LABEL}_${STEPS}_report.json"
 
-echo "HF_H200_JOB_START $(date -Is)"
-echo "DISASTER_FAMILY=$DISASTER_FAMILY STEPS=$STEPS CONFIG=$CONFIG"
+echo "HF_SPECIALIST_JOB_START $(date -Is)"
+echo "DISASTER_FAMILY=$DISASTER_FAMILY STEPS=$STEPS RUN_LABEL=$RUN_LABEL CONFIG=$CONFIG BASE_CONFIG=$BASE_CONFIG"
 echo "REPO_URL=$REPO_URL REPO_REF=$REPO_REF"
 
 if [[ -z "${HF_TOKEN:-}" ]]; then
@@ -106,6 +109,30 @@ cd "$WORKDIR"
 
 python -m pip install --ignore-requires-python -e .
 
+python - <<PY
+from pathlib import Path
+import os
+import yaml
+
+base = Path("$BASE_CONFIG")
+target = Path("$CONFIG")
+steps = int("$STEPS")
+run_name = "$RUN_NAME"
+if not base.exists():
+    raise SystemExit(f"Base specialist config not found: {base}")
+cfg = yaml.safe_load(base.read_text(encoding="utf-8"))
+cfg["max_steps"] = steps
+cfg.setdefault("rollout", {})["tier_schedule"] = [{"steps": steps, "mix": {"easy": steps}}]
+cfg.setdefault("checkpoint", {})["root_dir"] = "$CHECKPOINT_DIR"
+cfg["checkpoint"]["every_steps"] = int(os.environ.get("HF_SPECIALIST_CHECKPOINT_EVERY", "10" if steps <= 50 else "50"))
+cfg.setdefault("metrics", {})["csv_path"] = "$METRICS"
+cfg["metrics"]["jsonl_dir"] = "$JSONL_DIR"
+cfg.setdefault("eval", {})["every_steps"] = int(os.environ.get("HF_SPECIALIST_EVAL_EVERY", "10" if steps <= 50 else "50"))
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+print(f"GENERATED_CONFIG={target} RUN_NAME={run_name} STEPS={steps}", flush=True)
+PY
+
 python - <<'PY'
 import torch
 print("torch", torch.__version__, torch.cuda.is_available(), torch.version.cuda)
@@ -118,7 +145,47 @@ python -m pytest tests/test_config_schema.py tests/test_specialist_configs.py te
 
 set +e
 echo "TRAIN_START $(date -Is)"
-python -u -c "from pathlib import Path; from training.train import run_training; run_training(Path('$CONFIG'))"
+python -u -c "from pathlib import Path; from training.train import run_training; run_training(Path('$CONFIG'))" &
+TRAIN_PID=$!
+while kill -0 "$TRAIN_PID" 2>/dev/null; do
+  sleep 60
+  echo "TRAIN_HEARTBEAT $(date -Is) pid=$TRAIN_PID"
+  nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits || true
+  python - <<PY || true
+from pathlib import Path
+import csv
+import json
+import os
+import time
+
+metrics = Path("$METRICS")
+ckpt = Path("$CHECKPOINT_DIR/latest")
+payload = {
+    "metrics_exists": metrics.exists(),
+    "latest_checkpoint_exists": ckpt.exists(),
+}
+if metrics.exists():
+    payload["metrics_age_seconds"] = round(time.time() - metrics.stat().st_mtime, 1)
+    try:
+        rows = list(csv.DictReader(metrics.open(newline="", encoding="utf-8")))
+    except Exception as exc:
+        payload["metrics_error"] = repr(exc)
+        rows = []
+    payload["rows"] = len(rows)
+    if rows:
+        watch = [
+            "step",
+            "invalid_action_rate",
+            "mean_norm_reward_floor",
+            "mean_raw_reward_floor",
+            "floor_agent_advantage_std",
+            "floor_agent_group_raw_reward_std_mean",
+        ]
+        payload["last"] = {k: rows[-1].get(k) for k in watch if k in rows[-1]}
+print("TRAIN_PROGRESS " + json.dumps(payload, sort_keys=True), flush=True)
+PY
+done
+wait "$TRAIN_PID"
 TRAIN_EXIT=$?
 set -e
 echo "TRAIN_EXIT=$TRAIN_EXIT $(date -Is)"
@@ -204,5 +271,5 @@ print(f"ARTIFACT_REPO={repo_id}")
 print(f"ARTIFACT_PATH=runs/{run_name}")
 PY
 
-echo "HF_H200_JOB_END $(date -Is)"
+echo "HF_SPECIALIST_JOB_END $(date -Is)"
 exit "$TRAIN_EXIT"

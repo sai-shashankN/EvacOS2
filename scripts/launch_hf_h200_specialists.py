@@ -1,4 +1,4 @@
-"""Launch fire/flood/gas specialist quality runs on HF H200 Jobs.
+"""Launch fire/flood/gas specialist quality runs on HF GPU Jobs.
 
 The launcher reads tokens from `.env` by default:
 
@@ -83,6 +83,8 @@ def main() -> int:
     parser.add_argument("--image", default="pytorch/pytorch:2.7.1-cuda12.6-cudnn9-devel")
     parser.add_argument("--flavor", default="h200")
     parser.add_argument("--timeout", default="4h")
+    parser.add_argument("--steps", type=int, help="Override specialist steps for small paid canaries.")
+    parser.add_argument("--run-label", default="", help="Optional label used in run/output names.")
     parser.add_argument("--only", choices=["fire", "flood", "gas"], action="append")
     parser.add_argument("--source-tgz", type=Path)
     parser.add_argument("--dry-run", action="store_true")
@@ -129,6 +131,10 @@ def main() -> int:
                 "HF_SOURCE_REPO": artifact_repo,
                 "HF_SOURCE_FILENAME": source_filename,
             }
+            if args.steps is not None:
+                job_env["HF_SPECIALIST_STEPS"] = str(args.steps)
+            if args.run_label:
+                job_env["HF_SPECIALIST_RUN_LABEL"] = args.run_label
             print(
                 json.dumps(
                     {
@@ -137,6 +143,8 @@ def main() -> int:
                         "namespace": namespace,
                         "flavor": args.flavor,
                         "timeout": args.timeout,
+                        "steps": args.steps,
+                        "run_label": args.run_label,
                         "repo_ref": args.repo_ref,
                         "source": f"{artifact_repo}/{source_filename}",
                         "artifact_repo": artifact_repo,
