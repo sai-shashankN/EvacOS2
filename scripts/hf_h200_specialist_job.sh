@@ -7,6 +7,9 @@ export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME}"
 export WANDB_DISABLED="${WANDB_DISABLED:-true}"
 export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 export EVACOS_LOGPROB_MICROBATCH_SIZE="${EVACOS_LOGPROB_MICROBATCH_SIZE:-8}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}"
+export LD_LIBRARY_PATH="/usr/local/nvidia/lib64:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}"
 
 DISASTER_FAMILY="${DISASTER_FAMILY:-fire}"
 case "$DISASTER_FAMILY" in
@@ -56,6 +59,76 @@ apt-get update
 apt-get install -y --no-install-recommends git curl ca-certificates build-essential
 
 python -m pip install --upgrade pip setuptools wheel
+
+repair_torch_cuda_if_needed() {
+  if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi -L >/dev/null 2>&1; then
+    echo "No GPU visible to nvidia-smi; cannot repair PyTorch CUDA from inside the job." >&2
+    return 1
+  fi
+  if [[ "${CUDA_VISIBLE_DEVICES:-}" == "-1" || "${CUDA_VISIBLE_DEVICES:-}" == "none" ]]; then
+    unset CUDA_VISIBLE_DEVICES
+  fi
+  python - <<'PY' && return 0
+import os
+import torch
+
+print(
+    "torch_preflight",
+    {
+        "torch": torch.__version__,
+        "torch_cuda": torch.version.cuda,
+        "device_count": torch.cuda.device_count(),
+        "is_available": torch.cuda.is_available(),
+        "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
+    },
+    flush=True,
+)
+raise SystemExit(0 if torch.cuda.is_available() else 1)
+PY
+
+  echo "nvidia-smi sees GPU but torch CUDA is unavailable; reinstalling official torch 2.7.1 cu126 wheels." >&2
+  python -m pip uninstall -y torch torchvision torchaudio triton >/tmp/torch_uninstall.log 2>&1 || true
+  python -m pip install --no-cache-dir --force-reinstall \
+    --index-url https://download.pytorch.org/whl/cu126 \
+    --extra-index-url https://pypi.org/simple \
+    "torch==2.7.1" "torchvision==0.22.1" "torchaudio==2.7.1"
+  python - <<'PY'
+import ctypes
+import os
+import subprocess
+import torch
+
+print("cuda_env", {
+    "CUDA_VISIBLE_DEVICES": os.environ.get("CUDA_VISIBLE_DEVICES"),
+    "NVIDIA_VISIBLE_DEVICES": os.environ.get("NVIDIA_VISIBLE_DEVICES"),
+    "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH"),
+}, flush=True)
+subprocess.run(
+    ["nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"],
+    check=False,
+)
+try:
+    ctypes.CDLL("libcuda.so.1")
+    print("libcuda_load=ok", flush=True)
+except Exception as exc:
+    print(f"libcuda_load=ERR:{exc!r}", flush=True)
+print(
+    "torch_after_repair",
+    {
+        "torch": torch.__version__,
+        "torch_cuda": torch.version.cuda,
+        "device_count": torch.cuda.device_count(),
+        "is_available": torch.cuda.is_available(),
+    },
+    flush=True,
+)
+if not torch.cuda.is_available():
+    raise SystemExit("CUDA still unavailable after torch cu126 reinstall")
+print("gpu", torch.cuda.get_device_name(0), flush=True)
+PY
+}
+
+repair_torch_cuda_if_needed
 python -m pip install \
   "transformers==4.56.2" "trl==0.24.0" "peft==0.19.1" \
   accelerate bitsandbytes datasets "fsspec==2025.9.0" \
@@ -65,35 +138,7 @@ python -m pip install \
 python -m pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 python -m pip install --no-deps "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes
 
-python - <<'PY'
-import subprocess
-import time
-
-deadline = time.time() + 300
-last_error = None
-while time.time() < deadline:
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            print(
-                "cuda_ready",
-                torch.__version__,
-                torch.version.cuda,
-                torch.cuda.get_device_name(0),
-            )
-            raise SystemExit(0)
-        last_error = "torch.cuda.is_available() returned False"
-    except SystemExit:
-        raise
-    except Exception as exc:
-        last_error = repr(exc)
-    subprocess.run(["nvidia-smi"], check=False)
-    print(f"cuda_not_ready_yet: {last_error}; sleeping 15s", flush=True)
-    time.sleep(15)
-
-raise SystemExit(f"CUDA did not become available within 300s: {last_error}")
-PY
+repair_torch_cuda_if_needed
 
 if [[ "${EVACOS_USE_EXISTING_SOURCE:-0}" == "1" ]]; then
   echo "Using existing source tree at $WORKDIR"
