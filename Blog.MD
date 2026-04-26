@@ -8,6 +8,10 @@ GitHub: [https://github.com/sai-shashankN/EvacOS2](https://github.com/sai-shasha
 
 Hugging Face Space: [https://huggingface.co/spaces/shashankN777/evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv)
 
+Training notebook: [https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/notebooks/train_evacos_ma.ipynb](https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/notebooks/train_evacos_ma.ipynb)
+
+Public model artifacts: [https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts)
+
 ## Why I Built This
 
 This project started from grief.
@@ -23,8 +27,10 @@ EvacOS2 is my attempt to turn that feeling into a technical environment: one whe
 EvacOS2 is built to score well on the things that matter in this hackathon:
 
 - **Environment innovation:** this is a hierarchical emergency-response simulator, not another toy grid world or static prompt set. It tests partial observability, bottlenecks, cross-floor coordination, and disaster-specific response.
+- **Benchmark angle:** beyond evacuation, it tests calibrated autonomy: when subagents should act locally, escalate, recover if the orchestrator is unreachable, or accept a smaller local win for better team coordination.
 - **Storytelling:** the demo has a clear mental model: fast `3B` floor responders handle local movement, while a slower `7B` orchestrator handles building-level priorities and outliers.
 - **Training evidence:** the public fire/flood/gas `3B` canaries show valid-action improvement, checkpointed LoRA adapters, logs, metrics, and plots from real runs.
+- **Evaluation scope:** the submitted held-out comparison uses a controlled specialist proof slice so base-vs-trained results are deterministic, rerunnable, and easy to audit; harder slices are a natural next benchmark milestone.
 - **OpenEnv compliance:** the live Hugging Face Space exposes `/openenv/health`, `/openenv/metadata`, `/openenv/schema`, `/openenv/reset`, `/openenv/step`, and `/openenv/state`.
 - **Honest frontier:** the `7B` orchestrator is included as a smoke/training-signal validated coordination layer, with a dedicated behavior card explaining what is proven and what the next held-out eval should measure.
 
@@ -36,6 +42,10 @@ Most LLM evaluation still happens in prompt-response form. That is useful, but i
 
 EvacOS2 turns that into a trainable environment. The simulator creates a multi-floor building with civilians, rooms, corridors, stairwells, elevators, exits, local hazards, and global coordination pressure. The system then asks a hierarchy of LLM policies to evacuate civilians while minimizing invalid actions, congestion, and casualties.
 
+While I was on a flight thinking about what we had actually built, I realized the evacuation setting was only the surface. EvacOS2 is also a benchmark for calibrated autonomy: when a local agent should solve a problem itself, when it should escalate, when the orchestrator should interfere, and when a locally capable agent should still pass context upward because the whole team may benefit from that shared knowledge later.
+
+That matters because most subagents are trained or prompted to finish only their own task. EvacOS2 creates a safer place to test a different behavior: a floor agent that may accept a smaller local win because routing an outlier to the orchestrator improves the global workflow, helps other floors, or gives the team a fallback plan if the coordinator is slow. The benchmark is not only independence versus obedience. It is independence versus positively controlled interdependence.
+
 The novelty is the combination:
 
 - A deterministic emergency simulator with multi-agent roles.
@@ -44,7 +54,7 @@ The novelty is the combination:
 - Verifiable evaluation with scorecards and plots instead of hand-picked examples.
 - A realistic routing layer where incident metadata selects the right specialist lane, while a larger orchestrator remains available for cross-floor conflicts and outliers.
 
-In practical terms, EvacOS2 is a benchmark for whether LLM post-training can make agents better at coordinated action, not just better at explanation.
+In practical terms, EvacOS2 is a benchmark for whether LLM post-training can make agents better at coordinated action, not just better at explanation. It also asks a harder question: can each agent decide whether it should be the one solving the problem?
 
 ## Why Evacuation Is A Strong Testbed
 
@@ -131,13 +141,34 @@ The reward is deliberately not one vague scalar. EvacOS2 combines several signal
 - override quality
 - belief and prediction checks
 
+The key design choice is that reward is layered. Route validity and target preservation keep the model from learning malformed actions. Evacuation progress and saved/lost terms keep it attached to the real objective. Orchestrator and override terms measure whether global coordination is helping rather than merely adding control. This reduces the risk that one easy-to-game reward dominates the policy.
+
 Training reward and judge-facing evaluation are kept separate. Training rewards can remain normalized and contrastive for GRPO, while evaluation reports bounded, readable metrics such as valid-action score, invalid-action rate, saved civilians, and baseline-vs-trained deltas.
 
 That separation matters. A messy reward curve may still be useful for optimization, but a judge should see a finite scorecard and a plot they can understand in seconds.
 
 ## Evidence So Far
 
-The cleanest completed evidence is the `3B` floor-specialist canary suite across fire, flood, and gas response lanes. These short runs are not presented as final convergence. They are proof that the environment, training, checkpointing, and metrics pipeline are live end to end.
+The cleanest reward-improvement evidence is now a held-out `3B` specialist comparison: the same Qwen2.5-3B base model with no LoRA adapter versus the trained LoRA specialist, on the same unseen seeds and the same fixed-suite evaluator.
+
+This is intentionally framed as a controlled proof lane, not the full ceiling of the simulator. For judges, the goal is a clean scientific slice: same seeds, same evaluator, same task families, base model versus trained adapter. The simulator and curriculum can be extended to harder slices, but the submitted public table focuses on the benchmark slice we can make reproducible and inspectable end to end.
+
+The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists more than doubled the base/no-LoRA Qwen2.5-3B average eval score, from `15.08%` to `36.28%`, while eliminating invalid actions across all fire, flood, and gas response lanes.
+
+| Family | Held-out episodes | Base eval score | Trained eval score | Delta | Base invalid rate | Trained invalid rate |
+|---|---:|---:|---:|---:|---:|---:|
+| Fire | `10` | `11.58%` | `36.34%` | `+24.76 pp` | `60.00%` | `0.00%` |
+| Flood | `10` | `17.63%` | `36.34%` | `+18.70 pp` | `46.67%` | `0.00%` |
+| Gas | `10` | `16.02%` | `36.16%` | `+20.14 pp` | `48.75%` | `0.00%` |
+| **Average** | `30 total` | **`15.08%`** | **`36.28%`** | **`+21.20 pp`** | **`51.81%`** | **`0.00%`** |
+
+The public artifact path is `heldout/base-model-vs-h200-resume200-3b-heldout10-batched-20260429-065816` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). This run is intentionally labeled as a fast `10`-seed held-out comparison; the same evaluator path supports larger seed counts.
+
+![Held-out 3B base-vs-trained eval score](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png)
+
+![Held-out 3B base-vs-trained invalid action rate](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png)
+
+The `3B` floor-specialist canary suite across fire, flood, and gas response lanes adds the training-signal story. These short runs are not presented as final convergence. They are proof that the environment, training, checkpointing, and metrics pipeline are live end to end.
 
 | Specialist | Start valid-action score | Trained checkpoint score | Delta | Last-10 invalid rate | Last-10 GRPO reward std |
 |---|---:|---:|---:|---:|---:|
@@ -147,11 +178,25 @@ The cleanest completed evidence is the `3B` floor-specialist canary suite across
 
 `valid-action score = 100 * (1 - invalid_action_rate)`. The start score is step `0`; the trained checkpoint score is the last-10 average ending at checkpoint `ckpt_49`.
 
+The continuation run resumes from those `ckpt_49` specialists and uploads checkpoints every `10` steps. This is not presented as a final held-out scorecard; it is the live reward-signal snapshot showing that the next phase is moving in the right direction.
+
+| Specialist | Uploaded continuation steps | First-10 invalid rate | Last-10 invalid rate | First-10 raw reward | Last-10 raw reward | Reading |
+|---|---:|---:|---:|---:|---:|---|
+| Fire `3B` | `50 -> 169` | `1.44%` | `0.00%` | `10.56` | `11.59` | reward up, invalid actions eliminated in the latest window |
+| Flood `3B` | `50 -> 139` | `3.69%` | `0.00%` | `7.60` | `8.68` | reward up, invalid actions eliminated in the latest window |
+| Gas `3B` | `50 -> 89` | `0.19%` | `0.15%` | `29.40` | `30.44` | reward up, invalid actions remain near-zero |
+
 ![3B specialist valid-action score comparison](demo/results/plots/3b_specialist_valid_action_score_comparison.png)
 
 ![3B specialist invalid action rate across checkpoints](demo/results/plots/3b_specialist_invalid_action_checkpoints.png)
 
 ![3B specialist raw reward across checkpoints](demo/results/plots/3b_specialist_raw_reward_checkpoints.png)
+
+![H200 continuation raw reward progress](demo/results/plots/h200_resume200_raw_reward_progress.png)
+
+![H200 continuation normalized reward progress](demo/results/plots/h200_resume200_norm_reward_progress.png)
+
+![H200 continuation invalid-action progress](demo/results/plots/h200_resume200_invalid_action_progress.png)
 
 The important result is not only that the score improves. It is that the system produces the full artifact chain: rollouts, rewards, checkpoints, metrics, plots, and reproducible evaluation scripts.
 

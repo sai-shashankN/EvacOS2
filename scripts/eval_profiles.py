@@ -143,6 +143,15 @@ def build_parser(profile: EvalProfile) -> argparse.ArgumentParser:
         action="store_true",
         help="Seed trained eval normalization from config.checkpoint.root_dir/latest.",
     )
+    parser.add_argument(
+        "--baseline-policy",
+        choices=("stub", "base_model"),
+        default="stub",
+        help=(
+            "Baseline reference. Use base_model for judge-facing no-LoRA "
+            "model-vs-trained-LoRA comparisons."
+        ),
+    )
     return parser
 
 
@@ -167,6 +176,7 @@ def run_profile(profile_name: str, argv: Sequence[str] | None = None) -> DemoBun
         training_metrics_path=args.training_metrics_path,
         trained_normalizer_snapshot=trained_normalizer_snapshot,
         config_path=args.config,
+        baseline_policy=args.baseline_policy,
     )
     _print_result(profile, result)
     return result

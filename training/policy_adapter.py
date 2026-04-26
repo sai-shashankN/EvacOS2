@@ -720,15 +720,29 @@ def hf_policy_factory(
             agent_id: str,
             role: str,
         ) -> PolicyResult:
-            del agent_id, role
-            rendered = self._tokenizer.apply_chat_template(
-                prompt,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
+            return self.act_batch([prompt], [agent_id], [role])[0]
+
+        def act_batch(
+            self,
+            prompts: list[list[dict[str, str]]],
+            agent_ids: list[str],
+            roles: list[str],
+        ) -> list[PolicyResult]:
+            del agent_ids, roles
+            if not prompts:
+                return []
+
+            rendered = [
+                self._tokenizer.apply_chat_template(
+                    prompt,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                for prompt in prompts
+            ]
             _warn_once_if_prompt_truncated(
                 tokenizer=self._tokenizer,
-                rendered=[rendered],
+                rendered=rendered,
                 max_prompt_tokens=self._max_prompt_tokens,
             )
             inputs = _call_tokenizer(
@@ -752,10 +766,26 @@ def hf_policy_factory(
             finally:
                 if was_training:
                     self._model.train()
-            first_row = outputs[0] if hasattr(outputs, "__getitem__") else next(iter(outputs))
-            generated = first_row[inputs["input_ids"].shape[-1] :]
-            generated_ids = generated.tolist() if hasattr(generated, "tolist") else list(generated)
-            return self._tokenizer.decode(generated, skip_special_tokens=True), generated_ids
+
+            input_width = inputs["input_ids"].shape[-1]
+            results: list[PolicyResult] = []
+            for row in outputs:
+                generated = row[input_width:]
+                generated_ids = (
+                    generated.tolist()
+                    if hasattr(generated, "tolist")
+                    else list(generated)
+                )
+                results.append(
+                    (
+                        self._tokenizer.decode(
+                            generated,
+                            skip_special_tokens=True,
+                        ),
+                        generated_ids,
+                    )
+                )
+            return results
 
     return _HFPolicy()
 

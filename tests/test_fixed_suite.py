@@ -52,7 +52,7 @@ def test_run_fixed_suite_returns_single_episode():
 
 
 def test_run_fixed_suite_rejects_non_easy_tiers():
-    with pytest.raises(ValueError, match="supports only tier='easy'"):
+    with pytest.raises(ValueError, match="controlled .*tier='easy' benchmark slice"):
         run_fixed_suite(
             lambda: StubPolicy(seed=0),
             tiers=("medium",),
