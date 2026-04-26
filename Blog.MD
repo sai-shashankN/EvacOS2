@@ -8,6 +8,16 @@ GitHub: [https://github.com/sai-shashankN/EvacOS2](https://github.com/sai-shasha
 
 Hugging Face Space: [https://huggingface.co/spaces/shashankN777/evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv)
 
+## Why I Built This
+
+This project started from grief.
+
+During the war in Lebanon, a Lebanese friend of mine stopped replying. Later, I learned he was gone. That changed how I thought about emergency response. Evacuation was no longer an abstract optimization problem; it was about whether people get the right help in the small window where help still matters.
+
+Around the same time, while I was thinking about this hackathon, I felt an earthquake. The coincidence stayed with me. Disasters are chaotic, local, and time-sensitive. People do not fail only because there is no plan; they fail because information is partial, coordination breaks down, and decisions arrive too late.
+
+EvacOS2 is my attempt to turn that feeling into a technical environment: one where LLM agents are not rewarded for sounding calm, but for coordinating actions that move people toward safety.
+
 ## Judge TL;DR
 
 EvacOS2 is built to score well on the things that matter in this hackathon:
