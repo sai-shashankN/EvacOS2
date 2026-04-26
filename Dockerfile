@@ -9,9 +9,14 @@ WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 COPY requirements.txt /app/requirements.txt
 COPY openenv.yaml /app/openenv.yaml
+COPY curriculum /app/curriculum
+COPY dashboard /app/dashboard
 COPY evacos_ma /app/evacos_ma
+COPY evaluation /app/evaluation
 COPY procgen /app/procgen
+COPY renderer /app/renderer
 COPY server /app/server
+COPY training /app/training
 
 RUN pip install --upgrade pip && pip install .
 
