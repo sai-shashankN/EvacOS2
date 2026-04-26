@@ -58,7 +58,7 @@ python -m pip install \
   accelerate bitsandbytes datasets "fsspec==2025.9.0" \
   "pydantic>=2,<3" "fastapi>=0.115" "uvicorn>=0.30" \
   "numpy>=1.26" pyyaml nbformat "wandb>=0.19" matplotlib pytest \
-  "huggingface_hub>=1.7.2"
+  "huggingface_hub>=0.34.0,<1.0"
 python -m pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 python -m pip install --no-deps "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes
 
