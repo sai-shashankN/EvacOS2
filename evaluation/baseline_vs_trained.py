@@ -57,10 +57,16 @@ def _load_model_config(config_path: Path = Path("training/config.yaml")) -> dict
     resolved_floor = str(floor_base or base)
     orchestrator_policy = str(roles_cfg.get("orchestrator_policy", "model"))
     split = resolved_orchestrator != resolved_floor
+    max_prompt_tokens = int(model_cfg.get("max_prompt_tokens", 3500))
+    max_completion_tokens = int(model_cfg.get("max_completion_tokens", 256))
+    dtype = str(model_cfg.get("dtype", "bfloat16"))
     return {
         "base": base,
         "orchestrator": resolved_orchestrator,
         "floor_agent": resolved_floor,
+        "max_prompt_tokens": max_prompt_tokens,
+        "max_completion_tokens": max_completion_tokens,
+        "dtype": dtype,
         "split": split,
         "role_routed": (
             split
@@ -167,6 +173,11 @@ def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool
                 "base": orchestrator,
                 "orchestrator": orchestrator,
                 "floor_agent": floor,
+                "max_prompt_tokens": int(meta.get("max_prompt_tokens", 3500)),
+                "max_completion_tokens": int(
+                    meta.get("max_completion_tokens", 256)
+                ),
+                "dtype": str(meta.get("dtype", "bfloat16")),
                 "split": split,
                 "role_routed": (
                     split
@@ -182,6 +193,9 @@ def _load_model_config_from_checkpoint(checkpoint: Path) -> dict[str, str | bool
         "base": model_name,
         "orchestrator": model_name,
         "floor_agent": model_name,
+        "max_prompt_tokens": int(meta.get("max_prompt_tokens", 3500)),
+        "max_completion_tokens": int(meta.get("max_completion_tokens", 256)),
+        "dtype": str(meta.get("dtype", "bfloat16")),
         "split": False,
         "role_routed": (
             orchestrator_policy != "model"
@@ -200,6 +214,14 @@ def _load_model_name(config_path: Path = Path("training/config.yaml")) -> str:
 
 def _nan() -> float:
     return float("nan")
+
+
+def _hf_policy_kwargs(model_cfg: dict[str, str | bool]) -> dict[str, object]:
+    return {
+        "max_prompt_tokens": int(model_cfg.get("max_prompt_tokens", 3500)),
+        "max_new_tokens": int(model_cfg.get("max_completion_tokens", 256)),
+        "torch_dtype": str(model_cfg.get("dtype", "bfloat16")),
+    }
 
 
 def _metric_rows(suite: FixedSuiteResult) -> dict[tuple[str, int, str, str, str], float]:
@@ -221,10 +243,18 @@ def _trained_factory(
     config_path: Path = Path("training/config.yaml"),
 ) -> Callable[[], object]:
     adapter_root = _adapter_root(checkpoint)
-    model_cfg = _load_model_config_from_checkpoint(checkpoint) or _load_model_config(config_path)
+    config_model_cfg = _load_model_config(config_path)
+    model_cfg = _load_model_config_from_checkpoint(checkpoint) or config_model_cfg
+    for key in ("max_prompt_tokens", "max_completion_tokens", "dtype"):
+        model_cfg[key] = config_model_cfg[key]
+    policy_kwargs = _hf_policy_kwargs(model_cfg)
     if not bool(model_cfg.get("role_routed", model_cfg["split"])):
         model_name = str(model_cfg["orchestrator"])
-        return lambda: hf_policy_factory(model_name, lora_adapter_path=str(adapter_root))
+        return lambda: hf_policy_factory(
+            model_name,
+            lora_adapter_path=str(adapter_root),
+            **policy_kwargs,
+        )
 
     floor_checkpoint = adapter_root / "floor_agent"
     orchestrator_policy = str(model_cfg.get("orchestrator_policy") or "model")
@@ -250,12 +280,14 @@ def _trained_factory(
                 else hf_policy_factory(
                     str(model_cfg["orchestrator"]),
                     lora_adapter_path=str(orch_checkpoint),
+                    **policy_kwargs,
                 )
             )
             generalist_policy = (
                 hf_policy_factory(
                     str(model_cfg["floor_agent"]),
                     lora_adapter_path=str(floor_generalist_checkpoint),
+                    **policy_kwargs,
                 )
                 if floor_generalist_checkpoint is not None
                 else None
@@ -267,6 +299,7 @@ def _trained_factory(
                         family: hf_policy_factory(
                             str(model_cfg["floor_agent"]),
                             lora_adapter_path=str(path),
+                            **policy_kwargs,
                         )
                         for family, path in floor_specialist_paths.items()
                     },
@@ -289,6 +322,7 @@ def _trained_factory(
                 floor_policy=hf_policy_factory(
                     str(model_cfg["floor_agent"]),
                     lora_adapter_path=str(floor_checkpoint),
+                    **policy_kwargs,
                 ),
             )
 
@@ -306,11 +340,41 @@ def _trained_factory(
             orchestrator_policy=hf_policy_factory(
                 str(model_cfg["orchestrator"]),
                 lora_adapter_path=str(orch_checkpoint),
+                **policy_kwargs,
             ),
             floor_policy=hf_policy_factory(
                 str(model_cfg["floor_agent"]),
                 lora_adapter_path=str(floor_checkpoint),
+                **policy_kwargs,
             ),
+        )
+
+    return _factory
+
+
+def _base_model_factory(
+    *,
+    config_path: Path = Path("training/config.yaml"),
+) -> Callable[[], object]:
+    """Build the no-LoRA model baseline with the same role topology."""
+
+    model_cfg = _load_model_config(config_path)
+    policy_kwargs = _hf_policy_kwargs(model_cfg)
+    orchestrator_policy = str(model_cfg.get("orchestrator_policy") or "model")
+    role_routed = bool(model_cfg.get("role_routed", model_cfg["split"]))
+
+    if not role_routed:
+        return lambda: hf_policy_factory(str(model_cfg["orchestrator"]), **policy_kwargs)
+
+    def _factory() -> object:
+        orchestrator = (
+            StubPolicy(seed=0)
+            if orchestrator_policy == "stub"
+            else hf_policy_factory(str(model_cfg["orchestrator"]), **policy_kwargs)
+        )
+        return RoleRoutedPolicy(
+            orchestrator_policy=orchestrator,
+            floor_policy=hf_policy_factory(str(model_cfg["floor_agent"]), **policy_kwargs),
         )
 
     return _factory
@@ -328,15 +392,27 @@ def run_comparison(
     skip_trained: bool = False,
     trained_normalizer_snapshot: dict | None = None,
     config_path: Path = Path("training/config.yaml"),
+    baseline_policy: str = "stub",
 ) -> ComparisonResult:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     effective_disaster_families = _effective_disaster_families_for_checkpoint(
         trained_checkpoint,
         disaster_families,
     )
+    if baseline_policy not in {"stub", "base_model"}:
+        raise ValueError(
+            "baseline_policy must be one of {'stub', 'base_model'}; "
+            f"got {baseline_policy!r}"
+        )
+    baseline_factory: Callable[[], object]
+    baseline_factory = (
+        _base_model_factory(config_path=config_path)
+        if baseline_policy == "base_model"
+        else lambda: StubPolicy(seed=0)
+    )
 
     baseline_suite = run_fixed_suite(
-        lambda: StubPolicy(seed=0),
+        baseline_factory,
         tiers=tiers,
         seeds=seeds,
         disaster_families=effective_disaster_families,

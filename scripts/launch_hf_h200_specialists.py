@@ -135,6 +135,45 @@ def main() -> int:
     )
     parser.add_argument("--only", choices=["fire", "flood", "gas"], action="append")
     parser.add_argument("--source-tgz", type=Path)
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=10,
+        help="Training checkpoint cadence passed to the HF job. Defaults to 10.",
+    )
+    parser.add_argument(
+        "--eval-every",
+        type=int,
+        default=10,
+        help="Eval cadence passed to the HF job. Defaults to 10.",
+    )
+    parser.add_argument(
+        "--upload-every",
+        type=int,
+        default=10,
+        help="Periodic HF artifact upload cadence. Defaults to 10.",
+    )
+    parser.add_argument(
+        "--resume-checkpoint-repo",
+        default="",
+        help="Optional model repo containing a checkpoint tree to seed/resume from.",
+    )
+    parser.add_argument(
+        "--resume-checkpoint-path-template",
+        default="",
+        help=(
+            "Optional checkpoint path template inside --resume-checkpoint-repo. "
+            "Use {family}; e.g. floor-specialists/{family}/vast-canary50/checkpoints"
+        ),
+    )
+    parser.add_argument(
+        "--resume-from-public-vast50",
+        action="store_true",
+        help=(
+            "Shortcut for --resume-checkpoint-repo shashankN777/evacos2-7b-orchestrator-artifacts "
+            "and floor-specialists/{family}/vast-canary50/checkpoints."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -178,7 +217,18 @@ def main() -> int:
                 "HF_ARTIFACT_REPO": artifact_repo,
                 "HF_SOURCE_REPO": artifact_repo,
                 "HF_SOURCE_FILENAME": source_filename,
+                "HF_SPECIALIST_CHECKPOINT_EVERY": str(args.checkpoint_every),
+                "HF_SPECIALIST_EVAL_EVERY": str(args.eval_every),
+                "HF_SPECIALIST_UPLOAD_EVERY": str(args.upload_every),
             }
+            resume_repo = args.resume_checkpoint_repo
+            resume_path_template = args.resume_checkpoint_path_template
+            if args.resume_from_public_vast50:
+                resume_repo = "shashankN777/evacos2-7b-orchestrator-artifacts"
+                resume_path_template = "floor-specialists/{family}/vast-canary50/checkpoints"
+            if resume_repo and resume_path_template:
+                job_env["HF_RESUME_CHECKPOINT_REPO"] = resume_repo
+                job_env["HF_RESUME_CHECKPOINT_PATH"] = resume_path_template.format(family=family)
             if args.steps is not None:
                 job_env["HF_SPECIALIST_STEPS"] = str(args.steps)
             if args.run_label:

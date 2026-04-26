@@ -45,10 +45,16 @@ JSONL_DIR="outputs/logs/${RUN_NAME}"
 CHECKPOINT_DIR="outputs/training/${RUN_NAME}"
 ARTIFACT_DIR="/workspace/evacos2_${DISASTER_FAMILY}_${RUN_LABEL}_${STEPS}_artifacts"
 REPORT="$ARTIFACT_DIR/${DISASTER_FAMILY}_${RUN_LABEL}_${STEPS}_report.json"
+UPLOAD_EVERY="${HF_SPECIALIST_UPLOAD_EVERY:-10}"
+export RUN_NAME_ENV="$RUN_NAME"
+export CHECKPOINT_DIR_ENV="$CHECKPOINT_DIR"
+export METRICS_ENV="$METRICS"
+export CONFIG_ENV="$CONFIG"
 
 echo "HF_SPECIALIST_JOB_START $(date -Is)"
 echo "DISASTER_FAMILY=$DISASTER_FAMILY STEPS=$STEPS RUN_LABEL=$RUN_LABEL CONFIG=$CONFIG BASE_CONFIG=$BASE_CONFIG"
 echo "REPO_URL=$REPO_URL REPO_REF=$REPO_REF"
+echo "CHECKPOINT_UPLOAD_EVERY=$UPLOAD_EVERY"
 
 if [[ -z "${HF_TOKEN:-}" ]]; then
   echo "HF_TOKEN secret is required for artifact upload." >&2
@@ -157,6 +163,37 @@ cd "$WORKDIR"
 
 python -m pip install --ignore-requires-python -e .
 
+if [[ -n "${HF_RESUME_CHECKPOINT_REPO:-}" && -n "${HF_RESUME_CHECKPOINT_PATH:-}" ]]; then
+  echo "RESUME_CHECKPOINT_DOWNLOAD repo=$HF_RESUME_CHECKPOINT_REPO path=$HF_RESUME_CHECKPOINT_PATH"
+  python - <<'PY'
+import os
+import shutil
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+repo_id = os.environ["HF_RESUME_CHECKPOINT_REPO"]
+path_in_repo = os.environ["HF_RESUME_CHECKPOINT_PATH"].strip("/")
+target = Path(os.environ["CHECKPOINT_DIR_ENV"])
+download_root = Path("/workspace/resume_checkpoint_repo")
+if target.exists():
+    shutil.rmtree(target)
+local_root = Path(
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type="model",
+        token=os.environ.get("HF_TOKEN"),
+        allow_patterns=[f"{path_in_repo}/**"],
+        local_dir=str(download_root),
+    )
+)
+source = local_root / path_in_repo
+if not source.exists():
+    raise SystemExit(f"Downloaded checkpoint path is missing: {source}")
+shutil.copytree(source, target)
+print(f"RESUME_CHECKPOINT_READY source={source} target={target}", flush=True)
+PY
+fi
+
 python - <<PY
 from pathlib import Path
 import os
@@ -172,10 +209,10 @@ cfg = yaml.safe_load(base.read_text(encoding="utf-8"))
 cfg["max_steps"] = steps
 cfg.setdefault("rollout", {})["tier_schedule"] = [{"steps": steps, "mix": {"easy": steps}}]
 cfg.setdefault("checkpoint", {})["root_dir"] = "$CHECKPOINT_DIR"
-cfg["checkpoint"]["every_steps"] = int(os.environ.get("HF_SPECIALIST_CHECKPOINT_EVERY", "10" if steps <= 50 else "50"))
+cfg["checkpoint"]["every_steps"] = int(os.environ.get("HF_SPECIALIST_CHECKPOINT_EVERY", "10"))
 cfg.setdefault("metrics", {})["csv_path"] = "$METRICS"
 cfg["metrics"]["jsonl_dir"] = "$JSONL_DIR"
-cfg.setdefault("eval", {})["every_steps"] = int(os.environ.get("HF_SPECIALIST_EVAL_EVERY", "10" if steps <= 50 else "50"))
+cfg.setdefault("eval", {})["every_steps"] = int(os.environ.get("HF_SPECIALIST_EVAL_EVERY", "10"))
 target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
 print(f"GENERATED_CONFIG={target} RUN_NAME={run_name} STEPS={steps}", flush=True)
@@ -191,8 +228,89 @@ PY
 
 python -m pytest tests/test_config_schema.py tests/test_specialist_configs.py tests/test_check_grpo_contrast.py -q --basetemp .pytest_tmp_hf_h200
 
+upload_checkpoint_loop() {
+  python - <<'PY'
+import csv
+import json
+import os
+import time
+from pathlib import Path
+
+from huggingface_hub import HfApi
+
+token = os.environ["HF_TOKEN"]
+api = HfApi(token=token)
+user = api.whoami()["name"]
+repo_id = os.environ.get("HF_ARTIFACT_REPO") or f"{user}/evacos2-h200-specialist-artifacts"
+run_name = os.environ["RUN_NAME_ENV"]
+checkpoint_dir = Path(os.environ["CHECKPOINT_DIR_ENV"])
+metrics_path = Path(os.environ["METRICS_ENV"])
+config_path = Path(os.environ["CONFIG_ENV"])
+upload_every = max(1, int(os.environ.get("HF_SPECIALIST_UPLOAD_EVERY", "10")))
+state_path = Path(os.environ.get("HF_UPLOAD_STATE_PATH", "/workspace/hf_checkpoint_upload_state.json"))
+last_uploaded = -1
+if state_path.exists():
+    try:
+        last_uploaded = int(json.loads(state_path.read_text()).get("last_uploaded", -1))
+    except Exception:
+        last_uploaded = -1
+
+api.create_repo(repo_id=repo_id, repo_type="model", private=True, exist_ok=True)
+while True:
+    stop_path = Path(os.environ.get("HF_UPLOAD_STOP_PATH", "/workspace/stop_checkpoint_uploader"))
+    latest = checkpoint_dir / "latest"
+    meta = latest / "meta.json"
+    if meta.exists():
+        try:
+            payload = json.loads(meta.read_text(encoding="utf-8"))
+            step = int(payload["step"])
+        except Exception as exc:
+            print(f"HF_PERIODIC_UPLOAD_SKIP meta_error={exc!r}", flush=True)
+            step = -1
+        should_upload = step >= 0 and step > last_uploaded and (step + 1) % upload_every == 0
+        if should_upload:
+            ckpt = checkpoint_dir / f"ckpt_{step}"
+            if ckpt.exists():
+                base = f"runs/{run_name}"
+                for folder, dest in ((ckpt, f"{base}/checkpoints/ckpt_{step}"), (latest, f"{base}/checkpoints/latest")):
+                    api.upload_folder(
+                        repo_id=repo_id,
+                        repo_type="model",
+                        folder_path=str(folder),
+                        path_in_repo=dest,
+                        commit_message=f"Upload {run_name} checkpoint step {step}",
+                    )
+                if metrics_path.exists():
+                    api.upload_file(
+                        repo_id=repo_id,
+                        repo_type="model",
+                        path_or_fileobj=str(metrics_path),
+                        path_in_repo=f"{base}/{metrics_path.name}",
+                        commit_message=f"Upload {run_name} metrics step {step}",
+                    )
+                if config_path.exists():
+                    api.upload_file(
+                        repo_id=repo_id,
+                        repo_type="model",
+                        path_or_fileobj=str(config_path),
+                        path_in_repo=f"{base}/{config_path.name}",
+                        commit_message=f"Upload {run_name} config step {step}",
+                    )
+                last_uploaded = step
+                state_path.write_text(json.dumps({"last_uploaded": last_uploaded}, indent=2), encoding="utf-8")
+                print(f"HF_PERIODIC_UPLOAD step={step} repo={repo_id} path={base}/checkpoints/latest", flush=True)
+    if stop_path.exists():
+        break
+    time.sleep(30)
+PY
+}
+
 set +e
 echo "TRAIN_START $(date -Is)"
+export HF_UPLOAD_STOP_PATH="/workspace/stop_${RUN_NAME}_checkpoint_uploader"
+rm -f "$HF_UPLOAD_STOP_PATH"
+upload_checkpoint_loop &
+UPLOAD_PID=$!
 python -u -c "from pathlib import Path; from training.train import run_training; run_training(Path('$CONFIG'))" &
 TRAIN_PID=$!
 while kill -0 "$TRAIN_PID" 2>/dev/null; do
@@ -235,6 +353,8 @@ PY
 done
 wait "$TRAIN_PID"
 TRAIN_EXIT=$?
+touch "$HF_UPLOAD_STOP_PATH"
+wait "$UPLOAD_PID" || true
 set -e
 echo "TRAIN_EXIT=$TRAIN_EXIT $(date -Is)"
 

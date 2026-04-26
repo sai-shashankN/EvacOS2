@@ -133,11 +133,14 @@ def _validate_easy_only_tiers(tiers: Sequence[str]) -> tuple[str, ...]:
     unsupported = sorted(set(normalized) - SUPPORTED_EVAL_TIERS)
     if unsupported:
         raise ValueError(
-            "EvacOS2's current specialist proof lane supports only tier='easy'; "
-            f"got unsupported tiers {unsupported!r}."
+            "EvacOS2's current fixed-suite proof lane is pinned to the controlled "
+            f"tier='easy' benchmark slice; got unsupported tiers {unsupported!r}. "
+            "Use the controlled slice for submitted specialist comparisons, and "
+            "extend SUPPORTED_EVAL_TIERS only when higher-tier scorecards are "
+            "separately validated."
         )
     if not normalized:
-        raise ValueError("At least one eval tier is required; use tier='easy'.")
+        raise ValueError("At least one eval tier is required; use the controlled tier='easy' slice.")
     return normalized
 
 

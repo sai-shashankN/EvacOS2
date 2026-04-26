@@ -8,7 +8,17 @@ pinned: false
 
 # EvacOS2
 
-**OpenEnv-compatible hierarchical multi-agent evacuation benchmark - deterministic simulator, role-aware GRPO, baseline-to-scorecard evaluation.**
+EvacOS2 is a hierarchical multi-agent evacuation simulator for training agents under fire, flood, and gas emergencies.
+
+It also serves as a benchmark for calibrated autonomy in agent teams. The evacuation domain gives the benchmark concrete stakes: partial observability, evolving hazards, bottlenecked exits, delayed consequences, and multiple agents acting at once. Beneath that domain, EvacOS2 tests when local agents should act independently, when they should escalate to an orchestrator, when the orchestrator should intervene, and whether the same model can behave differently across roles.
+
+In other words, EvacOS2 asks not only:
+
+> Can the agents solve the evacuation?
+
+but also:
+
+> Can each agent decide whether it should be the one solving the problem?
 
 ## Judge-Fast Summary
 
@@ -17,9 +27,10 @@ pinned: false
 | **Domain** | Emergency building evacuation under uncertainty, constrained exits, and evolving hazards |
 | **Topology** | `1` orchestrator agent + `5` floor agents |
 | **Hierarchy** | `7B` orchestrator for long-horizon coordination, `3B` floor agents for faster local decisions |
+| **Benchmark focus** | Calibrated autonomy: local action, escalation, intervention, fallback, and same-model role discipline |
 | **Interface** | OpenEnv-compatible live endpoints backed by the simulator, with fixed-task and procedural disaster-family resets |
 | **Endpoints** | `/openenv/reset`, `/openenv/step`, `/openenv/state`, `/openenv/schema`, `/openenv/health`, `/openenv/metadata` |
-| **Training/eval scope** | default fire, flood, and gas specialist response lanes |
+| **Training/eval scope** | controlled fixed-suite fire, flood, and gas specialist response lanes |
 | **Training** | Unsloth + LoRA + GRPO-style training, with shared-model and split-role support |
 | **Specialization path** | Optional `fire`, `flood`, and `gas` specialist configs with a deterministic scope router driven by observed incident metadata |
 | **Evaluation** | Fixed-suite verification, baseline-vs-trained comparison, scorecards, and plots |
@@ -28,7 +39,18 @@ pinned: false
 
 **Bottom line:** real simulator, real training loop, real evaluation pipeline. This is not a prompt wrapper or a config-only stub.
 
-**Evidence status:** the tracked fixed-suite scorecard is baseline-only; the tracked learning evidence is the fire/flood/gas `3B` canary and training-signal artifact trail. A full trained held-out comparison is supported by the evaluator once a selected LoRA adapter checkpoint is restored.
+## Submission Links
+
+| Required field | Public URL |
+|---|---|
+| Hugging Face Space URL for Env | [https://huggingface.co/spaces/shashankN777/evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) |
+| Training run notebook URL | [notebooks/train_evacos_ma.ipynb](https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/notebooks/train_evacos_ma.ipynb) |
+| Blog post URL | [Blog.MD](https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/Blog.MD) |
+| Public model/artifact repo | [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
+
+**Evidence status:** the repo now includes a judge-clean held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the average eval score from `15.08%` to `36.28%` and reduced invalid actions from `51.81%` to `0.00%`. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+
+**Benchmark scope note:** the submitted specialist proof lane uses a controlled fixed-suite slice so the public baseline-vs-trained comparison is deterministic, cheap enough to rerun, and easy to audit. The simulator and training stack are designed for broader curricula; expanding the same fixed-suite evaluator to higher-difficulty slices is future evaluation work, not a change to the environment architecture.
 
 ## Validated Evidence
 
@@ -43,6 +65,7 @@ pinned: false
 | Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / canary and quality-run configs ready | [training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
 | Specialist routing | Deterministic single-disaster router with generalist fallback for mixed/cascade scenarios | Implemented | [training/scope_router.py](training/scope_router.py) |
 | H200 / HF Jobs specialist artifacts | Public fire/flood/gas `3B` floor-specialist canary adapters plus logs and metrics | Public canary artifact trail is linked below; longer quality-run configs are checked in but not claimed as final results | [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
+| Held-out `3B` specialist comparison | Base Qwen2.5-3B/no-LoRA vs trained LoRA specialists on unseen seeds | Verified on H200 | [summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), [eval plot](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png), [invalid-action plot](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics, with `metrics_window.csv`, `metrics_to_date.csv`, and `metrics_summary.json` saved beside each checkpoint | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
@@ -59,6 +82,16 @@ EvacOS2 is built around three contributions:
 2. **Role-aware training.** Shared-model and split-role paths are both supported, including a validated `7B` orchestrator / `3B` floor-agent lane with per-role diagnostics so you can see which role improved and which did not.
 3. **Verifiable evaluation.** Baseline-vs-trained comparison, scorecards, and plots come from real rollouts and checkpoints, not hand-curated examples.
 4. **A practical specialization path.** The same environment can train a mixed-disaster generalist or separate `fire`, `flood`, and `gas` specialists, then route scenarios through a deterministic scope layer using the incident type that would realistically come from building alarms, sensors, or dispatch reports.
+
+## Benchmark Modes
+
+EvacOS2 can be evaluated in three role configurations:
+
+1. **Orchestrator benchmark:** keep floor agents fixed and vary the orchestrator. This tests when the orchestrator should intervene, when it should trust local responders, how it handles outliers, and whether its overrides improve the whole evacuation rather than merely adding control.
+2. **Floor-agent benchmark:** keep the orchestrator fixed and vary the floor agents. This tests instruction following, local decision quality, escalation timing, behavior when the orchestrator is unreachable, and whether a floor agent understands when local autonomy helps or harms the team.
+3. **Same-model role benchmark:** use the same model for both orchestrator and floor-agent roles. This tests whether a model can preserve role discipline despite equal intelligence: acting locally when appropriate, escalating when the team benefits, and avoiding both selfish autonomy and blind deference.
+
+The deeper target is not hierarchy for its own sake. It is controlled interdependence: agents that can work independently, but know when the safer and more useful decision is to route context upward for the whole team.
 
 ## Architecture
 
@@ -145,6 +178,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 | Artifact | Current status | What will land here |
 |---|---|---|
 | **H200 / HF Jobs specialist artifacts** | Public canary trail | Fire/flood/gas H200 canary adapters, logs, and metrics are hosted on Hugging Face; longer quality-run configs are checked in but not claimed as final results |
+| **Held-out `3B` specialist comparison** | Tracked + public artifact repo | [held-out summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), and plots show base/no-LoRA vs trained LoRA on the same unseen seeds |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
 | **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
 | **`7B` orchestrator behavior card** | Tracked | [behavior card](demo/results/7b_orchestrator_behavior_card.md) explains the orchestrator role, split-role smoke evidence, one trace, and the remaining held-out eval gap |
@@ -154,39 +188,74 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 
 ## Public Adapter Artifacts
 
-The public adapter repository is [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). Despite the historical repository name, the visible submitted artifacts here are `3B` floor-specialist H200 canaries, not a final `7B` orchestrator quality checkpoint.
+The public adapter repository is [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). Despite the historical repository name, the visible public artifacts here are primarily `3B` floor-specialist checkpoints and evidence. The `7B` orchestrator path is documented separately as smoke/training-signal validated, not as a final converged orchestrator policy.
 
 | Specialist | Public checkpoint path | Run type |
 |---|---|---|
 | Fire floor specialist | `floor-specialists/fire/h200-canary3-10/checkpoints/latest` | `10`-step H200 canary |
 | Flood floor specialist | `floor-specialists/flood/h200-canary3-10/checkpoints/latest` | `10`-step H200 canary |
 | Gas floor specialist | `floor-specialists/gas/h200-canary-10/checkpoints/latest` | `10`-step H200 canary |
+| Fire floor specialist | `floor-specialists/fire/vast-canary50/checkpoints/latest` | `50`-step validity-stabilized Vast canary |
+| Flood floor specialist | `floor-specialists/flood/vast-canary50/checkpoints/latest` | `50`-step validity-stabilized Vast canary |
+| Gas floor specialist | `floor-specialists/gas/vast-canary50/checkpoints/latest` | `50`-step validity-stabilized Vast canary |
+| Fire floor specialist | `floor-specialists/fire/h200-resume200-from-vast50/checkpoints/ckpt_169` | H200 continuation resumed from Vast `ckpt_49` |
+| Flood floor specialist | `floor-specialists/flood/h200-resume200-from-vast50/checkpoints/ckpt_139` | H200 continuation resumed from Vast `ckpt_49` |
+| Gas floor specialist | `floor-specialists/gas/h200-resume200-from-vast50/checkpoints/ckpt_89` | H200 continuation resumed from Vast `ckpt_49` |
 
-Download the public canary artifacts with:
+Download the public specialist artifacts with:
 
 ```bash
 hf download shashankN777/evacos2-7b-orchestrator-artifacts \
   --include "floor-specialists/fire/h200-canary3-10/**" \
   --include "floor-specialists/flood/h200-canary3-10/**" \
   --include "floor-specialists/gas/h200-canary-10/**" \
+  --include "floor-specialists/fire/vast-canary50/**" \
+  --include "floor-specialists/flood/vast-canary50/**" \
+  --include "floor-specialists/gas/vast-canary50/**" \
+  --include "floor-specialists/fire/h200-resume200-from-vast50/**" \
+  --include "floor-specialists/flood/h200-resume200-from-vast50/**" \
+  --include "floor-specialists/gas/h200-resume200-from-vast50/**" \
+  --include "floor-specialists/h200-resume200-from-vast50-MANIFEST.json" \
   --local-dir outputs/hf_public_artifacts
 ```
 
 Example trained-checkpoint evaluation command after download:
 
 ```bash
-CHECKPOINT_DIR=outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/checkpoints/latest
-CONFIG_PATH=outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/generated.remote-unsloth-3b-fire-floor-specialist-h200-canary3-10.yaml
-METRICS_PATH=outputs/hf_public_artifacts/floor-specialists/fire/h200-canary3-10/remote-unsloth-3b-fire-floor-specialist-h200-canary3-10-metrics.csv
+CHECKPOINT_DIR=outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-from-vast50/checkpoints/latest
+CONFIG_PATH=outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-from-vast50/generated.remote-unsloth-3b-fire-floor-specialist-h200-resume200-200.yaml
+METRICS_PATH=outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-from-vast50/remote-unsloth-3b-fire-floor-specialist-h200-resume200-200-metrics.csv
 
 python -m evaluation.demo_bundle \
+  --baseline-policy base_model \
   --trained-checkpoint "$CHECKPOINT_DIR" \
   --config "$CONFIG_PATH" \
   --training-metrics-path "$METRICS_PATH" \
-  --output-dir outputs/demo_bundle_fire_h200_canary
+  --output-dir outputs/demo_bundle_fire_h200_resume200
 ```
 
-For the checked-in baseline-only fixed suite, use [demo/results/submission_scorecard_baseline.md](demo/results/submission_scorecard_baseline.md). For the tracked learning-signal summary, use [demo/results/specialist_canary50_report.md](demo/results/specialist_canary50_report.md) and [demo/results/3b_specialist_canary50_scores.csv](demo/results/3b_specialist_canary50_scores.csv).
+For the checked-in base-vs-trained held-out specialist comparison, use [demo/results/heldout_3b_base_vs_trained_summary.md](demo/results/heldout_3b_base_vs_trained_summary.md). For the tracked learning-signal summary, use [demo/results/specialist_canary50_report.md](demo/results/specialist_canary50_report.md) and [demo/results/3b_specialist_canary50_scores.csv](demo/results/3b_specialist_canary50_scores.csv).
+
+## Held-Out Base-vs-Trained Result
+
+This is the clearest reward-improvement evidence: same held-out seeds, same fixed-suite evaluator, same family-specific lane. The baseline is `Qwen/Qwen2.5-3B-Instruct` with no LoRA adapter and the same stub orchestrator used by the specialist training lane. The trained policy is the latest mirrored `h200-resume200-from-vast50` LoRA checkpoint.
+
+For submission clarity, this table is reported on the controlled specialist proof slice rather than the full simulator difficulty ceiling. That choice keeps the public result reproducible and directly comparable across base, checkpoint, and trained policies; harder benchmark slices are the next validation milestone using the same evaluator shape.
+
+Headline: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists more than doubled the base/no-LoRA Qwen2.5-3B average eval score, from `15.08%` to `36.28%`, while eliminating invalid actions across all fire, flood, and gas response lanes.
+
+| Family | Held-out episodes | Base eval score | Trained eval score | Delta | Base invalid rate | Trained invalid rate |
+|---|---:|---:|---:|---:|---:|---:|
+| Fire | `10` | `11.58%` | `36.34%` | `+24.76 pp` | `60.00%` | `0.00%` |
+| Flood | `10` | `17.63%` | `36.34%` | `+18.70 pp` | `46.67%` | `0.00%` |
+| Gas | `10` | `16.02%` | `36.16%` | `+20.14 pp` | `48.75%` | `0.00%` |
+| **Average** | `30 total` | **`15.08%`** | **`36.28%`** | **`+21.20 pp`** | **`51.81%`** | **`0.00%`** |
+
+Public artifact path: `heldout/base-model-vs-h200-resume200-3b-heldout10-batched-20260429-065816` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts).
+
+![Held-out 3B base-vs-trained eval score](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png)
+
+![Held-out 3B base-vs-trained invalid action rate](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png)
 
 ## 3B Specialist Training Evidence
 
@@ -200,11 +269,27 @@ The cleanest completed specialist evidence is the `50`-step fire/flood/gas floor
 
 `valid-action score = 100 * (1 - invalid_action_rate)`. The start score is step `0`; the trained checkpoint score is the last-10 average ending at checkpoint `ckpt_49`.
 
+The continuation path resumes from those `ckpt_49` checkpoints and saves/upload-checkpoints every `10` steps. The snapshot below comes from uploaded H200 continuation metrics, so it is a reward-signal trend, not a final held-out scorecard.
+
+| Specialist | Uploaded continuation steps | First-10 invalid rate | Last-10 invalid rate | First-10 raw reward | Last-10 raw reward | Reading |
+|---|---:|---:|---:|---:|---:|---|
+| Fire `3B` | `50 -> 169` | `1.44%` | `0.00%` | `10.56` | `11.59` | reward up, invalid actions eliminated in the latest window |
+| Flood `3B` | `50 -> 139` | `3.69%` | `0.00%` | `7.60` | `8.68` | reward up, invalid actions eliminated in the latest window |
+| Gas `3B` | `50 -> 89` | `0.19%` | `0.15%` | `29.40` | `30.44` | reward up, invalid actions remain near-zero |
+
+Training reward is intentionally diagnostic and contrastive for GRPO. Public evaluation is separate: it reports bounded metrics such as valid-action score, invalid-action rate, saved/lost outcomes, and baseline-vs-trained deltas.
+
 ![3B specialist valid-action score comparison](demo/results/plots/3b_specialist_valid_action_score_comparison.png)
 
 ![3B specialist invalid action rate across checkpoints](demo/results/plots/3b_specialist_invalid_action_checkpoints.png)
 
 ![3B specialist raw reward across checkpoints](demo/results/plots/3b_specialist_raw_reward_checkpoints.png)
+
+![H200 continuation raw reward progress](demo/results/plots/h200_resume200_raw_reward_progress.png)
+
+![H200 continuation normalized reward progress](demo/results/plots/h200_resume200_norm_reward_progress.png)
+
+![H200 continuation invalid-action progress](demo/results/plots/h200_resume200_invalid_action_progress.png)
 
 ## Agent Behavior
 

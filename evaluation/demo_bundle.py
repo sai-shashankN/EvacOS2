@@ -393,6 +393,7 @@ def build_demo_bundle(
     training_metrics_path: Path | None = None,
     trained_normalizer_snapshot: dict | None = None,
     config_path: Path = Path("training/config.yaml"),
+    baseline_policy: str = "stub",
 ) -> DemoBundleResult:
     output_dir.mkdir(parents=True, exist_ok=True)
     comparison = run_comparison(
@@ -406,6 +407,7 @@ def build_demo_bundle(
         skip_trained=skip_trained,
         trained_normalizer_snapshot=trained_normalizer_snapshot,
         config_path=config_path,
+        baseline_policy=baseline_policy,
     )
     plot_paths = [
         path
@@ -482,6 +484,15 @@ def _parse_args() -> argparse.Namespace:
         default=50,
         help="Bounded rounds per eval episode. Keep small for smoke/gate evals.",
     )
+    parser.add_argument(
+        "--baseline-policy",
+        choices=("stub", "base_model"),
+        default="stub",
+        help=(
+            "Baseline reference. Use base_model for judge-facing no-LoRA "
+            "model-vs-trained-LoRA comparisons."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -495,6 +506,7 @@ def main() -> None:
         skip_trained=args.skip_trained,
         training_metrics_path=args.training_metrics_path,
         config_path=args.config,
+        baseline_policy=args.baseline_policy,
     )
     print(result.scorecard_md)
     print(result.summary_md)
