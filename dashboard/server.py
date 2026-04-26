@@ -1,4 +1,4 @@
-"""FastAPI server for the Phase 8 read-only dashboard."""
+"""FastAPI server for the EvacOS2 read-only dashboard."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ APP_ROOT = Path(__file__).resolve().parent
 STATIC_ROOT = APP_ROOT / "static"
 LOG_ROOT = Path(os.environ.get("EVACOS_DASHBOARD_LOG_ROOT", "outputs/logs"))
 
-app = FastAPI(title="Phase 8 Dashboard", version="2026.04.20")
+app = FastAPI(title="EvacOS2 Dashboard", version="2026.04.26")
 
 
 @app.get("/health")

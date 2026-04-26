@@ -45,7 +45,6 @@ EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and mu
 ## Repo landmarks
 
 - Project overview: [README.md](README.md)
-- Hackathon runbook: [HACKATHON.md](HACKATHON.md)
 - Demo bundle builder: [evaluation/demo_bundle.py](evaluation/demo_bundle.py)
 - Fixed-suite evaluation: [evaluation/fixed_suite.py](evaluation/fixed_suite.py)
 - Scope router: [training/scope_router.py](training/scope_router.py)

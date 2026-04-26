@@ -123,6 +123,31 @@ def append_training_metrics_row(csv_path: Path, row: dict) -> None:
         writer.writerow(row)
 
 
+def read_training_metrics_rows(csv_path: Path) -> list[dict[str, str]]:
+    """Read a training metrics CSV using the canonical schema."""
+    if not csv_path.exists() or csv_path.stat().st_size == 0:
+        return []
+
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames != _METRICS_COLUMNS:
+            raise RuntimeError(
+                "Training metrics CSV header does not match the current schema. "
+                f"Refusing to read {csv_path}; start a new metrics path or migrate the file."
+            )
+        return list(reader)
+
+
+def write_training_metrics_rows(csv_path: Path, rows: list[dict]) -> None:
+    """Write a standalone metrics CSV snapshot with the canonical header."""
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_METRICS_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
 # ---------------------------------------------------------------------------
 # JSONL trace writer
 # ---------------------------------------------------------------------------

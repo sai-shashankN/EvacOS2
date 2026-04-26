@@ -20,7 +20,12 @@ from typing import Any
 
 from training.compat import patch_transformers_cache_exports
 from training.config_schema import TrainingConfig
-from training.metrics import append_training_metrics_row, write_trace_row
+from training.metrics import (
+    append_training_metrics_row,
+    read_training_metrics_rows,
+    write_trace_row,
+    write_training_metrics_rows,
+)
 
 _TRAINER_DIAGNOSTIC_KEYS: tuple[str, ...] = (
     "loss",
@@ -2188,6 +2193,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
     stop_requested = False
     last_completed_step = start_step - 1
+    last_metrics_checkpoint_step = bundle.step if bundle is not None else start_step - 1
     zero_signal_streak = 0
 
     def _signal_handler(signum: int, frame: Any) -> None:
@@ -2199,6 +2205,83 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
     def _seed_gen() -> int:
         return rng.randint(0, 2_147_483_647)
+
+    def _metrics_step(row: dict[str, Any]) -> int | None:
+        try:
+            return int(row.get("step", ""))
+        except (TypeError, ValueError):
+            return None
+
+    def _floatish(value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _recent_means(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> dict[str, float]:
+        recent = rows[-10:]
+        means: dict[str, float] = {}
+        for key in keys:
+            values = [
+                parsed
+                for row in recent
+                if (parsed := _floatish(row.get(key))) is not None
+            ]
+            if values:
+                means[key] = round(sum(values) / len(values), 6)
+        return means
+
+    def _write_checkpoint_metrics_snapshot(step: int, ckpt_dir: Path) -> None:
+        """Save plot-friendly metrics slices beside each checkpoint."""
+        nonlocal last_metrics_checkpoint_step
+
+        window_path = ckpt_dir / "metrics_window.csv"
+        if step <= last_metrics_checkpoint_step and window_path.exists():
+            return
+
+        rows = read_training_metrics_rows(metrics_path)
+        to_date = [
+            row
+            for row in rows
+            if (row_step := _metrics_step(row)) is not None and row_step <= step
+        ]
+        window = [
+            row
+            for row in to_date
+            if (row_step := _metrics_step(row)) is not None
+            and row_step > last_metrics_checkpoint_step
+        ]
+
+        write_training_metrics_rows(ckpt_dir / "metrics_to_date.csv", to_date)
+        write_training_metrics_rows(window_path, window)
+
+        summary = {
+            "checkpoint_step": step,
+            "previous_checkpoint_step": last_metrics_checkpoint_step,
+            "window_row_count": len(window),
+            "to_date_row_count": len(to_date),
+            "window_start_step": _metrics_step(window[0]) if window else None,
+            "window_end_step": _metrics_step(window[-1]) if window else None,
+            "source_metrics_csv": str(metrics_path),
+            "latest_metrics": to_date[-1] if to_date else {},
+            "last_10_means": _recent_means(
+                to_date,
+                (
+                    "mean_raw_reward_floor",
+                    "mean_norm_reward_floor",
+                    "invalid_action_rate",
+                    "floor_agent_group_raw_reward_std_mean",
+                    "floor_agent_advantage_std",
+                    "floor_agent_policy_loss",
+                    "policy_loss",
+                ),
+            ),
+        }
+        with open(ckpt_dir / "metrics_summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, sort_keys=True)
+        last_metrics_checkpoint_step = step
 
     def _write_checkpoint(step: int) -> None:
         ckpt_dir = ckpt_root / f"ckpt_{step}"
@@ -2271,6 +2354,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
 
         # 3. Write meta.json, RNG files, optimizer state into ckpt_N
         save_checkpoint(ckpt_root, new_bundle)
+        _write_checkpoint_metrics_snapshot(step, ckpt_dir)
 
         # 4. Publish latest/ last (atomic)
         atomic_replace_latest(ckpt_root, ckpt_dir)
