@@ -8,6 +8,18 @@ GitHub: [https://github.com/sai-shashankN/EvacOS2](https://github.com/sai-shasha
 
 Hugging Face Space: [https://huggingface.co/spaces/shashankN777/evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv)
 
+## Judge TL;DR
+
+EvacOS2 is built to score well on the things that matter in this hackathon:
+
+- **Environment innovation:** this is a hierarchical emergency-response simulator, not another toy grid world or static prompt set. It tests partial observability, bottlenecks, cross-floor coordination, and disaster-specific response.
+- **Storytelling:** the demo has a clear mental model: fast `3B` floor responders handle local movement, while a slower `7B` orchestrator handles building-level priorities and outliers.
+- **Training evidence:** the public fire/flood/gas `3B` canaries show valid-action improvement, checkpointed LoRA adapters, logs, metrics, and plots from real runs.
+- **OpenEnv compliance:** the live Hugging Face Space exposes `/openenv/health`, `/openenv/metadata`, `/openenv/schema`, `/openenv/reset`, `/openenv/step`, and `/openenv/state`.
+- **Honest frontier:** the `7B` orchestrator is included as a smoke/training-signal validated coordination layer, with a dedicated behavior card explaining what is proven and what the next held-out eval should measure.
+
+The project’s pitch is simple: if LLM agents are going to operate in the world, they need environments where actions have consequences. EvacOS2 gives them one.
+
 ## The Core Idea
 
 Most LLM evaluation still happens in prompt-response form. That is useful, but it misses a large part of what agents need to do in the world: maintain state, delegate work, react to partial observations, and make decisions whose consequences unfold over time.
