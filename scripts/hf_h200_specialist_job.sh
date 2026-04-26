@@ -62,6 +62,36 @@ python -m pip install \
 python -m pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 python -m pip install --no-deps "trl==0.24.0" "peft==0.19.1" accelerate bitsandbytes
 
+python - <<'PY'
+import subprocess
+import time
+
+deadline = time.time() + 300
+last_error = None
+while time.time() < deadline:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            print(
+                "cuda_ready",
+                torch.__version__,
+                torch.version.cuda,
+                torch.cuda.get_device_name(0),
+            )
+            raise SystemExit(0)
+        last_error = "torch.cuda.is_available() returned False"
+    except SystemExit:
+        raise
+    except Exception as exc:
+        last_error = repr(exc)
+    subprocess.run(["nvidia-smi"], check=False)
+    print(f"cuda_not_ready_yet: {last_error}; sleeping 15s", flush=True)
+    time.sleep(15)
+
+raise SystemExit(f"CUDA did not become available within 300s: {last_error}")
+PY
+
 if [[ "${EVACOS_USE_EXISTING_SOURCE:-0}" == "1" ]]; then
   echo "Using existing source tree at $WORKDIR"
 else
