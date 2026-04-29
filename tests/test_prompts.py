@@ -223,7 +223,7 @@ def test_build_floor_prompt_includes_identity_contract_and_action_mask():
     assert "Round: 3" in system_message
     assert "Step: 3/10" in system_message
     assert f"Allowed actions: {json.dumps(obs.action_mask)}" in system_message
-    assert "Prompt template version: 2026.04.20" in user_message
+    assert "Prompt template version: 2026.04.29" in user_message
     assert f"Prompt template version: {PROMPT_TEMPLATE_VERSION}" in user_message
     assert "Rooms:" in user_message
     assert "Exits:" in user_message
@@ -367,9 +367,13 @@ def test_build_orchestrator_prompt_includes_identity_contract_and_action_mask():
     assert "Round: 5" in system_message
     assert "Step: 5/12" in system_message
     assert f"Allowed actions: {json.dumps(obs.action_mask)}" in system_message
-    assert "Prompt template version: 2026.04.20" in user_message
+    assert "Prompt template version: 2026.04.29" in user_message
     assert f"Prompt template version: {PROMPT_TEMPLATE_VERSION}" in user_message
     assert "Floor summaries:" in user_message
+    assert "Copyable evacuate_floor_priority arguments:" in user_message
+    assert '"ordered_floor_ids":["floor_1"]' in user_message
+    assert "Orchestrator argument schemas:" in user_message
+    assert "never use priority_floor" in user_message
     assert "Beliefs: total=4, avg_conf=0.75, resolved=1, pending=3" in user_message
     assert "Recent floor actions:" in user_message
     assert "Unresolved escalations:" in user_message

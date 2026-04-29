@@ -209,6 +209,22 @@ def _normalize_action_payload(
     if normalized.get("arguments") is None or not isinstance(normalized.get("arguments"), dict):
         normalized["arguments"] = {}
 
+    action_type = normalized.get("action_type")
+    arguments = normalized.get("arguments")
+    if action_type == ActionTypeMA.evacuate_floor_priority.value and isinstance(arguments, dict):
+        priority_floor = arguments.get("priority_floor")
+        if "ordered_floor_ids" not in arguments and priority_floor:
+            if isinstance(priority_floor, str):
+                arguments["ordered_floor_ids"] = [priority_floor]
+            elif isinstance(priority_floor, list):
+                arguments["ordered_floor_ids"] = [
+                    str(floor_id)
+                    for floor_id in priority_floor
+                    if isinstance(floor_id, str) and floor_id.strip()
+                ]
+            arguments.pop("priority_floor", None)
+            normalized["arguments"] = arguments
+
     if normalized.get("client_metadata") is None:
         normalized["client_metadata"] = {}
 

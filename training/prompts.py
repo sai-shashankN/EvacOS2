@@ -15,7 +15,7 @@ from evacos_ma.schemas.multi_agent import (
 )
 
 # Version must match the module-level constant in training/__init__
-PROMPT_TEMPLATE_VERSION = "2026.04.20"
+PROMPT_TEMPLATE_VERSION = "2026.04.29"
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +140,27 @@ def _floor_route_argument_menu(obs: FloorAgentObservationMA) -> str:
                     bundles.append({"from_room_id": from_room, "to_room_id": to_room})
 
     return _compact_json({"route_within_floor_arguments": bundles[:12]})
+
+
+def _orchestrator_priority_argument_menu(obs: OrchestratorObservationMA) -> str:
+    """Return a copyable priority-floor argument bundle from visible summaries."""
+
+    summaries = list(obs.floor_summaries or [])
+    ordered = sorted(
+        summaries,
+        key=lambda summary: (
+            float(getattr(summary, "hazard_severity", 0.0) or 0.0),
+            float(getattr(summary, "queue_pressure", 0.0) or 0.0),
+            int(getattr(summary, "known_civilian_count", 0) or 0),
+        ),
+        reverse=True,
+    )
+    floor_ids = [summary.floor_id for summary in ordered if summary.floor_id]
+    if not floor_ids:
+        floor_ids = [summary.floor_id for summary in summaries if summary.floor_id]
+    return _compact_json(
+        {"evacuate_floor_priority_arguments": {"ordered_floor_ids": floor_ids[:5]}}
+    )
 
 
 def build_floor_prompt(
@@ -318,6 +339,26 @@ def build_orchestrator_prompt(
     )
 
     user_parts: list[str] = [f"Floor summaries: {summaries_str}"]
+    user_parts.append(
+        "Copyable evacuate_floor_priority arguments: "
+        + _orchestrator_priority_argument_menu(obs)
+    )
+    user_parts.append(
+        "Orchestrator argument schemas: "
+        'evacuate_floor_priority -> {"ordered_floor_ids":["floor_1","floor_3"]}; '
+        'broadcast_directive -> {"directive":{"directive_id":"dir_5","target":"floor_1",'
+        '"directive_type":"prioritize_evacuation","params":{},"priority":"high",'
+        f'"issued_round":{obs.round_id},"ttl_rounds":5,"human_readable_note":"..."}}; '
+        'override_floor_agent -> {"target_floor_agent_id":"floor_1_agent",'
+        '"replacement_action_type":"wait","replacement_arguments":{}}; '
+        'request_explanation -> {"target_floor_agent_id":"floor_1_agent","question":"..."}; '
+        "wait -> {}."
+    )
+    user_parts.append(
+        "For evacuate_floor_priority, never use priority_floor, floor, target_floor, "
+        "or a single string. The only valid key is ordered_floor_ids and its value "
+        "must be a list of visible floor_id strings."
+    )
 
     # Belief rollup
     br = obs.belief_rollup
