@@ -1,0 +1,189 @@
+{
+  "schema_version": "visualization_trace_v1",
+  "trajectory_id": "sample_evac_replay",
+  "building": {
+    "building_id": "sample_building",
+    "floors": [
+      {
+        "floor_id": 0,
+        "width": 800,
+        "height": 420,
+        "rooms": [
+          {"room_id": "F0_R0", "geometry": {"x": 30, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F0_R1", "geometry": {"x": 220, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F0_R2", "geometry": {"x": 410, "y": 38, "w": 150, "h": 118}, "capacity": 24},
+          {"room_id": "F0_R3", "geometry": {"x": 600, "y": 38, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F0_R4", "geometry": {"x": 30, "y": 264, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F0_R5", "geometry": {"x": 220, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F0_R6", "geometry": {"x": 410, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F0_R7", "geometry": {"x": 600, "y": 264, "w": 150, "h": 118}, "capacity": 18}
+        ],
+        "corridors": [{"corridor_id": "F0_C0", "geometry": {"x": 0, "y": 190, "w": 800, "h": 36}}],
+        "exits": [{"exit_id": "F0_W", "x": 24, "y": 208}, {"exit_id": "F0_E", "x": 776, "y": 208}]
+      },
+      {
+        "floor_id": 1,
+        "width": 800,
+        "height": 420,
+        "rooms": [
+          {"room_id": "F1_R0", "geometry": {"x": 30, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F1_R1", "geometry": {"x": 220, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F1_R2", "geometry": {"x": 410, "y": 38, "w": 150, "h": 118}, "capacity": 24},
+          {"room_id": "F1_R3", "geometry": {"x": 600, "y": 38, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F1_R4", "geometry": {"x": 30, "y": 264, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F1_R5", "geometry": {"x": 220, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F1_R6", "geometry": {"x": 410, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F1_R7", "geometry": {"x": 600, "y": 264, "w": 150, "h": 118}, "capacity": 18}
+        ],
+        "corridors": [{"corridor_id": "F1_C0", "geometry": {"x": 0, "y": 190, "w": 800, "h": 36}}],
+        "exits": [{"exit_id": "F1_W", "x": 24, "y": 208}, {"exit_id": "F1_E", "x": 776, "y": 208}]
+      },
+      {
+        "floor_id": 2,
+        "width": 800,
+        "height": 420,
+        "rooms": [
+          {"room_id": "F2_R0", "geometry": {"x": 30, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F2_R1", "geometry": {"x": 220, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F2_R2", "geometry": {"x": 410, "y": 38, "w": 150, "h": 118}, "capacity": 24},
+          {"room_id": "F2_R3", "geometry": {"x": 600, "y": 38, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F2_R4", "geometry": {"x": 30, "y": 264, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F2_R5", "geometry": {"x": 220, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F2_R6", "geometry": {"x": 410, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F2_R7", "geometry": {"x": 600, "y": 264, "w": 150, "h": 118}, "capacity": 18}
+        ],
+        "corridors": [{"corridor_id": "F2_C0", "geometry": {"x": 0, "y": 190, "w": 800, "h": 36}}],
+        "exits": [{"exit_id": "F2_W", "x": 24, "y": 208}, {"exit_id": "F2_E", "x": 776, "y": 208}]
+      },
+      {
+        "floor_id": 3,
+        "width": 800,
+        "height": 420,
+        "rooms": [
+          {"room_id": "F3_R0", "geometry": {"x": 30, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F3_R1", "geometry": {"x": 220, "y": 38, "w": 150, "h": 118}, "capacity": 20},
+          {"room_id": "F3_R2", "geometry": {"x": 410, "y": 38, "w": 150, "h": 118}, "capacity": 24},
+          {"room_id": "F3_R3", "geometry": {"x": 600, "y": 38, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F3_R4", "geometry": {"x": 30, "y": 264, "w": 150, "h": 118}, "capacity": 18},
+          {"room_id": "F3_R5", "geometry": {"x": 220, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F3_R6", "geometry": {"x": 410, "y": 264, "w": 150, "h": 118}, "capacity": 22},
+          {"room_id": "F3_R7", "geometry": {"x": 600, "y": 264, "w": 150, "h": 118}, "capacity": 18}
+        ],
+        "corridors": [{"corridor_id": "F3_C0", "geometry": {"x": 0, "y": 190, "w": 800, "h": 36}}],
+        "exits": [{"exit_id": "F3_W", "x": 24, "y": 208}, {"exit_id": "F3_E", "x": 776, "y": 208}]
+      }
+    ]
+  },
+  "frames": [
+    {
+      "round_id": 0,
+      "per_floor_civilians": {"floor_0": 12, "floor_1": 18, "floor_2": 16, "floor_3": 9},
+      "per_floor_hazard_severity": {"floor_0": 0.05, "floor_1": 0.16, "floor_2": 0.38, "floor_3": 0.18},
+      "room_states": {
+        "F0_R1": {"civilians": 5, "hazard": 0.04, "casualties": 0, "disaster_type": "smoke", "exit_id": "F0_W"},
+        "F0_R4": {"civilians": 7, "hazard": 0.02, "casualties": 0, "disaster_type": "", "exit_id": "F0_W"},
+        "F1_R0": {"civilians": 6, "hazard": 0.08, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F1_R2": {"civilians": 4, "hazard": 0.03, "casualties": 0, "disaster_type": "", "exit_id": "F1_E"},
+        "F1_R5": {"civilians": 8, "hazard": 0.16, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F2_R2": {"civilians": 7, "hazard": 0.62, "casualties": 0, "disaster_type": "fire", "exit_id": "F2_E"},
+        "F2_R6": {"civilians": 9, "hazard": 0.48, "casualties": 0, "disaster_type": "smoke", "exit_id": "F2_E"},
+        "F3_R1": {"civilians": 4, "hazard": 0.10, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_W"},
+        "F3_R5": {"civilians": 5, "hazard": 0.18, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_E"}
+      },
+      "directive_feed": [{"agent_id": "orchestrator", "directive_type": "prioritize_exit", "target_floor_id": "floor_2", "message": "Route smoke-exposed rooms to east stairs."}],
+      "override_feed": [],
+      "action_feed": [{"agent_id": "floor_2", "action_type": "route_within_floor", "summary": "Move R2 and R6 groups toward east corridor."}],
+      "reward_ticker": {"orchestrator": 0.1, "floor_2": 0.04},
+      "score_snapshot": {"saved": 0, "lost": 0, "invalid_actions": 0},
+      "done": false
+    },
+    {
+      "round_id": 1,
+      "per_floor_civilians": {"floor_0": 10, "floor_1": 16, "floor_2": 13, "floor_3": 9},
+      "per_floor_hazard_severity": {"floor_0": 0.08, "floor_1": 0.2, "floor_2": 0.52, "floor_3": 0.25},
+      "room_states": {
+        "F0_R1": {"civilians": 4, "hazard": 0.08, "casualties": 0, "disaster_type": "smoke", "exit_id": "F0_W"},
+        "F0_R4": {"civilians": 6, "hazard": 0.04, "casualties": 0, "disaster_type": "", "exit_id": "F0_W"},
+        "F1_R0": {"civilians": 5, "hazard": 0.10, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F1_R2": {"civilians": 4, "hazard": 0.06, "casualties": 0, "disaster_type": "", "exit_id": "F1_E"},
+        "F1_R5": {"civilians": 7, "hazard": 0.24, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F2_R2": {"civilians": 5, "hazard": 0.76, "casualties": 0, "disaster_type": "fire", "exit_id": "F2_E"},
+        "F2_R6": {"civilians": 8, "hazard": 0.55, "casualties": 0, "disaster_type": "smoke", "exit_id": "F2_E"},
+        "F3_R1": {"civilians": 4, "hazard": 0.16, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_W"},
+        "F3_R5": {"civilians": 5, "hazard": 0.25, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_E"}
+      },
+      "directive_feed": [{"agent_id": "orchestrator", "directive_type": "hold_elevator", "target_floor_id": "floor_1", "message": "Keep elevator clear for mobility-limited group."}],
+      "override_feed": [{"agent_id": "orchestrator", "override_type": "replace_route", "target_agent_id": "floor_2", "reason": "West corridor hazard exceeded threshold."}],
+      "action_feed": [{"agent_id": "floor_1", "action_type": "open_exit", "summary": "Open west stair door."}],
+      "reward_ticker": {"orchestrator": 0.18, "floor_1": 0.07, "floor_2": 0.12},
+      "score_snapshot": {"saved": 3, "lost": 0, "invalid_actions": 0},
+      "done": false
+    },
+    {
+      "round_id": 2,
+      "per_floor_civilians": {"floor_0": 8, "floor_1": 13, "floor_2": 9, "floor_3": 7},
+      "per_floor_hazard_severity": {"floor_0": 0.11, "floor_1": 0.28, "floor_2": 0.66, "floor_3": 0.35},
+      "room_states": {
+        "F0_R1": {"civilians": 3, "hazard": 0.12, "casualties": 0, "disaster_type": "smoke", "exit_id": "F0_W"},
+        "F0_R4": {"civilians": 5, "hazard": 0.05, "casualties": 0, "disaster_type": "", "exit_id": "F0_W"},
+        "F1_R0": {"civilians": 4, "hazard": 0.13, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F1_R2": {"civilians": 3, "hazard": 0.08, "casualties": 0, "disaster_type": "", "exit_id": "F1_E"},
+        "F1_R5": {"civilians": 6, "hazard": 0.34, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F2_R2": {"civilians": 3, "hazard": 0.86, "casualties": 1, "disaster_type": "fire", "exit_id": "F2_E"},
+        "F2_R6": {"civilians": 6, "hazard": 0.63, "casualties": 0, "disaster_type": "smoke", "exit_id": "F2_E"},
+        "F3_R1": {"civilians": 3, "hazard": 0.22, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_W"},
+        "F3_R5": {"civilians": 4, "hazard": 0.35, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_E"}
+      },
+      "directive_feed": [{"agent_id": "orchestrator", "directive_type": "evacuate_floor_priority", "target_floor_id": "floor_2", "message": "Floor 2 receives priority until smoke clears."}],
+      "override_feed": [],
+      "action_feed": [{"agent_id": "floor_3", "action_type": "handoff_to_orchestrator", "summary": "Requests cross-floor stair priority."}],
+      "reward_ticker": {"orchestrator": 0.22, "floor_2": 0.16, "floor_3": 0.05},
+      "score_snapshot": {"saved": 8, "lost": 1, "invalid_actions": 0},
+      "done": false
+    },
+    {
+      "round_id": 3,
+      "per_floor_civilians": {"floor_0": 4, "floor_1": 9, "floor_2": 5, "floor_3": 3},
+      "per_floor_hazard_severity": {"floor_0": 0.16, "floor_1": 0.36, "floor_2": 0.72, "floor_3": 0.42},
+      "room_states": {
+        "F0_R1": {"civilians": 1, "hazard": 0.16, "casualties": 0, "disaster_type": "smoke", "exit_id": "F0_W"},
+        "F0_R4": {"civilians": 3, "hazard": 0.08, "casualties": 0, "disaster_type": "", "exit_id": "F0_W"},
+        "F1_R0": {"civilians": 3, "hazard": 0.20, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F1_R2": {"civilians": 2, "hazard": 0.12, "casualties": 0, "disaster_type": "", "exit_id": "F1_E"},
+        "F1_R5": {"civilians": 4, "hazard": 0.46, "casualties": 1, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F2_R2": {"civilians": 1, "hazard": 0.93, "casualties": 2, "disaster_type": "fire", "exit_id": "F2_E"},
+        "F2_R6": {"civilians": 4, "hazard": 0.72, "casualties": 0, "disaster_type": "smoke", "exit_id": "F2_E"},
+        "F3_R1": {"civilians": 1, "hazard": 0.28, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_W"},
+        "F3_R5": {"civilians": 2, "hazard": 0.42, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_E"}
+      },
+      "directive_feed": [],
+      "override_feed": [{"agent_id": "orchestrator", "override_type": "call_elevator", "target_agent_id": "floor_1", "reason": "Wheelchair group at landing."}],
+      "action_feed": [{"agent_id": "floor_0", "action_type": "route_within_floor", "summary": "Final ground-floor group exits west."}],
+      "reward_ticker": {"orchestrator": 0.31, "floor_0": 0.2, "floor_1": 0.13},
+      "score_snapshot": {"saved": 18, "lost": 3, "invalid_actions": 0},
+      "done": false
+    },
+    {
+      "round_id": 4,
+      "per_floor_civilians": {"floor_0": 0, "floor_1": 2, "floor_2": 1, "floor_3": 0},
+      "per_floor_hazard_severity": {"floor_0": 0.2, "floor_1": 0.44, "floor_2": 0.78, "floor_3": 0.5},
+      "room_states": {
+        "F0_R1": {"civilians": 0, "hazard": 0.22, "casualties": 0, "disaster_type": "smoke", "exit_id": "F0_W"},
+        "F0_R4": {"civilians": 0, "hazard": 0.10, "casualties": 0, "disaster_type": "", "exit_id": "F0_W"},
+        "F1_R0": {"civilians": 0, "hazard": 0.26, "casualties": 0, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F1_R2": {"civilians": 0, "hazard": 0.16, "casualties": 0, "disaster_type": "", "exit_id": "F1_E"},
+        "F1_R5": {"civilians": 2, "hazard": 0.56, "casualties": 1, "disaster_type": "smoke", "exit_id": "F1_W"},
+        "F2_R2": {"civilians": 0, "hazard": 0.96, "casualties": 2, "disaster_type": "fire", "exit_id": "F2_E"},
+        "F2_R6": {"civilians": 1, "hazard": 0.78, "casualties": 0, "disaster_type": "smoke", "exit_id": "F2_E"},
+        "F3_R1": {"civilians": 0, "hazard": 0.34, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_W"},
+        "F3_R5": {"civilians": 0, "hazard": 0.50, "casualties": 0, "disaster_type": "smoke", "exit_id": "F3_E"}
+      },
+      "directive_feed": [{"agent_id": "orchestrator", "directive_type": "final_sweep", "target_floor_id": "floor_1", "message": "Confirm remaining rooms before terminal exit."}],
+      "override_feed": [],
+      "action_feed": [{"agent_id": "floor_1", "action_type": "scout", "summary": "Verifies R5 clear."}],
+      "reward_ticker": {"orchestrator": 0.4, "floor_1": 0.17, "floor_2": 0.14},
+      "score_snapshot": {"saved": 49, "lost": 3, "invalid_actions": 0},
+      "done": true
+    }
+  ]
+}
