@@ -188,15 +188,7 @@ The continuation run resumes from those `ckpt_49` specialists and uploads checkp
 | Flood `3B` | `50 -> 199` | `3.69%` | `0.00%` | `23.85% @ 183` | `7.60` | `8.83` | reward up, latest window clean, but three isolated invalid spikes need trace review |
 | Gas `3B` | `50 -> 199` | `0.19%` | `5.89%` | `58.85% @ 195` | `29.40` | `31.89` | reward up, but the latest-window invalid rate is caused by a severe step-195 spike, not smooth improvement |
 
-![3B specialist valid-action score comparison](demo/results/plots/3b_specialist_valid_action_score_comparison.png)
-
-![3B specialist invalid action rate across checkpoints](demo/results/plots/3b_specialist_invalid_action_checkpoints.png)
-
-![3B specialist raw reward across checkpoints](demo/results/plots/3b_specialist_raw_reward_checkpoints.png)
-
 ![H200 continuation raw reward progress](demo/results/plots/h200_resume200_raw_reward_progress.png)
-
-![H200 continuation normalized reward progress](demo/results/plots/h200_resume200_norm_reward_progress.png)
 
 ![H200 continuation invalid-action progress](demo/results/plots/h200_resume200_invalid_action_progress.png)
 

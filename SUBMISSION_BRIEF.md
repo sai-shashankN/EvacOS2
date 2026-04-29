@@ -28,11 +28,9 @@ Benchmark scope: the submitted fixed-suite specialist comparison is a controlled
   - `demo/results/heldout_3b_base_vs_trained_summary.csv`
   - `demo/results/plots/heldout_3b_base_vs_trained_eval_score.png`
   - `demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png`
-  - `demo/results/specialist_canary50_report.md`
-  - `demo/results/plots/3b_specialist_valid_action_score_comparison.png`
   - `demo/results/plots/h200_resume200_raw_reward_progress.png`
-  - `demo/results/plots/h200_resume200_norm_reward_progress.png`
   - `demo/results/plots/h200_resume200_invalid_action_progress.png`
+  - `demo/results/specialist_canary50_report.md`
   - `demo/results/7b_orchestrator_behavior_card.md`
   - `demo/results/submission_scorecard_baseline.md`
   - `demo/results/baseline_fixed_suite.csv`
