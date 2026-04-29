@@ -1,14 +1,12 @@
-# Held-Out 3B Specialist Eval: Base Model vs Trained LoRA
+# Held-Out 3B Specialist Eval: ckpt_199 Base Model vs Trained LoRA
 
-Same held-out seeds, same evaluator, same family-specific lane. Baseline is Qwen2.5-3B-Instruct with no LoRA adapter and the same stub orchestrator used by the specialist training lane. This is a fast 10-seed held-out run; the 50-seed path uses the same command shape.
+Same held-out seeds `9101-9110`, same evaluator, same family-specific controlled proof lane. Baseline is Qwen2.5-3B-Instruct with no LoRA adapter; trained policies are fire/flood/gas H200 resume200 `ckpt_199` LoRA specialists.
 
-This is the controlled fixed-suite proof slice used for the public submission. It is meant to make the base-vs-trained comparison deterministic and auditable; broader higher-difficulty slices use the same evaluation shape as future validation work.
-
-Headline: on this 30-episode held-out specialist evaluation, trained LoRA floor specialists more than doubled the base/no-LoRA Qwen2.5-3B average eval score, from 15.08% to 36.28%, while reducing invalid actions from 51.81% to 0.00%.
+Headline: average eval score 58.65% -> 80.45% (+21.80 pp); invalid actions 39.18% -> 0.87%.
 
 | Family | Episodes | Base eval score | Trained eval score | Delta | Base invalid | Trained invalid | Save-rate delta |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| fire | 10 | 11.58% | 36.34% | 24.76 | 0.6000 | 0.0000 | +0.2099 |
-| flood | 10 | 17.63% | 36.34% | 18.70 | 0.4667 | 0.0000 | +0.1498 |
-| gas | 10 | 16.02% | 36.16% | 20.14 | 0.4875 | 0.0000 | +0.1680 |
-| **average** | **30 total** | **15.08%** | **36.28%** | **21.20** | **0.5181** | **0.0000** | **+0.1759** |
+| fire | 10 | 84.77% | 96.64% | +11.87 pp | 27.52% | 2.60% | +0.6400 |
+| flood | 10 | 22.95% | 45.42% | +22.47 pp | 47.67% | 0.00% | +0.1876 |
+| gas | 10 | 68.22% | 99.28% | +31.06 pp | 42.34% | 0.00% | +0.6740 |
+| **Average** | **30 total** | **58.65%** | **80.45%** | **+21.80 pp** | **39.18%** | **0.87%** | **+0.5006** |

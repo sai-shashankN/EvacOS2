@@ -153,16 +153,16 @@ The cleanest reward-improvement evidence is now a held-out `3B` specialist compa
 
 This is intentionally framed as a controlled proof lane, not the full ceiling of the simulator. For judges, the goal is a clean scientific slice: same seeds, same evaluator, same task families, base model versus trained adapter. The simulator and curriculum can be extended to harder slices, but the submitted public table focuses on the benchmark slice we can make reproducible and inspectable end to end.
 
-The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists more than doubled the base/no-LoRA Qwen2.5-3B average eval score, from `15.08%` to `36.28%`, while eliminating invalid actions across all fire, flood, and gas response lanes.
+The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B average eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`.
 
 | Family | Held-out episodes | Base eval score | Trained eval score | Delta | Base invalid rate | Trained invalid rate |
 |---|---:|---:|---:|---:|---:|---:|
-| Fire | `10` | `11.58%` | `36.34%` | `+24.76 pp` | `60.00%` | `0.00%` |
-| Flood | `10` | `17.63%` | `36.34%` | `+18.70 pp` | `46.67%` | `0.00%` |
-| Gas | `10` | `16.02%` | `36.16%` | `+20.14 pp` | `48.75%` | `0.00%` |
-| **Average** | `30 total` | **`15.08%`** | **`36.28%`** | **`+21.20 pp`** | **`51.81%`** | **`0.00%`** |
+| Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` |
+| Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` |
+| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` |
+| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** |
 
-The public artifact path is `heldout/base-model-vs-h200-resume200-3b-heldout10-batched-20260429-065816` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). This run is intentionally labeled as a fast `10`-seed held-out comparison; the same evaluator path supports larger seed counts.
+The public artifact path is `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). This run is intentionally labeled as a fast `10`-seed held-out comparison; the same evaluator path supports larger seed counts.
 
 ![Held-out 3B base-vs-trained eval score](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png)
 

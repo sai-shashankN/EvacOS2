@@ -49,7 +49,7 @@ but also:
 | Public model/artifact repo | [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
 | Source code on GitHub | [sai-shashankN/EvacOS2](https://github.com/sai-shashankN/EvacOS2) |
 
-**Evidence status:** the repo now includes a judge-clean held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the average eval score from `15.08%` to `36.28%` and reduced invalid actions from `51.81%` to `0.00%`. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+**Evidence status:** the repo now includes a judge-clean held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the average eval score from `58.65%` to `80.45%` and reduced invalid actions from `39.18%` to `0.87%`. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
 
 **Benchmark scope note:** the submitted specialist proof lane uses a controlled fixed-suite slice so the public baseline-vs-trained comparison is deterministic, cheap enough to rerun, and easy to audit. The simulator and training stack are designed for broader curricula; expanding the same fixed-suite evaluator to higher-difficulty slices is future evaluation work, not a change to the environment architecture.
 
@@ -243,16 +243,16 @@ This is the clearest reward-improvement evidence: same held-out seeds, same fixe
 
 For submission clarity, this table is reported on the controlled specialist proof slice rather than the full simulator difficulty ceiling. That choice keeps the public result reproducible and directly comparable across base, checkpoint, and trained policies; harder benchmark slices are the next validation milestone using the same evaluator shape.
 
-Headline: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists more than doubled the base/no-LoRA Qwen2.5-3B average eval score, from `15.08%` to `36.28%`, while eliminating invalid actions across all fire, flood, and gas response lanes.
+Headline: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B average eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`.
 
 | Family | Held-out episodes | Base eval score | Trained eval score | Delta | Base invalid rate | Trained invalid rate |
 |---|---:|---:|---:|---:|---:|---:|
-| Fire | `10` | `11.58%` | `36.34%` | `+24.76 pp` | `60.00%` | `0.00%` |
-| Flood | `10` | `17.63%` | `36.34%` | `+18.70 pp` | `46.67%` | `0.00%` |
-| Gas | `10` | `16.02%` | `36.16%` | `+20.14 pp` | `48.75%` | `0.00%` |
-| **Average** | `30 total` | **`15.08%`** | **`36.28%`** | **`+21.20 pp`** | **`51.81%`** | **`0.00%`** |
+| Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` |
+| Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` |
+| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` |
+| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** |
 
-Public artifact path: `heldout/base-model-vs-h200-resume200-3b-heldout10-batched-20260429-065816` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts).
+Public artifact path: `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts).
 
 ![Held-out 3B base-vs-trained eval score](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png)
 
