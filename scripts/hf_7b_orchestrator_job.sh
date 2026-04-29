@@ -158,6 +158,7 @@ PY
 METRICS="outputs/training/${RUN_NAME}-metrics.csv"
 JSONL_DIR="outputs/logs/${RUN_NAME}"
 CHECKPOINT_DIR="outputs/training/${RUN_NAME}"
+export METRICS JSONL_DIR CHECKPOINT_DIR
 
 if [[ -n "${HF_7B_RESUME_CHECKPOINT_REPO:-}" ]]; then
   python - <<'PY'
