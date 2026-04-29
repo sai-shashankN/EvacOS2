@@ -134,6 +134,7 @@ PY
 python -m pytest tests/test_config_schema.py tests/test_scope_router.py tests/test_check_grpo_contrast.py -q --basetemp .pytest_tmp_hf_7b
 
 RUN_CONFIG="/workspace/${RUN_NAME}.yaml"
+export RUN_CONFIG
 python - <<'PY'
 import os
 from pathlib import Path
