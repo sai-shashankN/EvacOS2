@@ -31,6 +31,15 @@ for required in HF_SOURCE_REPO HF_SOURCE_FILENAME HF_FIRE_ADAPTER_REPO HF_FIRE_A
   fi
 done
 
+if [[ -n "${HF_7B_RESUME_CHECKPOINT_REPO:-}" && -z "${HF_7B_RESUME_CHECKPOINT_PATH:-}" ]]; then
+  echo "HF_7B_RESUME_CHECKPOINT_PATH is required when HF_7B_RESUME_CHECKPOINT_REPO is set." >&2
+  exit 2
+fi
+if [[ -z "${HF_7B_RESUME_CHECKPOINT_REPO:-}" && -n "${HF_7B_RESUME_CHECKPOINT_PATH:-}" ]]; then
+  echo "HF_7B_RESUME_CHECKPOINT_REPO is required when HF_7B_RESUME_CHECKPOINT_PATH is set." >&2
+  exit 2
+fi
+
 mkdir -p /workspace/source "$WORKDIR" "$HF_HOME" "$ARTIFACT_DIR" /workspace/frozen_specialists
 
 apt-get update
@@ -149,6 +158,34 @@ PY
 METRICS="outputs/training/${RUN_NAME}-metrics.csv"
 JSONL_DIR="outputs/logs/${RUN_NAME}"
 CHECKPOINT_DIR="outputs/training/${RUN_NAME}"
+
+if [[ -n "${HF_7B_RESUME_CHECKPOINT_REPO:-}" ]]; then
+  python - <<'PY'
+import os
+import shutil
+from pathlib import Path
+from huggingface_hub import snapshot_download
+
+repo_id = os.environ["HF_7B_RESUME_CHECKPOINT_REPO"]
+checkpoint_path = os.environ["HF_7B_RESUME_CHECKPOINT_PATH"].strip("/")
+target = Path(os.environ["CHECKPOINT_DIR"])
+local_root = Path("/workspace/resume_7b_checkpoint_repo")
+snapshot_download(
+    repo_id=repo_id,
+    repo_type="model",
+    token=os.environ["HF_TOKEN"],
+    allow_patterns=[f"{checkpoint_path}/**"],
+    local_dir=str(local_root),
+)
+source = local_root / checkpoint_path
+if not (source / "latest" / "meta.json").exists():
+    raise SystemExit(f"Resume checkpoint is missing latest/meta.json: {source}")
+if target.exists():
+    shutil.rmtree(target)
+shutil.copytree(source, target)
+print(f"RESUME_CHECKPOINT_COPIED repo={repo_id} path={checkpoint_path} target={target}", flush=True)
+PY
+fi
 
 set +e
 echo "TRAIN_START $(date -Is)"

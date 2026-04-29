@@ -87,6 +87,8 @@ def main() -> int:
     parser.add_argument("--flood-adapter-path")
     parser.add_argument("--gas-adapter-repo")
     parser.add_argument("--gas-adapter-path")
+    parser.add_argument("--resume-checkpoint-repo")
+    parser.add_argument("--resume-checkpoint-path")
     parser.add_argument("--source-tgz", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -123,6 +125,16 @@ def main() -> int:
         "HF_GAS_ADAPTER_REPO": _env_or_arg(env_values, args.gas_adapter_repo, "HF_GAS_ADAPTER_REPO"),
         "HF_GAS_ADAPTER_PATH": _env_or_arg(env_values, args.gas_adapter_path, "HF_GAS_ADAPTER_PATH"),
     }
+    resume_checkpoint_repo = (args.resume_checkpoint_repo or env_values.get("HF_7B_RESUME_CHECKPOINT_REPO", "")).strip()
+    resume_checkpoint_path = (args.resume_checkpoint_path or env_values.get("HF_7B_RESUME_CHECKPOINT_PATH", "")).strip()
+    if bool(resume_checkpoint_repo) != bool(resume_checkpoint_path):
+        raise SystemExit(
+            "Pass both --resume-checkpoint-repo and --resume-checkpoint-path, "
+            "or set both HF_7B_RESUME_CHECKPOINT_REPO and HF_7B_RESUME_CHECKPOINT_PATH."
+        )
+    if resume_checkpoint_repo:
+        job_env["HF_7B_RESUME_CHECKPOINT_REPO"] = resume_checkpoint_repo
+        job_env["HF_7B_RESUME_CHECKPOINT_PATH"] = resume_checkpoint_path
     plan = {
         "namespace": namespace,
         "artifact_repo": artifact_repo,
@@ -131,6 +143,9 @@ def main() -> int:
         "steps": args.steps,
         "run_name": args.run_name,
         "source": f"{artifact_repo}/{source_filename}",
+        "resume_checkpoint": (
+            f"{resume_checkpoint_repo}/{resume_checkpoint_path}" if resume_checkpoint_repo else None
+        ),
         "dry_run": args.dry_run,
     }
     print(json.dumps(plan, indent=2))
