@@ -1,4 +1,4 @@
-specialist,start_step,latest_step,rows,first10_invalid_action_rate,last10_invalid_action_rate,first10_mean_raw_reward_floor,last10_mean_raw_reward_floor,first10_mean_norm_reward_floor,last10_mean_norm_reward_floor
-Fire 3B,50,199,150,0.01442,0.0,10.556000000000001,12.059999999999999,1.97543,1.43716
-Flood 3B,50,199,150,0.03693,0.0,7.6000000000000005,8.83,1.02227,1.07071
-Gas 3B,50,199,150,0.00192,0.05885,29.402,31.89,2.21035,3.01402
+specialist,start_step,latest_step,rows,first10_invalid_action_rate,last10_invalid_action_rate,max_invalid_action_rate,max_invalid_step,invalid_spikes_gt_10pct,first10_mean_raw_reward_floor,last10_mean_raw_reward_floor,first10_mean_norm_reward_floor,last10_mean_norm_reward_floor
+Fire 3B,50,199,150,0.01442,0.0,0.0962,61,0,10.556000000000001,12.059999999999999,1.97543,1.43716
+Flood 3B,50,199,150,0.03693,0.0,0.2385,183,3,7.6000000000000005,8.83,1.02227,1.07071
+Gas 3B,50,199,150,0.00192,0.05885,0.5885,195,2,29.402,31.89,2.21035,3.01402

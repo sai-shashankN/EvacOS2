@@ -273,11 +273,11 @@ The cleanest completed specialist evidence is the `50`-step fire/flood/gas floor
 
 The continuation path resumes from those `ckpt_49` checkpoints and saves/upload-checkpoints every `10` steps. The snapshot below comes from uploaded H200 continuation metrics, so it is a reward-signal trend, not a final held-out scorecard.
 
-| Specialist | Uploaded continuation steps | First-10 invalid rate | Last-10 invalid rate | First-10 raw reward | Last-10 raw reward | Reading |
-|---|---:|---:|---:|---:|---:|---|
-| Fire `3B` | `50 -> 199` | `1.44%` | `0.00%` | `10.56` | `12.06` | reward up, invalid actions eliminated in the latest window |
-| Flood `3B` | `50 -> 199` | `3.69%` | `0.00%` | `7.60` | `8.83` | reward up, invalid actions eliminated in the latest window |
-| Gas `3B` | `50 -> 199` | `0.19%` | `5.89%` | `29.40` | `31.89` | reward up, with latest-window invalid actions needing continued monitoring |
+| Specialist | Uploaded continuation steps | First-10 invalid rate | Last-10 invalid rate | Max invalid spike | First-10 raw reward | Last-10 raw reward | Reading |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Fire `3B` | `50 -> 199` | `1.44%` | `0.00%` | `9.62% @ 61` | `10.56` | `12.06` | reward up, no invalid spike above the `10%` watch line |
+| Flood `3B` | `50 -> 199` | `3.69%` | `0.00%` | `23.85% @ 183` | `7.60` | `8.83` | reward up, latest window clean, but three isolated invalid spikes need trace review |
+| Gas `3B` | `50 -> 199` | `0.19%` | `5.89%` | `58.85% @ 195` | `29.40` | `31.89` | reward up, but the latest-window invalid rate is caused by a severe step-195 spike, not smooth improvement |
 
 Training reward is intentionally diagnostic and contrastive for GRPO. Public evaluation is separate: it reports bounded metrics such as valid-action score, invalid-action rate, saved/lost outcomes, and baseline-vs-trained deltas.
 
