@@ -11,6 +11,7 @@ from training.policy_adapter import StubPolicy
 from evaluation.fixed_suite import (
     EpisodeResult,
     FixedSuiteResult,
+    _bounded_civilian_counts,
     _count_actions,
     _seed_eval_normalizer,
     run_fixed_suite,
@@ -79,6 +80,14 @@ def test_action_diagnostics_count_current_and_legacy_action_names():
         counts,
         ("evacuate_floor_priority", "evacuate_floor", "evacuate_room"),
     ) == 4
+
+
+def test_bounded_civilian_counts_prevent_impossible_eval_totals():
+    saved, lost, remaining = _bounded_civilian_counts(total=10, saved=14, lost=3)
+
+    assert saved == 10
+    assert lost == 0
+    assert remaining == 0
 
 
 def test_fixed_suite_json_round_trip():

@@ -181,6 +181,16 @@ def _eval_score_pct(*, save_rate: float, invalid_action_rate: float) -> float:
     return 100.0 * _clamp01(save_rate) * _clamp01(valid_multiplier)
 
 
+def _bounded_civilian_counts(*, total: int, saved: int, lost: int) -> tuple[int, int, int]:
+    """Return evaluation-safe counts even if a simulator trace double-counts a cohort."""
+
+    bounded_total = max(int(total), 1)
+    bounded_saved = max(0, min(int(saved), bounded_total))
+    bounded_lost = max(0, min(int(lost), bounded_total - bounded_saved))
+    bounded_remaining = max(0, bounded_total - bounded_saved - bounded_lost)
+    return bounded_saved, bounded_lost, bounded_remaining
+
+
 def _resolve_reward_config(
     reward_config: Mapping[str, object] | None,
     rationale_mode: str,
@@ -252,9 +262,12 @@ def _build_episode_result(
 
     state = env.get_internal_state(actual_episode_id)
     total_civilians = max(state.total_civilians.total, 1)
-    saved = state.civilians_saved.total
-    lost = state.civilians_lost.total
-    remaining = max(total_civilians - saved - lost, 0)
+    saved, lost, remaining = _bounded_civilian_counts(
+        total=total_civilians,
+        saved=state.civilians_saved.total,
+        lost=state.civilians_lost.total,
+    )
+    save_rate = float(saved / total_civilians)
 
     floor_raw = _mean(
         value for key, value in batch_result.total_raw_reward_by_role.items() if key != "orchestrator"
@@ -280,12 +293,12 @@ def _build_episode_result(
         wall_clock_s=float(batch_result.wall_clock_seconds),
         termination_reason=batch_result.done_reason,
         total_civilians=int(total_civilians),
-        civilians_saved=saved,
-        civilians_lost=lost,
+        civilians_saved=int(saved),
+        civilians_lost=int(lost),
         civilians_remaining=int(remaining),
-        save_rate=float(saved / total_civilians),
+        save_rate=save_rate,
         eval_score_pct=_eval_score_pct(
-            save_rate=float(saved / total_civilians),
+            save_rate=save_rate,
             invalid_action_rate=float(invalid_count / action_count) if action_count else 0.0,
         ),
         invalid_action_rate=float(invalid_count / action_count) if action_count else 0.0,

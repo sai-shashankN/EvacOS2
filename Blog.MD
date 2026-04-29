@@ -153,14 +153,16 @@ The cleanest reward-improvement evidence is now a held-out `3B` specialist compa
 
 This is intentionally framed as a controlled proof lane, not the full ceiling of the simulator. For judges, the goal is a clean scientific slice: same seeds, same evaluator, same task families, base model versus trained adapter. The simulator and curriculum can be extended to harder slices, but the submitted public table focuses on the benchmark slice we can make reproducible and inspectable end to end.
 
-The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B average eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`.
+The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`.
 
-| Family | Held-out episodes | Base eval score | Trained eval score | Delta | Base invalid rate | Trained invalid rate |
-|---|---:|---:|---:|---:|---:|---:|
-| Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` |
-| Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` |
-| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` |
-| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** |
+One audit detail is worth making explicit because this is a simulator, not a static worksheet: the scorecard records raw save-rate overflow counts for fire/gas traces where the simulator-accounting layer can double-count saved civilians. The public eval score is still bounded to `0-100%`, but the cleanest learning signal is the invalid-action reduction plus the bounded score movement, not a claim that this is a final converged policy.
+
+| Family | Held-out episodes | Base bounded score | Trained bounded score | Delta | Base invalid rate | Trained invalid rate | Raw save overflows |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` | `5/7` |
+| Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` | `0/0` |
+| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` | `2/8` |
+| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** | **audit logged** |
 
 The public artifact path is `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). This run is intentionally labeled as a fast `10`-seed held-out comparison; the same evaluator path supports larger seed counts.
 
@@ -182,9 +184,9 @@ The continuation run resumes from those `ckpt_49` specialists and uploads checkp
 
 | Specialist | Uploaded continuation steps | First-10 invalid rate | Last-10 invalid rate | First-10 raw reward | Last-10 raw reward | Reading |
 |---|---:|---:|---:|---:|---:|---|
-| Fire `3B` | `50 -> 169` | `1.44%` | `0.00%` | `10.56` | `11.59` | reward up, invalid actions eliminated in the latest window |
-| Flood `3B` | `50 -> 139` | `3.69%` | `0.00%` | `7.60` | `8.68` | reward up, invalid actions eliminated in the latest window |
-| Gas `3B` | `50 -> 89` | `0.19%` | `0.15%` | `29.40` | `30.44` | reward up, invalid actions remain near-zero |
+| Fire `3B` | `50 -> 199` | `1.44%` | `0.00%` | `10.56` | `12.06` | reward up, invalid actions eliminated in the latest window |
+| Flood `3B` | `50 -> 199` | `3.69%` | `0.00%` | `7.60` | `8.83` | reward up, invalid actions eliminated in the latest window |
+| Gas `3B` | `50 -> 199` | `0.19%` | `5.89%` | `29.40` | `31.89` | reward up, with latest-window invalid actions needing continued monitoring |
 
 ![3B specialist valid-action score comparison](demo/results/plots/3b_specialist_valid_action_score_comparison.png)
 

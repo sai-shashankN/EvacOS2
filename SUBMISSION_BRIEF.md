@@ -2,7 +2,7 @@
 
 EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and multiple floor agents must coordinate people movement, exits, overrides, and hazard response inside a deterministic simulator.
 
-Evidence status: the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus trained LoRA specialists on the same unseen seeds and evaluator. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the average eval score from `58.65%` to `80.45%` and reduced invalid actions from `39.18%` to `0.87%`. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+Evidence status: the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus trained LoRA specialists on the same unseen seeds and evaluator. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `58.65%` to `80.45%` and reduced invalid actions from `39.18%` to `0.87%`. The scorecard also includes raw save-rate overflow audit columns for fire/gas simulator-accounting traces, so the safest claim is invalid-action reduction plus bounded score movement rather than final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
 
 Benchmark scope: the submitted fixed-suite specialist comparison is a controlled proof slice. That keeps the baseline-vs-trained result deterministic, judge-runnable, and directly auditable. The simulator and training configs are built for broader curricula; higher-difficulty scorecards are the next evaluation milestone after the submitted slice.
 
@@ -40,7 +40,7 @@ Benchmark scope: the submitted fixed-suite specialist comparison is a controlled
 
 ## Public adapter paths
 
-The public artifact repo is historically named `evacos2-7b-orchestrator-artifacts`, but the visible submitted checkpoints are `3B` floor-specialist H200 canaries:
+The public artifact repo is historically named `evacos2-7b-orchestrator-artifacts`, but it also hosts the current `3B` floor-specialist H200 checkpoints and held-out evidence:
 
 - fire: `floor-specialists/fire/h200-canary3-10/checkpoints/latest`
 - flood: `floor-specialists/flood/h200-canary3-10/checkpoints/latest`
@@ -48,10 +48,9 @@ The public artifact repo is historically named `evacos2-7b-orchestrator-artifact
 - fire stronger seed: `floor-specialists/fire/vast-canary50/checkpoints/latest`
 - flood stronger seed: `floor-specialists/flood/vast-canary50/checkpoints/latest`
 - gas stronger seed: `floor-specialists/gas/vast-canary50/checkpoints/latest`
-- latest fire continuation: `floor-specialists/fire/h200-resume200-from-vast50/checkpoints/ckpt_169`
-- latest flood continuation: `floor-specialists/flood/h200-resume200-from-vast50/checkpoints/ckpt_139`
-- latest gas continuation: `floor-specialists/gas/h200-resume200-from-vast50/checkpoints/ckpt_89`
-- latest continuation manifest: `floor-specialists/h200-resume200-from-vast50-MANIFEST.json`
+- latest fire continuation: `floor-specialists/fire/h200-resume200-ckpt199/checkpoints/ckpt_199`
+- latest flood continuation: `floor-specialists/flood/h200-resume200-ckpt199/checkpoints/ckpt_199`
+- latest gas continuation: `floor-specialists/gas/h200-resume200-ckpt199/checkpoints/ckpt_199`
 - held-out base-vs-trained eval: `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214`
 
 Download example:
@@ -64,10 +63,9 @@ hf download shashankN777/evacos2-7b-orchestrator-artifacts \
   --include "floor-specialists/fire/vast-canary50/**" \
   --include "floor-specialists/flood/vast-canary50/**" \
   --include "floor-specialists/gas/vast-canary50/**" \
-  --include "floor-specialists/fire/h200-resume200-from-vast50/**" \
-  --include "floor-specialists/flood/h200-resume200-from-vast50/**" \
-  --include "floor-specialists/gas/h200-resume200-from-vast50/**" \
-  --include "floor-specialists/h200-resume200-from-vast50-MANIFEST.json" \
+  --include "floor-specialists/fire/h200-resume200-ckpt199/**" \
+  --include "floor-specialists/flood/h200-resume200-ckpt199/**" \
+  --include "floor-specialists/gas/h200-resume200-ckpt199/**" \
   --include "heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214/**" \
   --local-dir outputs/hf_public_artifacts
 ```
@@ -77,22 +75,22 @@ Evaluation example:
 ```bash
 python -m evaluation.demo_bundle \
   --baseline-policy base_model \
-  --trained-checkpoint outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-from-vast50/checkpoints/latest \
-  --config outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-from-vast50/generated.remote-unsloth-3b-fire-floor-specialist-h200-resume200-200.yaml \
-  --training-metrics-path outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-from-vast50/remote-unsloth-3b-fire-floor-specialist-h200-resume200-200-metrics.csv \
+  --trained-checkpoint outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-ckpt199/checkpoints/latest \
+  --config outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-ckpt199/generated.remote-unsloth-3b-fire-floor-specialist-h200-resume200-200.yaml \
+  --training-metrics-path outputs/hf_public_artifacts/floor-specialists/fire/h200-resume200-ckpt199/remote-unsloth-3b-fire-floor-specialist-h200-resume200-200-metrics.csv \
   --output-dir outputs/demo_bundle_fire_h200_resume200
 ```
 
 ## Held-out base-vs-trained headline
 
-On a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B average eval score by `+21.80 pp` and cut invalid actions from `39.18%` to `0.87%` across fire, flood, and gas response lanes.
+On a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score by `+21.80 pp` and cut invalid actions from `39.18%` to `0.87%` across fire, flood, and gas response lanes. The CSV includes raw save-rate overflow audit columns; use invalid-action reduction as the cleanest learning headline.
 
-| Family | Episodes | Base eval score | Trained eval score | Delta | Base invalid | Trained invalid |
-|---|---:|---:|---:|---:|---:|---:|
-| Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` |
-| Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` |
-| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` |
-| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** |
+| Family | Episodes | Base bounded score | Trained bounded score | Delta | Base invalid | Trained invalid | Raw save overflows |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` | `5/7` |
+| Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` | `0/0` |
+| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` | `2/8` |
+| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** | **audit logged** |
 
 ## Core competitive claims
 
