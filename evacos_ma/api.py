@@ -6,9 +6,11 @@ no Unity bridge. Only the core reset/step/state/grader/tasks endpoints remain.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import Body, FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, TypeAdapter
 
 from evacos_ma.env import EvacEnvironment
@@ -33,6 +35,14 @@ app = FastAPI(
 
 # Include the multi-agent OpenEnv router under /openenv prefix
 app.include_router(openenv_router)
+
+_VISUALIZER_DIR = Path(__file__).resolve().parents[1] / "visualizer"
+if _VISUALIZER_DIR.exists():
+    app.mount(
+        "/visualizer",
+        StaticFiles(directory=_VISUALIZER_DIR, html=True),
+        name="visualizer",
+    )
 
 env = EvacEnvironment()
 
