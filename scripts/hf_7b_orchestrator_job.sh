@@ -190,7 +190,47 @@ fi
 
 set +e
 echo "TRAIN_START $(date -Is)"
-python -u -c "from pathlib import Path; from training.train import run_training; run_training(Path('$RUN_CONFIG'))"
+python -u -c "from pathlib import Path; from training.train import run_training; run_training(Path('$RUN_CONFIG'))" &
+TRAIN_PID=$!
+while kill -0 "$TRAIN_PID" 2>/dev/null; do
+  sleep 60
+  echo "TRAIN_HEARTBEAT $(date -Is) pid=$TRAIN_PID"
+  nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits || true
+  python - <<PY || true
+from pathlib import Path
+import csv
+import json
+import time
+
+metrics = Path("$METRICS")
+ckpt = Path("$CHECKPOINT_DIR/latest")
+payload = {
+    "metrics_exists": metrics.exists(),
+    "latest_checkpoint_exists": ckpt.exists(),
+}
+if metrics.exists():
+    payload["metrics_age_seconds"] = round(time.time() - metrics.stat().st_mtime, 1)
+    try:
+        rows = list(csv.DictReader(metrics.open(newline="", encoding="utf-8")))
+    except Exception as exc:
+        payload["metrics_error"] = repr(exc)
+        rows = []
+    payload["rows"] = len(rows)
+    if rows:
+        watch = [
+            "step",
+            "invalid_action_rate",
+            "mean_norm_reward_orch",
+            "mean_raw_reward_orch",
+            "orchestrator_advantage_std",
+            "orchestrator_group_raw_reward_std_mean",
+            "policy_loss",
+        ]
+        payload["last"] = {k: rows[-1].get(k) for k in watch if k in rows[-1]}
+print("TRAIN_PROGRESS " + json.dumps(payload, sort_keys=True), flush=True)
+PY
+done
+wait "$TRAIN_PID"
 TRAIN_EXIT=$?
 set -e
 echo "TRAIN_EXIT=$TRAIN_EXIT $(date -Is)"
