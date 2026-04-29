@@ -47,6 +47,7 @@ but also:
 | Training run notebook URL | [notebooks/train_evacos_ma.ipynb](https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/notebooks/train_evacos_ma.ipynb) |
 | Blog post URL | [Blog.MD](https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/Blog.MD) |
 | Public model/artifact repo | [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
+| Source code on GitHub | [sai-shashankN/EvacOS2](https://github.com/sai-shashankN/EvacOS2) |
 
 **Evidence status:** the repo now includes a judge-clean held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the average eval score from `15.08%` to `36.28%` and reduced invalid actions from `51.81%` to `0.00%`. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
 
