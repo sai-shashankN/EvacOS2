@@ -14,6 +14,7 @@ BASE_CONFIG="${BASE_CONFIG:-training/config.remote-unsloth-7b-orchestrator-froze
 WORKDIR="${EVACOS_WORKDIR:-/workspace/EvacOS2}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-/workspace/evacos2_7b_orchestrator_artifacts}"
 REPORT="$ARTIFACT_DIR/${RUN_NAME}_report.json"
+export RUN_NAME STEPS BASE_CONFIG WORKDIR ARTIFACT_DIR REPORT
 
 echo "HF_7B_JOB_START $(date -Is)"
 echo "RUN_NAME=$RUN_NAME STEPS=$STEPS BASE_CONFIG=$BASE_CONFIG"
