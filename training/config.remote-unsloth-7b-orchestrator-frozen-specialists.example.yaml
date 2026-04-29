@@ -11,7 +11,7 @@ model:
   floor_base: "Qwen/Qwen2.5-3B-Instruct"
   dtype: "bfloat16"
   max_prompt_tokens: 1024
-  max_completion_tokens: 128
+  max_completion_tokens: 192
 roles:
   trainable: ["orchestrator"]
   frozen_floor_specialist_adapter_paths:

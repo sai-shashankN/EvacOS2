@@ -49,3 +49,26 @@ def test_check_grpo_contrast_rejects_flat_final_window(tmp_path: Path):
 
     assert any("floor_agent_group_raw_reward_std_mean" in error for error in errors)
     assert any("floor_agent_advantage_std" in error for error in errors)
+
+
+def test_check_grpo_contrast_accepts_orchestrator_only_columns(tmp_path: Path):
+    csv_path = _write_csv(
+        tmp_path / "metrics.csv",
+        "\n".join(
+            [
+                "step,orchestrator_group_raw_reward_std_mean,orchestrator_advantage_std,"
+                "floor_agent_group_raw_reward_std_mean,floor_agent_advantage_std",
+                "0,0.5,1.0,0.0,0.0",
+                "1,0.7,1.1,0.0,0.0",
+            ]
+        ),
+    )
+
+    assert check_csv(
+        csv_path,
+        columns=(
+            "orchestrator_group_raw_reward_std_mean",
+            "orchestrator_advantage_std",
+        ),
+        last_n=2,
+    ) == []

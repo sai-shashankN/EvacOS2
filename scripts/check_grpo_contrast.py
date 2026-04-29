@@ -65,6 +65,16 @@ def main() -> int:
         description="Fail if GRPO contrast metrics are missing or flat in metrics CSV files."
     )
     parser.add_argument("csv_paths", nargs="+", type=Path)
+    parser.add_argument(
+        "--columns",
+        nargs="+",
+        default=list(DEFAULT_COLUMNS),
+        help=(
+            "Metric columns that must have non-zero final-window means. "
+            "Defaults to floor-agent GRPO columns; pass orchestrator columns "
+            "for orchestrator-only runs with frozen floor specialists."
+        ),
+    )
     parser.add_argument("--last-n", type=int, default=10)
     parser.add_argument("--min-mean", type=float, default=1e-8)
     args = parser.parse_args()
@@ -74,7 +84,14 @@ def main() -> int:
         if not csv_path.exists():
             all_errors.append(f"{csv_path}: file does not exist")
             continue
-        all_errors.extend(check_csv(csv_path, last_n=args.last_n, min_mean=args.min_mean))
+        all_errors.extend(
+            check_csv(
+                csv_path,
+                columns=tuple(args.columns),
+                last_n=args.last_n,
+                min_mean=args.min_mean,
+            )
+        )
 
     if all_errors:
         for error in all_errors:

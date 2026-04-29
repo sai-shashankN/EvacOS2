@@ -15,7 +15,7 @@ from evacos_ma.schemas.multi_agent import (
 )
 
 # Version must match the module-level constant in training/__init__
-PROMPT_TEMPLATE_VERSION = "2026.04.29"
+PROMPT_TEMPLATE_VERSION = "2026.04.29.1"
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +292,8 @@ def build_floor_prompt(
         "No prose, no markdown, no code fences, and keep it on one line.\n"
         "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
         "action_type (one of the allowed actions), arguments (dict).\n"
+        "Never output the literal placeholder action_type=\"action_type\"; replace it with an exact "
+        "allowed action such as route_within_floor or wait.\n"
         "round_id must be the integer shown above, not a string or composite id.\n"
         "client_metadata must be omitted or {}, never null.\n"
         "Omit optional keys during training; especially omit rationale to keep the JSON short.\n"
@@ -400,9 +402,11 @@ def build_orchestrator_prompt(
         "No prose, no markdown, no code fences, and keep it on one line.\n"
         "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
         "action_type (one of the allowed actions), arguments (dict).\n"
+        "Never output the literal placeholder action_type=\"action_type\"; replace it with an exact "
+        "allowed action from the action mask.\n"
         "round_id must be the integer shown above, not a string or composite id.\n"
         "client_metadata must be omitted or {}, never null.\n"
-        "Optional keys: rationale, client_metadata. Omit optional keys unless they are needed.\n"
+        "Omit optional keys during training; especially omit rationale to keep the JSON short.\n"
         f"Prompt template version: {version}"
     )
 

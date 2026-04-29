@@ -2405,6 +2405,8 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             all_norm_floor: list[float] = []
             invalid_count = 0
             total_samples = 0
+            invalid_by_role: dict[str, int] = {"orchestrator": 0, "floor_agent": 0}
+            total_by_role: dict[str, int] = {"orchestrator": 0, "floor_agent": 0}
             for result in results:
                 all_raw_orch.append(result.total_raw_reward_by_role.get("orchestrator", 0.0))
                 all_norm_orch.append(result.total_normalized_reward_by_role.get("orchestrator", 0.0))
@@ -2416,8 +2418,11 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                         all_norm_floor.append(value)
                 for sample in result.samples:
                     total_samples += 1
+                    role = "orchestrator" if getattr(sample, "role", "") == "orchestrator" else "floor_agent"
+                    total_by_role[role] = total_by_role.get(role, 0) + 1
                     if sample.parsed_action.get("fallback_reason"):
                         invalid_count += 1
+                        invalid_by_role[role] = invalid_by_role.get(role, 0) + 1
 
             rollout_metrics = _compute_rollout_metrics(results)
             metrics_row = {
@@ -2442,6 +2447,18 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 "norm_reward_std_orch": round(_population_std(all_norm_orch), 4),
                 "norm_reward_std_floor": round(_population_std(all_norm_floor), 4),
                 "invalid_action_rate": round(invalid_count / max(total_samples, 1), 4),
+                "orchestrator_invalid_action_rate": round(
+                    invalid_by_role.get("orchestrator", 0)
+                    / max(total_by_role.get("orchestrator", 0), 1),
+                    4,
+                ),
+                "floor_agent_invalid_action_rate": round(
+                    invalid_by_role.get("floor_agent", 0)
+                    / max(total_by_role.get("floor_agent", 0), 1),
+                    4,
+                ),
+                "orchestrator_invalid_action_count": invalid_by_role.get("orchestrator", 0),
+                "floor_agent_invalid_action_count": invalid_by_role.get("floor_agent", 0),
                 **rollout_metrics,
                 "episodes_seen": (step + 1) * config.rollout.episodes_per_step,
             }

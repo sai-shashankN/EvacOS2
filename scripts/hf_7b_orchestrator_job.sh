@@ -320,7 +320,8 @@ set -e
 echo "TRAIN_EXIT=$TRAIN_EXIT $(date -Is)"
 
 set +e
-python scripts/check_grpo_contrast.py "$METRICS"
+python scripts/check_grpo_contrast.py "$METRICS" \
+  --columns orchestrator_group_raw_reward_std_mean orchestrator_advantage_std
 CONTRAST_EXIT=$?
 set -e
 echo "CONTRAST_EXIT=$CONTRAST_EXIT $(date -Is)"

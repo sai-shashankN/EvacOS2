@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _PROMPT_TRUNCATION_WARNED = False
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+_ACTION_TYPE_VALUES = {item.value for item in ActionTypeMA}
 
 
 def _as_policy_result(result: PolicyResult | str | object) -> PolicyResult:
@@ -172,6 +173,7 @@ def _normalize_action_payload(
     expected_episode_id: str,
     expected_round_id: int,
     agent_id: str,
+    role: str,
 ) -> dict[str, Any] | None:
     """Coerce common model formatting mistakes into ActionEnvelopeMA shape."""
     if not isinstance(payload, dict):
@@ -211,6 +213,17 @@ def _normalize_action_payload(
 
     action_type = normalized.get("action_type")
     arguments = normalized.get("arguments")
+    if (
+        role == "floor_agent"
+        and isinstance(arguments, dict)
+        and (action_type in (None, "", "action_type") or action_type not in _ACTION_TYPE_VALUES)
+    ):
+        action_id_hint = str(normalized.get("action_id", "")).lower()
+        has_route_target = any(arguments.get(key) for key in ("to_room_id", "exit_id", "stairwell_id"))
+        if "route" in action_id_hint or has_route_target:
+            normalized["action_type"] = ActionTypeMA.route_within_floor.value
+            action_type = normalized["action_type"]
+
     if action_type == ActionTypeMA.evacuate_floor_priority.value and isinstance(arguments, dict):
         priority_floor = arguments.get("priority_floor")
         if "ordered_floor_ids" not in arguments and priority_floor:
@@ -639,6 +652,7 @@ def parse_completion_to_action(
         expected_episode_id=expected_episode_id,
         expected_round_id=expected_round_id,
         agent_id=agent_id,
+        role=role,
     )
     if payload is None:
         return None, "schema_invalid"

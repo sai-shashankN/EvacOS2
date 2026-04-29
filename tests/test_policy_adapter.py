@@ -9,6 +9,7 @@ import types
 
 import pytest
 
+from evacos_ma.schemas.multi_agent import ActionTypeMA
 from training.policy_adapter import (
     RoleRoutedPolicy,
     ScopeRoutedFloorPolicy,
@@ -485,6 +486,29 @@ class TestParseCompletionToAction:
         assert reason == "ok"
         assert action is not None
         assert action.arguments["exit_id"] == "exit_0"
+
+    def test_parse_completion_repairs_literal_action_type_route_hint(self):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": 0,
+            "agent_id": "floor_0_agent",
+            "action_id": "route_to_stair",
+            "action_type": "action_type",
+            "arguments": {"from_room_id": "room_01", "stairwell_id": "SW0"},
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="floor_0_agent",
+            role="floor_agent",
+            expected_episode_id="ep1",
+            expected_round_id=0,
+        )
+
+        assert reason == "ok"
+        assert action is not None
+        assert action.action_type == ActionTypeMA.route_within_floor
+        assert action.arguments["stairwell_id"] == "SW0"
 
     def test_parse_completion_normalizes_priority_floor_alias(self):
         completion = json.dumps({
