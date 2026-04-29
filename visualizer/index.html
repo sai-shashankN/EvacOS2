@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EvacOS2 Replay Visualizer</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main class="workspace" aria-label="EvacOS2 replay visualizer">
+    <section class="scene-shell" aria-label="Three.js building scene">
+      <canvas id="sceneCanvas"></canvas>
+      <div id="sceneState" class="scene-state" role="status">Loading sample trace...</div>
+    </section>
+
+    <header class="topbar" aria-label="Visualizer controls">
+      <div class="brand-block">
+        <span class="kicker">EvacOS2 add-on</span>
+        <h1>Replay Visualizer</h1>
+      </div>
+
+      <div class="mode-group" role="group" aria-label="Mode">
+        <button class="mode-button is-active" data-mode="replay" type="button">Replay</button>
+        <button class="mode-button" data-mode="live" type="button">Live</button>
+        <button class="mode-button" data-mode="manual" type="button">Manual</button>
+      </div>
+
+      <div class="view-control" aria-label="View">
+        <span class="kicker">View</span>
+        <div class="view-mode-group" role="group" aria-label="View density">
+          <button class="view-button is-active" data-view-mode="solo" type="button">Floor</button>
+          <button class="view-button" data-view-mode="focus" type="button">Focus</button>
+          <button class="view-button" data-view-mode="all" type="button">Building</button>
+        </div>
+      </div>
+
+      <label class="file-loader">
+        <span>Load trace JSON</span>
+        <input id="fileInput" type="file" accept="application/json,.json">
+      </label>
+    </header>
+
+    <section class="control-panel" aria-label="Replay controls">
+      <button id="playButton" class="icon-button" type="button" aria-label="Play replay" title="Play replay">&#9654;</button>
+      <button id="prevButton" class="icon-button" type="button" aria-label="Previous frame" title="Previous frame">&#8249;</button>
+      <button id="nextButton" class="icon-button" type="button" aria-label="Next frame" title="Next frame">&#8250;</button>
+
+      <label class="scrubber">
+        <span>Frame</span>
+        <input id="frameRange" type="range" min="0" max="0" value="0" step="1">
+      </label>
+
+      <label class="speed-select">
+        <span>Speed</span>
+        <select id="speedSelect">
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="status-panel" aria-label="Frame status">
+      <div>
+        <span class="metric-label">Round</span>
+        <strong id="roundMetric">-</strong>
+      </div>
+      <div>
+        <span class="metric-label">Civilians</span>
+        <strong id="civilianMetric">-</strong>
+      </div>
+      <div>
+        <span class="metric-label">Hazard</span>
+        <strong id="hazardMetric">-</strong>
+      </div>
+      <div>
+        <span class="metric-label">Reward</span>
+        <strong id="rewardMetric">-</strong>
+      </div>
+      <div>
+        <span class="metric-label">Score</span>
+        <strong id="scoreMetric">-</strong>
+      </div>
+    </section>
+
+    <section class="floor-panel" aria-label="Floor focus">
+      <div id="floorStrip" class="floor-strip" aria-label="Floors"></div>
+    </section>
+
+    <aside class="detail-panel" aria-label="Selected frame details">
+      <div class="panel-head">
+        <div>
+          <span class="kicker">Selected frame</span>
+          <h2 id="trajectoryTitle">No trace loaded</h2>
+        </div>
+        <span id="frameCounter" class="frame-counter">0 / 0</span>
+      </div>
+
+      <div id="modeNotice" class="notice">Replay mode loops the loaded trace with interpolated evacuee motion.</div>
+
+      <label class="trace-url">
+        <span>Trace URL</span>
+        <div class="fetch-row">
+          <input id="traceUrl" type="url" value="./sample_trace.json" aria-label="Trace URL">
+          <button id="fetchButton" type="button">Fetch</button>
+        </div>
+      </label>
+
+      <section class="feed-section" aria-label="Directives">
+        <h3>Directives</h3>
+        <ul id="directiveList" class="event-list"></ul>
+      </section>
+
+      <section class="feed-section" aria-label="Overrides and actions">
+        <h3>Overrides and Actions</h3>
+        <ul id="actionList" class="event-list"></ul>
+      </section>
+
+      <section class="json-section" aria-label="Score snapshot JSON">
+        <h3>Score Snapshot</h3>
+        <pre id="scoreJson">{}</pre>
+      </section>
+    </aside>
+  </main>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
