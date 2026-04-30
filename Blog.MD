@@ -216,7 +216,9 @@ The orchestrator exists for:
 
 This creates a path toward self-healing multi-agent coordination. A local specialist can act quickly; a larger coordinator can notice anomalies, redirect policy choices, request explanations, and escalate cases where the normal route fails. That is a more realistic architecture than a single monolithic model trying to do every decision at every speed.
 
-The public behavior card for this layer is [demo/results/7b_orchestrator_behavior_card.md](demo/results/7b_orchestrator_behavior_card.md). Its status is intentionally precise: the `7B/3B` split-role path is smoke/training-signal validated and checkpoints role-specific adapters, but final held-out `7B` orchestrator convergence is still the next evaluation target.
+The public behavior card for this layer is [demo/results/7b_orchestrator_behavior_card.md](demo/results/7b_orchestrator_behavior_card.md). Its status is intentionally precise: the `7B/3B` split-role path is smoke/training-signal validated, checkpoints role-specific adapters, and now has a post-fix continuation canary over frozen `3B` specialists.
+
+The latest `7B` canary resumed from public checkpoint `ckpt_349` and ran steps `350-359` on a Vast Ada `48GB` GPU. It completed with `TRAIN_EXIT=0`, uploaded to `runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts), and recorded `0.00%` invalid actions, `0.00%` orchestrator parse errors, `86.45%` average priority-rank fraction, `78.33%` average priority coverage, and `100.00%` priority-effect bonus rate. This is not presented as final held-out `7B` convergence. It is the canary that proves the fixed parser, checkpoint resume path, frozen-specialist wiring, and role-specific metrics survive a real continuation run.
 
 ## What Makes This Submission Novel
 

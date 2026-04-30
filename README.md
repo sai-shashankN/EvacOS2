@@ -49,7 +49,7 @@ but also:
 | Public model/artifact repo | [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
 | Source code on GitHub | [sai-shashankN/EvacOS2](https://github.com/sai-shashankN/EvacOS2) |
 
-**Evidence status:** the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `62.38%` to `80.05%` and reduced invalid actions from `34.47%` to `1.10%`. The base/no-LoRA model is intentionally non-trivial because EvacOS2 is an instruction-legible emergency benchmark, not an opaque puzzle; the learning claim is that training improves bounded score, contract reliability, and route-target discipline under the same evaluator. The scorecard also records raw save-rate overflow counts as an evaluator audit trail, so the safest headline is the invalid-action reduction plus bounded score movement rather than a claim of final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+**Evidence status:** the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `62.38%` to `80.05%` and reduced invalid actions from `34.47%` to `1.10%`. The base/no-LoRA model is intentionally non-trivial because EvacOS2 is an instruction-legible emergency benchmark, not an opaque puzzle; the learning claim is that training improves bounded score, contract reliability, and route-target discipline under the same evaluator. The scorecard also records raw save-rate overflow counts as an evaluator audit trail, so the safest headline is the invalid-action reduction plus bounded score movement rather than a claim of final convergence. The `7B` orchestrator is now documented with a post-fix continuation canary over frozen `3B` specialists: steps `350-359` completed with `0.00%` aggregate invalid actions, `0.00%` orchestrator parse errors, `86.45%` average priority-rank fraction, and uploaded adapters/metrics in the public artifact repo. That is still framed as role-metric canary evidence, not a final held-out `7B` convergence claim.
 
 **Benchmark scope note:** the submitted specialist proof lane uses a controlled fixed-suite slice so the public baseline-vs-trained comparison is deterministic, cheap enough to rerun, and easy to audit. The simulator and training stack are designed for broader curricula; expanding the same fixed-suite evaluator to higher-difficulty slices is future evaluation work, not a change to the environment architecture.
 
@@ -67,6 +67,7 @@ but also:
 | Specialist routing | Deterministic single-disaster router with generalist fallback for mixed/cascade scenarios | Implemented | [training/scope_router.py](training/scope_router.py) |
 | H200 / HF Jobs specialist artifacts | Public fire/flood/gas `3B` floor-specialist canary adapters plus logs and metrics | Public canary artifact trail is linked below; longer quality-run configs are checked in but not claimed as final results | [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
 | Held-out `3B` specialist comparison | Base Qwen2.5-3B/no-LoRA vs trained LoRA specialists on unseen seeds | Verified on H200 with evaluator audit columns | [summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), [eval plot](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png), [invalid-action plot](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png), [route-target plot](demo/results/plots/3b_route_target_validity.png) |
+| `7B` orchestrator continuation canary | `7B` orchestrator over frozen fire/flood/gas `3B` floor specialists | Verified on Vast Ada `48GB`, uploaded with role metrics | `runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics, with `metrics_window.csv`, `metrics_to_date.csv`, and `metrics_summary.json` saved beside each checkpoint | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
@@ -182,14 +183,14 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 | **Held-out `3B` specialist comparison** | Tracked + public artifact repo | [held-out summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), and plots show base/no-LoRA vs trained LoRA on the same unseen seeds, with raw save-rate overflow audit columns |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
 | **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), [route-target plot](demo/results/plots/3b_route_target_validity.png), and H200 continuation plots covering raw reward and invalid-action movement |
-| **`7B` orchestrator behavior card** | Tracked | [behavior card](demo/results/7b_orchestrator_behavior_card.md) explains the orchestrator role, split-role smoke evidence, one trace, and the remaining held-out eval gap |
+| **`7B` orchestrator behavior card** | Tracked | [behavior card](demo/results/7b_orchestrator_behavior_card.md) explains the orchestrator role, split-role smoke evidence, the post-fix continuation canary, one trace, and the remaining held-out eval gap |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **Walkthrough video** | External link slot | Link the final public video in this row and in the submission form; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
 | **Hugging Face blog / write-up** | Drafted | Root write-up lives in [Blog.MD](Blog.MD) and is mirrored into the Hugging Face Space |
 
 ## Public Adapter Artifacts
 
-The public adapter repository is [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). Despite the historical repository name, the visible public artifacts here are primarily `3B` floor-specialist checkpoints and evidence. The `7B` orchestrator path is documented separately as smoke/training-signal validated, not as a final converged orchestrator policy.
+The public adapter repository is [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). Despite the historical repository name, it hosts both the current `3B` floor-specialist checkpoints/evidence and the latest `7B` orchestrator continuation canary. The `7B` path is documented as role-metric canary evidence, not as a final converged held-out orchestrator policy.
 
 | Specialist | Public checkpoint path | Run type |
 |---|---|---|
@@ -202,6 +203,9 @@ The public adapter repository is [shashankN777/evacos2-7b-orchestrator-artifacts
 | Fire floor specialist | `floor-specialists/fire/h200-resume200-ckpt199/checkpoints/ckpt_199` | H200 continuation resumed from Vast `ckpt_49` |
 | Flood floor specialist | `floor-specialists/flood/h200-resume200-ckpt199/checkpoints/ckpt_199` | H200 continuation resumed from Vast `ckpt_49` |
 | Gas floor specialist | `floor-specialists/gas/h200-resume200-ckpt199/checkpoints/ckpt_199` | H200 continuation resumed from Vast `ckpt_49` |
+| `7B` orchestrator | `runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb` | Vast Ada `48GB` continuation canary over frozen `3B` specialists |
+
+The latest `7B` canary resumed from public `7B` checkpoint `ckpt_349` and ran steps `350-359`. It completed with `TRAIN_EXIT=0`, uploaded the latest adapter/checkpoint bundle, and recorded `0.00%` invalid actions, `0.00%` orchestrator parse errors, `50.00%` average top-priority exact match, `86.45%` average priority-rank fraction, `78.33%` average priority coverage, and `100.00%` priority-effect bonus rate. The result is useful because it proves the parser and role-metric fixes survive a real `7B` continuation run with frozen specialists.
 
 Download the public specialist artifacts with:
 
@@ -216,6 +220,7 @@ hf download shashankN777/evacos2-7b-orchestrator-artifacts \
   --include "floor-specialists/fire/h200-resume200-ckpt199/**" \
   --include "floor-specialists/flood/h200-resume200-ckpt199/**" \
   --include "floor-specialists/gas/h200-resume200-ckpt199/**" \
+  --include "runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb/**" \
   --local-dir outputs/hf_public_artifacts
 ```
 

@@ -25,20 +25,23 @@ Its job is not to replace the fast `3B` floor responders. Its job is to decide:
 
 ## Public Evidence
 
-The public evidence currently shows that the `7B/3B` split-role training path is wired and trainable:
+The public evidence currently shows that the `7B/3B` split-role training path is wired, trainable, resumable, and observable:
 
 - `100` split-role training steps completed.
 - Final checkpoint reached `ckpt_99`.
 - Both `orchestrator` and `floor_agent` LoRA adapters were checkpointed.
 - Per-role metrics were emitted, including `orchestrator_loss`, `floor_agent_loss`, KL terms, mask coverage, and reward diagnostics.
 - The run produced non-zero reward movement in the tracked fire curriculum lanes.
+- A later `7B` continuation canary over frozen fire/flood/gas `3B` specialists resumed from public checkpoint `ckpt_349` and ran steps `350-359`.
+- The continuation canary completed with `TRAIN_EXIT=0` and uploaded adapters/metrics to `runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb` in `shashankN777/evacos2-7b-orchestrator-artifacts`.
+- That canary recorded `0.00%` aggregate invalid actions, `0.00%` orchestrator parse errors, `86.45%` average priority-rank fraction, `78.33%` average priority coverage, and `100.00%` priority-effect bonus rate.
 
 Source artifacts:
 
 - [a100_7b3b_run_summary.md](a100_7b3b_run_summary.md)
 - [a100_7b3b_training_signal.csv](a100_7b3b_training_signal.csv)
 - [a100_7b3b_training_signal_summary.csv](a100_7b3b_training_signal_summary.csv)
-- [a100_7b3b_training_signal.png](plots/a100_7b3b_training_signal.png)
+- Public continuation canary: `shashankN777/evacos2-7b-orchestrator-artifacts/runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb`
 
 ## One Metric
 
@@ -50,6 +53,12 @@ The split-role smoke run produced visible reward movement, especially in the har
 | Fire lane B | `36` | `-2.3947` | `1.5382` | `-1.5750` | `0.8348` | `3.1896` |
 
 This is training-signal evidence, not a final held-out trained-vs-baseline claim.
+
+The later continuation canary is the cleaner parser/role-metric check:
+
+| Window | Steps | Invalid actions | Orchestrator parse errors | Avg priority rank | Avg priority coverage | Priority effect bonus |
+|---|---:|---:|---:|---:|---:|---:|
+| Post-fix continuation canary | `350-359` | `0.00%` | `0.00%` | `86.45%` | `78.33%` | `100.00%` |
 
 ## One Trace From The Split-Role Run
 
@@ -112,7 +121,7 @@ Interpretation: the model reached the correct action family conceptually, but th
 
 ## Honest Status
 
-The `7B` orchestrator is smoke/training-signal validated. It is architecturally important because it provides the global coordination layer above fast floor specialists, and the training stack can checkpoint role-specific adapters for it.
+The `7B` orchestrator is smoke/training-signal validated, and the latest continuation canary shows the fixed parser/resume path can run without the previous sticky invalid-action fractions. It is architecturally important because it provides the global coordination layer above fast floor specialists, and the training stack can checkpoint role-specific adapters for it.
 
 The public evidence does **not** yet prove final held-out `7B` orchestrator convergence. The next artifact needed is a trained-vs-baseline orchestrator eval focused on directive success, override usefulness, bottleneck reduction, and invalid orchestrator action rate.
 

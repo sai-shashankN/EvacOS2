@@ -2,7 +2,7 @@
 
 EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and multiple floor agents must coordinate people movement, exits, overrides, and hazard response inside a deterministic simulator.
 
-Evidence status: the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus trained LoRA specialists on the same unseen seeds and evaluator. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `62.38%` to `80.05%` and reduced invalid actions from `34.47%` to `1.10%`. A non-trivial base score is expected because EvacOS2 is an instruction-legible emergency benchmark; the learning claim is improved bounded score, invalid-action reduction, and stricter route-target discipline under the same evaluator. The scorecard also includes raw save-rate overflow audit columns for simulator-accounting traces, so the safest claim is invalid-action reduction plus bounded score movement rather than final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+Evidence status: the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus trained LoRA specialists on the same unseen seeds and evaluator. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `62.38%` to `80.05%` and reduced invalid actions from `34.47%` to `1.10%`. A non-trivial base score is expected because EvacOS2 is an instruction-legible emergency benchmark; the learning claim is improved bounded score, invalid-action reduction, and stricter route-target discipline under the same evaluator. The scorecard also includes raw save-rate overflow audit columns for simulator-accounting traces, so the safest claim is invalid-action reduction plus bounded score movement rather than final convergence. The `7B` orchestrator has a fresh continuation canary over frozen `3B` specialists: steps `350-359` completed with `0.00%` invalid actions, `0.00%` orchestrator parse errors, `86.45%` average priority-rank fraction, and public uploaded artifacts. This is role-metric canary evidence, not a final held-out `7B` convergence claim.
 
 Benchmark scope: the submitted fixed-suite specialist comparison is a controlled proof slice. That keeps the baseline-vs-trained result deterministic, judge-runnable, and directly auditable. The simulator and training configs are built for broader curricula; higher-difficulty scorecards are the next evaluation milestone after the submitted slice.
 
@@ -37,6 +37,7 @@ Benchmark scope: the submitted fixed-suite specialist comparison is a controlled
   - `demo/results/submission_scorecard_baseline.md`
   - `demo/results/baseline_fixed_suite.csv`
   - Public canary adapters: `shashankN777/evacos2-7b-orchestrator-artifacts`
+  - Latest `7B` continuation canary: `runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb`
 
 ## Public adapter paths
 
@@ -51,6 +52,7 @@ The public artifact repo is historically named `evacos2-7b-orchestrator-artifact
 - latest fire continuation: `floor-specialists/fire/h200-resume200-ckpt199/checkpoints/ckpt_199`
 - latest flood continuation: `floor-specialists/flood/h200-resume200-ckpt199/checkpoints/ckpt_199`
 - latest gas continuation: `floor-specialists/gas/h200-resume200-ckpt199/checkpoints/ckpt_199`
+- latest `7B` orchestrator continuation canary: `runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb`
 - held-out base-vs-trained eval: `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214`
 
 Download example:
