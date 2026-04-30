@@ -103,9 +103,13 @@ def _extract_tier_str(tier_obj: object) -> str:
 
 
 def _extract_disaster_family_str(disaster_family: object) -> str:
-    if isinstance(disaster_family, str):
-        return disaster_family
-    return str(getattr(disaster_family, "value", disaster_family))
+    value = getattr(disaster_family, "value", None)
+    if value is not None:
+        return str(value)
+    text = str(disaster_family)
+    if "." in text:
+        return text.rsplit(".", 1)[-1]
+    return text
 
 
 def _fallback_wait_action(episode_id: str, round_id: int, agent_id: str) -> ActionEnvelopeMA:

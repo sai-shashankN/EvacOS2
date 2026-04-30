@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from evacos_ma.models import DisasterType
 from training.config_schema import TrainingConfig
 from training import train as train_mod
 
@@ -876,6 +877,18 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
                 ),
             ],
         ),
+        SimpleNamespace(
+            disaster_family=DisasterType.flood,
+            override_count=0,
+            orchestrator_action_count=0,
+            override_win_count=0,
+            rationale_bonus_total=0.0,
+            rationale_bonus_count=0,
+            priority_component_totals={},
+            priority_component_counts={},
+            priority_directive_issue_count=0,
+            samples=[],
+        ),
     ]
 
     metrics = train_mod._compute_rollout_metrics(results)
@@ -886,9 +899,9 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
     assert metrics["priority_rank_score_mean"] == 0.20
     assert metrics["priority_coverage_mean"] == 0.10
     assert metrics["priority_effect_bonus_mean"] == 0.10
-    assert metrics["family_fire_fraction"] == 0.5
-    assert metrics["family_flood_fraction"] == 0.0
-    assert metrics["family_gas_fraction"] == 0.5
+    assert metrics["family_fire_fraction"] == pytest.approx(1 / 3, rel=0, abs=1e-4)
+    assert metrics["family_flood_fraction"] == pytest.approx(1 / 3, rel=0, abs=1e-4)
+    assert metrics["family_gas_fraction"] == pytest.approx(1 / 3, rel=0, abs=1e-4)
 
 
 def test_compute_rollout_metrics_uses_selected_candidates_for_action_rates() -> None:

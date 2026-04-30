@@ -1574,6 +1574,8 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     }
     for result in results:
         family = str(getattr(result, "disaster_family", ""))
+        if "." in family:
+            family = family.rsplit(".", 1)[-1]
         if family in family_counts:
             family_counts[family] += 1
 
