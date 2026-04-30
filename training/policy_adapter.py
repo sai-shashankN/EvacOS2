@@ -851,6 +851,7 @@ def hf_policy_factory(
                 return_tensors="pt",
                 max_length=self._max_prompt_tokens,
                 truncation=True,
+                padding=True,
             ).to(self._model.device)
             # Fix H29: ensure dropout is off during generation
             was_training = self._model.training
