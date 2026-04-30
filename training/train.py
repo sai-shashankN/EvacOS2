@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import pickle
 import random
@@ -54,6 +55,32 @@ _TRAINER_DIAGNOSTIC_KEYS: tuple[str, ...] = (
 _ROLE_DIAGNOSTIC_ROLES: tuple[str, ...] = ("orchestrator", "floor_agent")
 _TRAINER_DIAGNOSTIC_MAX_KEYS: frozenset[str] = frozenset({"kl_max", "kl_max_across_epochs"})
 _TRAINER_DIAGNOSTIC_INT_KEYS: frozenset[str] = frozenset({"num_inner_epochs"})
+logger = logging.getLogger(__name__)
+
+
+def _restore_rollout_rng_state(rng: random.Random, state_bytes: bytes | None) -> bool:
+    """Restore rollout RNG state when a full checkpoint provides it.
+
+    Public adapter-only checkpoints may intentionally omit RNG state. In that
+    case we keep the config-seeded RNG so LoRA continuation can still proceed
+    deterministically instead of crashing on ``pickle.loads(b"")``.
+    """
+
+    if not state_bytes:
+        logger.warning(
+            "Checkpoint has no rollout RNG state; continuing with config seed."
+        )
+        return False
+    try:
+        rng.setstate(pickle.loads(state_bytes))
+    except Exception as exc:
+        logger.warning(
+            "Checkpoint rollout RNG state could not be restored (%r); "
+            "continuing with config seed.",
+            exc,
+        )
+        return False
+    return True
 
 
 def _load_yaml_config(config_path: Path) -> dict:
@@ -2238,7 +2265,7 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
     if bundle is not None:
         start_step = bundle.step + 1
         wall_total = bundle.wall_seconds_total
-        rng.setstate(pickle.loads(bundle.rollout_rng_state))
+        _restore_rollout_rng_state(rng, bundle.rollout_rng_state)
 
     # Restore torch RNG states when resuming
     if bundle is not None and bundle.torch_rng_state is not None:

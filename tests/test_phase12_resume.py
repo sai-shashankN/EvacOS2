@@ -292,6 +292,30 @@ class TestStaleStepFinalizerSkip:
         assert not (last_completed_step >= start_step)
 
 
+class TestAdapterOnlyResume:
+    def test_missing_rollout_rng_state_keeps_seeded_rng(self):
+        from training.train import _restore_rollout_rng_state
+
+        rng = random.Random(123)
+        before = rng.getstate()
+
+        restored = _restore_rollout_rng_state(rng, b"")
+
+        assert restored is False
+        assert rng.getstate() == before
+
+    def test_corrupt_rollout_rng_state_keeps_seeded_rng(self):
+        from training.train import _restore_rollout_rng_state
+
+        rng = random.Random(123)
+        before = rng.getstate()
+
+        restored = _restore_rollout_rng_state(rng, b"not-a-pickle")
+
+        assert restored is False
+        assert rng.getstate() == before
+
+
 class TestBuildPolicyFailClosed:
     """Test that _build_policy raises on missing adapter directory."""
 
