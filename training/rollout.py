@@ -93,6 +93,8 @@ class EpisodeRolloutResult:
     rationale_bonus_count: int = 0
     priority_component_totals: dict[str, float] = field(default_factory=dict)
     priority_component_counts: dict[str, int] = field(default_factory=dict)
+    priority_behavior_totals: dict[str, float] = field(default_factory=dict)
+    priority_behavior_counts: dict[str, int] = field(default_factory=dict)
     priority_directive_issue_count: int = 0
 
 
@@ -720,7 +722,16 @@ def collect_episode(
         rationale_bonus_count = 0
         priority_component_totals = {key: 0.0 for key in _PRIORITY_REWARD_KEYS}
         priority_component_counts = {key: 0 for key in _PRIORITY_REWARD_KEYS}
+        priority_behavior_totals = {
+            "priority_top_match_rate": 0.0,
+            "priority_rank_fraction_mean": 0.0,
+            "priority_coverage_fraction_mean": 0.0,
+            "priority_effect_bonus_rate": 0.0,
+            "priority_unchanged_rate": 0.0,
+        }
+        priority_behavior_counts = {key: 0 for key in priority_behavior_totals}
         priority_directive_issue_count = 0
+        previous_priority_order: tuple[str, ...] | None = None
         for agent_id in obs_by_role.floors:
             total_raw[agent_id] = 0.0
             total_norm[agent_id] = 0.0
@@ -910,6 +921,36 @@ def collect_episode(
                 priority_directive_issue_count += int(
                     priority_snapshot.get("priority_directive_issued_count", 0) or 0
                 )
+                if priority_snapshot.get("priority_action"):
+                    used_order = tuple(str(floor_id) for floor_id in priority_snapshot.get("priority_order_used", []))
+                    oracle_order = [
+                        str(floor_id)
+                        for floor_id in priority_snapshot.get("priority_oracle_order", [])
+                    ]
+                    top_match = 0.0
+                    if used_order and oracle_order and used_order[0] == oracle_order[0]:
+                        top_match = 1.0
+                    priority_behavior_totals["priority_top_match_rate"] += top_match
+                    priority_behavior_counts["priority_top_match_rate"] += 1
+
+                    priority_behavior_totals["priority_rank_fraction_mean"] += float(
+                        priority_snapshot.get("priority_rank_fraction", 0.0) or 0.0
+                    )
+                    priority_behavior_counts["priority_rank_fraction_mean"] += 1
+                    priority_behavior_totals["priority_coverage_fraction_mean"] += float(
+                        priority_snapshot.get("priority_coverage_fraction", 0.0) or 0.0
+                    )
+                    priority_behavior_counts["priority_coverage_fraction_mean"] += 1
+                    priority_behavior_totals["priority_effect_bonus_rate"] += (
+                        1.0 if priority_snapshot.get("priority_effect_bonus_applied") else 0.0
+                    )
+                    priority_behavior_counts["priority_effect_bonus_rate"] += 1
+                    if previous_priority_order is not None:
+                        priority_behavior_totals["priority_unchanged_rate"] += (
+                            1.0 if used_order == previous_priority_order else 0.0
+                        )
+                        priority_behavior_counts["priority_unchanged_rate"] += 1
+                    previous_priority_order = used_order
             orch_bonus = float(orch_breakdown.get("rationale_bonus", 0.0))
             if orch_bonus > 0.0:
                 rationale_bonus_total += orch_bonus
@@ -1124,6 +1165,8 @@ def collect_episode(
             rationale_bonus_count=rationale_bonus_count,
             priority_component_totals=priority_component_totals,
             priority_component_counts=priority_component_counts,
+            priority_behavior_totals=priority_behavior_totals,
+            priority_behavior_counts=priority_behavior_counts,
             priority_directive_issue_count=priority_directive_issue_count,
         )
         write_trace_row(

@@ -1559,6 +1559,15 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     )
     priority_component_totals: dict[str, float] = {key: 0.0 for key in priority_component_keys}
     priority_component_counts: dict[str, int] = {key: 0 for key in priority_component_keys}
+    priority_behavior_keys = (
+        "priority_top_match_rate",
+        "priority_rank_fraction_mean",
+        "priority_coverage_fraction_mean",
+        "priority_effect_bonus_rate",
+        "priority_unchanged_rate",
+    )
+    priority_behavior_totals: dict[str, float] = {key: 0.0 for key in priority_behavior_keys}
+    priority_behavior_counts: dict[str, int] = {key: 0 for key in priority_behavior_keys}
     for result in results:
         totals = getattr(result, "priority_component_totals", {}) or {}
         counts = getattr(result, "priority_component_counts", {}) or {}
@@ -1567,6 +1576,13 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
         for key in priority_component_keys:
             priority_component_totals[key] += float(totals.get(key, 0.0) or 0.0)
             priority_component_counts[key] += int(counts.get(key, 0) or 0)
+        behavior_totals = getattr(result, "priority_behavior_totals", {}) or {}
+        behavior_counts = getattr(result, "priority_behavior_counts", {}) or {}
+        if not isinstance(behavior_totals, dict) or not isinstance(behavior_counts, dict):
+            continue
+        for key in priority_behavior_keys:
+            priority_behavior_totals[key] += float(behavior_totals.get(key, 0.0) or 0.0)
+            priority_behavior_counts[key] += int(behavior_counts.get(key, 0) or 0)
     family_counts = {
         "fire": 0,
         "flood": 0,
@@ -1582,6 +1598,12 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     def _priority_component_mean(key: str) -> float:
         return round(
             priority_component_totals[key] / max(priority_component_counts[key], 1),
+            4,
+        )
+
+    def _priority_behavior_mean(key: str) -> float:
+        return round(
+            priority_behavior_totals[key] / max(priority_behavior_counts[key], 1),
             4,
         )
 
@@ -1630,6 +1652,11 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
         "priority_rank_score_mean": _priority_component_mean("priority_rank_score"),
         "priority_coverage_mean": _priority_component_mean("priority_coverage"),
         "priority_effect_bonus_mean": _priority_component_mean("priority_effect_bonus"),
+        "priority_top_match_rate": _priority_behavior_mean("priority_top_match_rate"),
+        "priority_rank_fraction_mean": _priority_behavior_mean("priority_rank_fraction_mean"),
+        "priority_coverage_fraction_mean": _priority_behavior_mean("priority_coverage_fraction_mean"),
+        "priority_effect_bonus_rate": _priority_behavior_mean("priority_effect_bonus_rate"),
+        "priority_unchanged_rate": _priority_behavior_mean("priority_unchanged_rate"),
         "priority_action_rate": round(
             priority_action_count / max(len(orchestrator_samples), 1),
             4,

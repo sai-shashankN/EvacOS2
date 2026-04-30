@@ -849,6 +849,20 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
                 "priority_coverage": 1,
                 "priority_effect_bonus": 1,
             },
+            priority_behavior_totals={
+                "priority_top_match_rate": 1.0,
+                "priority_rank_fraction_mean": 0.8,
+                "priority_coverage_fraction_mean": 1.0,
+                "priority_effect_bonus_rate": 1.0,
+                "priority_unchanged_rate": 0.0,
+            },
+            priority_behavior_counts={
+                "priority_top_match_rate": 1,
+                "priority_rank_fraction_mean": 1,
+                "priority_coverage_fraction_mean": 1,
+                "priority_effect_bonus_rate": 1,
+                "priority_unchanged_rate": 1,
+            },
             priority_directive_issue_count=1,
             samples=[
                 SimpleNamespace(
@@ -869,6 +883,8 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
             rationale_bonus_count=0,
             priority_component_totals={},
             priority_component_counts={},
+            priority_behavior_totals={},
+            priority_behavior_counts={},
             priority_directive_issue_count=0,
             samples=[
                 SimpleNamespace(
@@ -886,6 +902,8 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
             rationale_bonus_count=0,
             priority_component_totals={},
             priority_component_counts={},
+            priority_behavior_totals={},
+            priority_behavior_counts={},
             priority_directive_issue_count=0,
             samples=[],
         ),
@@ -899,6 +917,11 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
     assert metrics["priority_rank_score_mean"] == 0.20
     assert metrics["priority_coverage_mean"] == 0.10
     assert metrics["priority_effect_bonus_mean"] == 0.10
+    assert metrics["priority_top_match_rate"] == 1.0
+    assert metrics["priority_rank_fraction_mean"] == 0.8
+    assert metrics["priority_coverage_fraction_mean"] == 1.0
+    assert metrics["priority_effect_bonus_rate"] == 1.0
+    assert metrics["priority_unchanged_rate"] == 0.0
     assert metrics["family_fire_fraction"] == pytest.approx(1 / 3, rel=0, abs=1e-4)
     assert metrics["family_flood_fraction"] == pytest.approx(1 / 3, rel=0, abs=1e-4)
     assert metrics["family_gas_fraction"] == pytest.approx(1 / 3, rel=0, abs=1e-4)
