@@ -49,7 +49,7 @@ but also:
 | Public model/artifact repo | [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
 | Source code on GitHub | [sai-shashankN/EvacOS2](https://github.com/sai-shashankN/EvacOS2) |
 
-**Evidence status:** the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `58.65%` to `80.45%` and reduced invalid actions from `39.18%` to `0.87%`. The scorecard also records raw save-rate overflow counts as an evaluator audit trail, so the safest headline is the invalid-action reduction plus bounded score movement rather than a claim of final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+**Evidence status:** the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `58.65%` to `80.45%` and reduced invalid actions from `39.18%` to `0.87%`. The base/no-LoRA model is intentionally non-trivial because EvacOS2 is an instruction-legible emergency benchmark, not an opaque puzzle; the learning claim is that training improves bounded score, contract reliability, and route-target discipline under the same evaluator. The scorecard also records raw save-rate overflow counts as an evaluator audit trail, so the safest headline is the invalid-action reduction plus bounded score movement rather than a claim of final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
 
 **Benchmark scope note:** the submitted specialist proof lane uses a controlled fixed-suite slice so the public baseline-vs-trained comparison is deterministic, cheap enough to rerun, and easy to audit. The simulator and training stack are designed for broader curricula; expanding the same fixed-suite evaluator to higher-difficulty slices is future evaluation work, not a change to the environment architecture.
 
@@ -66,7 +66,7 @@ but also:
 | Floor-only 3B specialist lanes | Deterministic stub orchestrator + trainable `3B` floor policy for `fire`, `flood`, or `gas` | Implemented / canary and quality-run configs ready | [training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-signal-canary-10.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-canary-50.yaml), [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
 | Specialist routing | Deterministic single-disaster router with generalist fallback for mixed/cascade scenarios | Implemented | [training/scope_router.py](training/scope_router.py) |
 | H200 / HF Jobs specialist artifacts | Public fire/flood/gas `3B` floor-specialist canary adapters plus logs and metrics | Public canary artifact trail is linked below; longer quality-run configs are checked in but not claimed as final results | [training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml](training/config.remote-unsloth-3b-fire-floor-specialist-quality-400.yaml), [training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml](training/config.remote-unsloth-3b-flood-floor-specialist-quality-500.yaml), [training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml](training/config.remote-unsloth-3b-gas-floor-specialist-quality-700.yaml) |
-| Held-out `3B` specialist comparison | Base Qwen2.5-3B/no-LoRA vs trained LoRA specialists on unseen seeds | Verified on H200 with evaluator audit columns | [summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), [eval plot](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png), [invalid-action plot](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png) |
+| Held-out `3B` specialist comparison | Base Qwen2.5-3B/no-LoRA vs trained LoRA specialists on unseen seeds | Verified on H200 with evaluator audit columns | [summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), [eval plot](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png), [invalid-action plot](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png), [route-target plot](demo/results/plots/3b_route_target_validity.png) |
 | Split-role metrics | Aggregate + per-role CSV diagnostics, with `metrics_window.csv`, `metrics_to_date.csv`, and `metrics_summary.json` saved beside each checkpoint | Verified | [training/metrics.py](training/metrics.py), [training/train.py](training/train.py) |
 | Checkpoint + resume | LoRA adapters, optimizer state, RNG state | Implemented | [training/checkpoint.py](training/checkpoint.py) |
 | Evaluation bundle | Fixed suite, comparison, scorecards, plots | Implemented | [evaluation/demo_bundle.py](evaluation/demo_bundle.py), [evaluation/plots.py](evaluation/plots.py) |
@@ -181,7 +181,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 | **H200 / HF Jobs specialist artifacts** | Public canary trail | Fire/flood/gas H200 canary adapters, logs, and metrics are hosted on Hugging Face; longer quality-run configs are checked in but not claimed as final results |
 | **Held-out `3B` specialist comparison** | Tracked + public artifact repo | [held-out summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), and plots show base/no-LoRA vs trained LoRA on the same unseen seeds, with raw save-rate overflow audit columns |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
-| **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
+| **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), [route-target plot](demo/results/plots/3b_route_target_validity.png), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
 | **`7B` orchestrator behavior card** | Tracked | [behavior card](demo/results/7b_orchestrator_behavior_card.md) explains the orchestrator role, split-role smoke evidence, one trace, and the remaining held-out eval gap |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **Walkthrough video** | External link slot | Link the final public video in this row and in the submission form; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
@@ -238,7 +238,7 @@ For the checked-in base-vs-trained held-out specialist comparison, use [demo/res
 
 ## Held-Out Base-vs-Trained Result
 
-This is the clearest reward-improvement evidence: same held-out seeds, same fixed-suite evaluator, same family-specific lane. The baseline is `Qwen/Qwen2.5-3B-Instruct` with no LoRA adapter and the same stub orchestrator used by the specialist training lane. The trained policy is the mirrored `h200-resume200-ckpt199` LoRA checkpoint.
+This is the clearest reward-improvement evidence: same held-out seeds, same fixed-suite evaluator, same family-specific lane. The baseline is `Qwen/Qwen2.5-3B-Instruct` with no LoRA adapter and the same stub orchestrator used by the specialist training lane. The trained policy is the mirrored `h200-resume200-ckpt199` LoRA checkpoint. A capable base score is expected here because the environment gives structured emergency instructions; the important comparison is the same-model delta after LoRA training, especially invalid-action and routing-contract behavior.
 
 For submission clarity, this table is reported on the controlled specialist proof slice rather than the full simulator difficulty ceiling. That choice keeps the public result reproducible and directly comparable across base, checkpoint, and trained policies; harder benchmark slices are the next validation milestone using the same evaluator shape.
 
@@ -259,17 +259,19 @@ Public artifact path: `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10
 
 ![Held-out 3B base-vs-trained invalid action rate](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png)
 
+![3B specialist route target validity](demo/results/plots/3b_route_target_validity.png)
+
 ## 3B Specialist Training Evidence
 
 The cleanest completed specialist evidence is the `50`-step fire/flood/gas floor-agent canary suite. These are not final convergence claims; they are checkpointed proof that the `3B` local responders receive valid observations, produce valid route actions, preserve target IDs, and receive non-zero GRPO contrast.
 
-| Specialist | Start valid-action score | Trained checkpoint score | Delta | Last-10 invalid rate | Last-10 GRPO reward std |
-|---|---:|---:|---:|---:|---:|
-| Fire `3B` | `83.65%` | `96.54%` | `+12.89 pp` | `3.46%` | `0.7168` |
-| Flood `3B` | `88.46%` | `97.54%` | `+9.08 pp` | `2.46%` | `1.3848` |
-| Gas `3B` | `89.62%` | `97.13%` | `+7.51 pp` | `2.87%` | `0.9769` |
+| Specialist | Start valid-action score | Trained checkpoint score | Delta | Last-10 invalid rate | Route action avg | Missing target avg | Last-10 GRPO reward std |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fire `3B` | `83.65%` | `96.54%` | `+12.89 pp` | `3.46%` | `1.0000` | `0.0000` | `0.7168` |
+| Flood `3B` | `88.46%` | `97.54%` | `+9.08 pp` | `2.46%` | `1.0000` | `0.0000` | `1.3848` |
+| Gas `3B` | `89.62%` | `97.13%` | `+7.51 pp` | `2.87%` | `1.0000` | `0.0000` | `0.9769` |
 
-`valid-action score = 100 * (1 - invalid_action_rate)`. The start score is step `0`; the trained checkpoint score is the last-10 average ending at checkpoint `ckpt_49`.
+`valid-action score = 100 * (1 - invalid_action_rate)`. The start score is step `0`; the trained checkpoint score is the last-10 average ending at checkpoint `ckpt_49`. `Missing target avg = 0.0000` means route actions preserved explicit target room IDs instead of emitting vague movement commands.
 
 The continuation path resumes from those `ckpt_49` checkpoints and saves/upload-checkpoints every `10` steps. The snapshot below comes from uploaded H200 continuation metrics, so it is a reward-signal trend, not a final held-out scorecard.
 

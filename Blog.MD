@@ -29,7 +29,7 @@ EvacOS2 is built to score well on the things that matter in this hackathon:
 - **Environment innovation:** this is a hierarchical emergency-response simulator, not another toy grid world or static prompt set. It tests partial observability, bottlenecks, cross-floor coordination, and disaster-specific response.
 - **Benchmark angle:** beyond evacuation, it tests calibrated autonomy: when subagents should act locally, escalate, recover if the orchestrator is unreachable, or accept a smaller local win for better team coordination.
 - **Storytelling:** the demo has a clear mental model: fast `3B` floor responders handle local movement, while a slower `7B` orchestrator handles building-level priorities and outliers.
-- **Training evidence:** the public fire/flood/gas `3B` canaries show valid-action improvement, checkpointed LoRA adapters, logs, metrics, and plots from real runs.
+- **Training evidence:** the public fire/flood/gas `3B` canaries show valid-action improvement, target-preserving route actions, checkpointed LoRA adapters, logs, metrics, and plots from real runs.
 - **Evaluation scope:** the submitted held-out comparison uses a controlled specialist proof slice so base-vs-trained results are deterministic, rerunnable, and easy to audit; harder slices are a natural next benchmark milestone.
 - **OpenEnv compliance:** the live Hugging Face Space exposes `/openenv/health`, `/openenv/metadata`, `/openenv/schema`, `/openenv/reset`, `/openenv/step`, and `/openenv/state`.
 - **Honest frontier:** the `7B` orchestrator is included as a smoke/training-signal validated coordination layer, with a dedicated behavior card explaining what is proven and what the next held-out eval should measure.
@@ -153,7 +153,7 @@ The cleanest reward-improvement evidence is now a held-out `3B` specialist compa
 
 This is intentionally framed as a controlled proof lane, not the full ceiling of the simulator. For judges, the goal is a clean scientific slice: same seeds, same evaluator, same task families, base model versus trained adapter. The simulator and curriculum can be extended to harder slices, but the submitted public table focuses on the benchmark slice we can make reproducible and inspectable end to end.
 
-The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`.
+The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`. The base model is not meant to be helpless: EvacOS2 is deliberately instruction-legible because emergency interfaces should be clear. The learning signal is that training makes the same model more reliable under the same contract.
 
 One audit detail is worth making explicit because this is a simulator, not a static worksheet: the scorecard records raw save-rate overflow counts for fire/gas traces where the simulator-accounting layer can double-count saved civilians. The public eval score is still bounded to `0-100%`, but the cleanest learning signal is the invalid-action reduction plus the bounded score movement, not a claim that this is a final converged policy.
 
@@ -170,15 +170,17 @@ The public artifact path is `heldout/base-model-vs-h200-resume200-ckpt199-3b-hel
 
 ![Held-out 3B base-vs-trained invalid action rate](demo/results/plots/heldout_3b_base_vs_trained_invalid_action_rate.png)
 
+![3B specialist route target validity](demo/results/plots/3b_route_target_validity.png)
+
 The `3B` floor-specialist canary suite across fire, flood, and gas response lanes adds the training-signal story. These short runs are not presented as final convergence. They are proof that the environment, training, checkpointing, and metrics pipeline are live end to end.
 
-| Specialist | Start valid-action score | Trained checkpoint score | Delta | Last-10 invalid rate | Last-10 GRPO reward std |
-|---|---:|---:|---:|---:|---:|
-| Fire `3B` | `83.65%` | `96.54%` | `+12.89 pp` | `3.46%` | `0.7168` |
-| Flood `3B` | `88.46%` | `97.54%` | `+9.08 pp` | `2.46%` | `1.3848` |
-| Gas `3B` | `89.62%` | `97.13%` | `+7.51 pp` | `2.87%` | `0.9769` |
+| Specialist | Start valid-action score | Trained checkpoint score | Delta | Last-10 invalid rate | Route action avg | Missing target avg | Last-10 GRPO reward std |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Fire `3B` | `83.65%` | `96.54%` | `+12.89 pp` | `3.46%` | `1.0000` | `0.0000` | `0.7168` |
+| Flood `3B` | `88.46%` | `97.54%` | `+9.08 pp` | `2.46%` | `1.0000` | `0.0000` | `1.3848` |
+| Gas `3B` | `89.62%` | `97.13%` | `+7.51 pp` | `2.87%` | `1.0000` | `0.0000` | `0.9769` |
 
-`valid-action score = 100 * (1 - invalid_action_rate)`. The start score is step `0`; the trained checkpoint score is the last-10 average ending at checkpoint `ckpt_49`.
+`valid-action score = 100 * (1 - invalid_action_rate)`. The start score is step `0`; the trained checkpoint score is the last-10 average ending at checkpoint `ckpt_49`. The route diagnostic is intentionally strict: route actions must keep an explicit target room ID, and the canary suite records `0.0000` missing-target rate across fire, flood, and gas.
 
 The continuation run resumes from those `ckpt_49` specialists and uploads checkpoints every `10` steps. This is not presented as a final held-out scorecard; it is the live reward-signal snapshot showing that the next phase is moving in the right direction.
 

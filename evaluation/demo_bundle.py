@@ -89,6 +89,9 @@ def _behavior_diagnostics(payload: dict | None) -> dict[str, float]:
         "wait_rate": _mean_episode_value("wait_rate"),
         "scout_rate": _mean_episode_value("scout_rate"),
         "route_rate": _mean_episode_value("route_rate"),
+        "floor_route_missing_target_rate": _mean_episode_value(
+            "floor_route_missing_target_rate"
+        ),
         "evacuate_rate": _mean_episode_value("evacuate_rate"),
     }
 
@@ -188,6 +191,7 @@ def _write_summary_markdown(
                 f"- trained mean civilians lost: `{trained_diagnostics.get('civilians_lost', 0.0):.2f}`",
                 f"- trained mean civilians remaining: `{trained_diagnostics.get('civilians_remaining', 0.0):.2f}`",
                 f"- trained wait/scout/route/evacuate rates: `{trained_diagnostics.get('wait_rate', 0.0):.4f}` / `{trained_diagnostics.get('scout_rate', 0.0):.4f}` / `{trained_diagnostics.get('route_rate', 0.0):.4f}` / `{trained_diagnostics.get('evacuate_rate', 0.0):.4f}`",
+                f"- trained floor-route missing-target rate: `{trained_diagnostics.get('floor_route_missing_target_rate', 0.0):.4f}`",
                 f"- baseline mean civilians saved/remaining: `{baseline_diagnostics.get('civilians_saved', 0.0):.2f}` / `{baseline_diagnostics.get('civilians_remaining', 0.0):.2f}`",
                 "",
                 "## Deltas (Trained - Baseline)",
@@ -338,6 +342,7 @@ def _write_scorecard_artifacts(
             f"- baseline saved/lost/remaining: `{baseline_diagnostics.get('civilians_saved', 0.0):.2f}` / `{baseline_diagnostics.get('civilians_lost', 0.0):.2f}` / `{baseline_diagnostics.get('civilians_remaining', 0.0):.2f}`",
             f"- trained saved/lost/remaining: `{trained_diagnostics.get('civilians_saved', 0.0):.2f}` / `{trained_diagnostics.get('civilians_lost', 0.0):.2f}` / `{trained_diagnostics.get('civilians_remaining', 0.0):.2f}`" if trained_payload is not None else "- trained saved/lost/remaining: `n/a`",
             f"- trained wait/scout/route/evacuate: `{trained_diagnostics.get('wait_rate', 0.0):.4f}` / `{trained_diagnostics.get('scout_rate', 0.0):.4f}` / `{trained_diagnostics.get('route_rate', 0.0):.4f}` / `{trained_diagnostics.get('evacuate_rate', 0.0):.4f}`" if trained_payload is not None else "- trained wait/scout/route/evacuate: `n/a`",
+            f"- trained floor-route missing-target rate: `{trained_diagnostics.get('floor_route_missing_target_rate', 0.0):.4f}`" if trained_payload is not None else "- trained floor-route missing-target rate: `n/a`",
             "",
         ]
     )

@@ -228,6 +228,7 @@ def _metric_rows(suite: FixedSuiteResult) -> dict[tuple[str, int, str, str, str]
     rows: dict[tuple[str, int, str, str, str], float] = {}
     for episode in suite.episodes:
         rows[(episode.tier, episode.seed, episode.disaster_family, "team", "eval_score_pct")] = episode.eval_score_pct
+        rows[(episode.tier, episode.seed, episode.disaster_family, "floor_agent", "floor_route_missing_target_rate")] = episode.floor_route_missing_target_rate
         for role in ("orchestrator", "floor_agent"):
             rows[(episode.tier, episode.seed, episode.disaster_family, role, "raw_reward")] = episode.raw_reward_by_role.get(role, 0.0)
             rows[(episode.tier, episode.seed, episode.disaster_family, role, "normalized_reward")] = episode.normalized_reward_by_role.get(role, 0.0)

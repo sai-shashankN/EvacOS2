@@ -2,6 +2,8 @@
 
 Same held-out seeds `9101-9110`, same evaluator, same family-specific controlled proof lane. Baseline is `Qwen/Qwen2.5-3B-Instruct` with no LoRA adapter; trained policies are fire/flood/gas H200 resume200 `ckpt_199` LoRA specialists.
 
+The base/no-LoRA policy is intentionally non-trivial because EvacOS2 exposes clear emergency observations and action contracts. The judge-facing claim is therefore not that the base model is helpless; it is that LoRA training improves bounded score and contract reliability under the same unseen seeds, same evaluator, and same route/action parser.
+
 Audit note: the fixed-suite score is bounded to `0-100%`, but this refresh also records raw save-rate overflow counts because some fire/gas traces double-count saved civilians at the simulator-accounting layer. For judging, the most robust headline is therefore the base/no-LoRA to trained LoRA invalid-action reduction, plus the bounded score as an audited proof-slice signal rather than a claim of final convergence.
 
 Headline: average bounded eval score `58.65% -> 80.45%` (`+21.80 pp`); invalid actions `39.18% -> 0.87%` (`-38.31 pp`).
@@ -12,4 +14,6 @@ Headline: average bounded eval score `58.65% -> 80.45%` (`+21.80 pp`); invalid a
 | flood | 10 | 22.95% | 45.42% | +22.47 pp | 47.67% | 0.00% | +0.1876 | 0/0 |
 | gas | 10 | 68.22% | 99.28% | +31.06 pp | 42.34% | 0.00% | +0.1345 | 2/8 |
 | **Average** | **30 total** | **58.65%** | **80.45%** | **+21.80 pp** | **39.18%** | **0.87%** | **+0.1064** | **audit logged** |
+
+Route-target discipline is tracked separately in the canary scorecard: fire/flood/gas `3B` specialists all record `1.0000` route-action averages and `0.0000` missing-target averages in [3b_specialist_canary50_scores.csv](3b_specialist_canary50_scores.csv).
 
