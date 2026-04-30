@@ -842,12 +842,14 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
                 "priority_rank_score": 0.20,
                 "priority_coverage": 0.10,
                 "priority_effect_bonus": 0.10,
+                "priority_unchanged_penalty": -0.08,
             },
             priority_component_counts={
                 "priority_top_match": 1,
                 "priority_rank_score": 1,
                 "priority_coverage": 1,
                 "priority_effect_bonus": 1,
+                "priority_unchanged_penalty": 1,
             },
             priority_behavior_totals={
                 "priority_top_match_rate": 1.0,
@@ -917,6 +919,7 @@ def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> 
     assert metrics["priority_rank_score_mean"] == 0.20
     assert metrics["priority_coverage_mean"] == 0.10
     assert metrics["priority_effect_bonus_mean"] == 0.10
+    assert metrics["priority_unchanged_penalty_mean"] == -0.08
     assert metrics["priority_top_match_rate"] == 1.0
     assert metrics["priority_rank_fraction_mean"] == 0.8
     assert metrics["priority_coverage_fraction_mean"] == 1.0

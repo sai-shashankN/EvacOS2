@@ -323,6 +323,100 @@ def test_evacuate_floor_priority_issues_high_priority_directive_and_reward():
     )
 
 
+def test_evacuate_floor_priority_effect_bonus_emits_for_top_floor_egress_action():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+    top_floor = ep.building.floors[-1]
+    top_floor_id = env._floor_public_id(top_floor.floor_id)
+    top_agent_id = f"{top_floor_id}_agent"
+    top_stairwell_id = top_floor.stairwells[0].stairwell_id
+
+    for floor in ep.building.floors:
+        for room in floor.rooms:
+            room.hazard.severity = 0.0
+            room.occupancy.mobile = 0
+            room.occupancy.injured = 0
+            room.occupancy.mobility_impaired = 0
+    top_floor.rooms[0].hazard.severity = 1.0
+    top_floor.rooms[0].occupancy.mobile = 25
+
+    oracle_order, _ = env._priority_oracle_order(ep)
+    assert oracle_order[0] == top_floor_id
+
+    result = env.step_multi_agent(
+        ActionBundleMA(
+            episode_id=episode_id,
+            round_id=ep.step,
+            orchestrator_action=ActionEnvelopeMA(
+                episode_id=episode_id,
+                round_id=ep.step,
+                agent_id="orchestrator",
+                action_id="priority_with_effect",
+                action_type=ActionTypeMA.evacuate_floor_priority,
+                arguments={"ordered_floor_ids": oracle_order},
+            ),
+            floor_actions={
+                top_agent_id: ActionEnvelopeMA(
+                    episode_id=episode_id,
+                    round_id=ep.step,
+                    agent_id=top_agent_id,
+                    action_id="top_floor_route_stairwell",
+                    action_type=ActionTypeMA.route_within_floor,
+                    arguments={"stairwell_id": top_stairwell_id},
+                )
+            },
+        )
+    )
+
+    snapshot = result.info.score_snapshot["priority"]
+    assert snapshot["priority_effect_bonus_applied"] is True
+    assert result.rewards_by_role.orchestrator.breakdown.priority_effect_bonus > 0.0
+
+
+def test_repeated_evacuate_floor_priority_gets_stale_penalty():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+    oracle_order, _ = env._priority_oracle_order(ep)
+
+    env.step_multi_agent(
+        ActionBundleMA(
+            episode_id=episode_id,
+            round_id=ep.step,
+            orchestrator_action=ActionEnvelopeMA(
+                episode_id=episode_id,
+                round_id=ep.step,
+                agent_id="orchestrator",
+                action_id="priority_first",
+                action_type=ActionTypeMA.evacuate_floor_priority,
+                arguments={"ordered_floor_ids": oracle_order},
+            ),
+            floor_actions={},
+        )
+    )
+    ep = env.get_internal_state(episode_id)
+    result = env.step_multi_agent(
+        ActionBundleMA(
+            episode_id=episode_id,
+            round_id=ep.step,
+            orchestrator_action=ActionEnvelopeMA(
+                episode_id=episode_id,
+                round_id=ep.step,
+                agent_id="orchestrator",
+                action_id="priority_repeat",
+                action_type=ActionTypeMA.evacuate_floor_priority,
+                arguments={"ordered_floor_ids": oracle_order},
+            ),
+            floor_actions={},
+        )
+    )
+
+    snapshot = result.info.score_snapshot["priority"]
+    assert snapshot["priority_order_repeated"] is True
+    assert result.rewards_by_role.orchestrator.breakdown.priority_unchanged_penalty < 0.0
+
+
 def test_evacuate_floor_priority_rejects_unknown_floor_order():
     env = EvacEnvironment()
     episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)

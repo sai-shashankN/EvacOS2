@@ -28,6 +28,7 @@ class RewardBreakdown(BaseModel):
     priority_coverage: float = 0.0
     priority_duplicate_or_unknown_penalty: float = 0.0
     priority_effect_bonus: float = 0.0
+    priority_unchanged_penalty: float = 0.0
     rationale_bonus: float = 0.0
 
     @model_serializer(mode="plain")

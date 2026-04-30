@@ -2139,6 +2139,20 @@ class EvacEnvironment:
         for row in getattr(round_result, "arbitration_trace", []):
             if isinstance(row, dict) and row.get("reason") == "directive_priority":
                 return True
+        top_floor = getattr(round_result, "priority_top_floor", None)
+        if not top_floor:
+            return False
+        target_agent = f"{top_floor}_agent"
+        egress_actions = {
+            ActionTypeMA.route_within_floor,
+            ActionTypeMA.route_between_floors,
+            ActionTypeMA.open_exit,
+        }
+        for action in getattr(round_result, "accepted_actions", []):
+            if getattr(action, "agent_id", None) != target_agent:
+                continue
+            if getattr(action, "action_type", None) in egress_actions:
+                return True
         return False
 
     def _orchestrator_priority_reward_components(
@@ -2156,6 +2170,7 @@ class EvacEnvironment:
             "priority_order_used": list(getattr(round_result, "priority_order_used", [])),
             "priority_unknown_floor_ids": list(getattr(round_result, "priority_unknown_floor_ids", [])),
             "priority_duplicate_floor_ids": list(getattr(round_result, "priority_duplicate_floor_ids", [])),
+            "priority_order_repeated": bool(getattr(round_result, "priority_order_repeated", False)),
             "priority_top_floor": getattr(round_result, "priority_top_floor", None),
             "priority_rejection_reason": getattr(round_result, "priority_rejection_reason", None),
             "priority_oracle_order": list(oracle_order),
@@ -2179,6 +2194,7 @@ class EvacEnvironment:
             "priority_coverage": 0.0,
             "priority_duplicate_or_unknown_penalty": 0.0,
             "priority_effect_bonus": 0.0,
+            "priority_unchanged_penalty": 0.0,
         }
         if used and oracle_order:
             if used[0] == oracle_order[0]:
@@ -2197,6 +2213,9 @@ class EvacEnvironment:
             components["priority_duplicate_or_unknown_penalty"] = (
                 weights.priority_duplicate_or_unknown_penalty * malformed_count
             )
+
+        if priority_snapshot["priority_order_repeated"]:
+            components["priority_unchanged_penalty"] = weights.priority_unchanged_penalty
 
         if self._priority_effect_bonus_applies(round_result):
             components["priority_effect_bonus"] = weights.priority_effect_bonus

@@ -48,6 +48,7 @@ _PRIORITY_REWARD_KEYS: tuple[str, ...] = (
     "priority_coverage",
     "priority_duplicate_or_unknown_penalty",
     "priority_effect_bonus",
+    "priority_unchanged_penalty",
 )
 
 

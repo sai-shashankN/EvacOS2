@@ -1556,6 +1556,7 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
         "priority_rank_score",
         "priority_coverage",
         "priority_effect_bonus",
+        "priority_unchanged_penalty",
     )
     priority_component_totals: dict[str, float] = {key: 0.0 for key in priority_component_keys}
     priority_component_counts: dict[str, int] = {key: 0 for key in priority_component_keys}
@@ -1652,6 +1653,7 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
         "priority_rank_score_mean": _priority_component_mean("priority_rank_score"),
         "priority_coverage_mean": _priority_component_mean("priority_coverage"),
         "priority_effect_bonus_mean": _priority_component_mean("priority_effect_bonus"),
+        "priority_unchanged_penalty_mean": _priority_component_mean("priority_unchanged_penalty"),
         "priority_top_match_rate": _priority_behavior_mean("priority_top_match_rate"),
         "priority_rank_fraction_mean": _priority_behavior_mean("priority_rank_fraction_mean"),
         "priority_coverage_fraction_mean": _priority_behavior_mean("priority_coverage_fraction_mean"),

@@ -93,7 +93,7 @@ class RewardWeights(EvacBaseModel):
     hazard_avoidance: float = 0.3
     vulnerable_bonus: float = 0.5
     efficiency: float = 0.2
-    invalid_action: float = -0.5
+    invalid_action: float = -0.75
     idle: float = -0.1
     time_step: float = -0.1
     completion: float = 5.0
@@ -108,12 +108,13 @@ class RewardWeights(EvacBaseModel):
     total_saved_terminal: float = 1.0
     total_lost_terminal: float = -1.0
     coordination_bonus: float = -0.3
-    directive_quality: float = 0.2
-    priority_top_match: float = 0.25
-    priority_rank_score: float = 0.25
+    directive_quality: float = 0.3
+    priority_top_match: float = 0.4
+    priority_rank_score: float = 0.2
     priority_coverage: float = 0.10
     priority_duplicate_or_unknown_penalty: float = -0.25
-    priority_effect_bonus: float = 0.10
+    priority_effect_bonus: float = 0.15
+    priority_unchanged_penalty: float = -0.08
 
 
 class ThreatState(EvacBaseModel):

@@ -96,6 +96,7 @@ _METRICS_COLUMNS: list[str] = [
     "priority_rank_score_mean",
     "priority_coverage_mean",
     "priority_effect_bonus_mean",
+    "priority_unchanged_penalty_mean",
     "priority_top_match_rate",
     "priority_rank_fraction_mean",
     "priority_coverage_fraction_mean",

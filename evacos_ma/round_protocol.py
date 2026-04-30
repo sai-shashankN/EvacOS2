@@ -64,6 +64,7 @@ class RoundResult:
         "priority_order_used",
         "priority_unknown_floor_ids",
         "priority_duplicate_floor_ids",
+        "priority_order_repeated",
         "priority_top_floor",
         "priority_directive_id",
         "priority_rejection_reason",
@@ -86,6 +87,7 @@ class RoundResult:
         priority_order_used: list[str] | None = None,
         priority_unknown_floor_ids: list[str] | None = None,
         priority_duplicate_floor_ids: list[str] | None = None,
+        priority_order_repeated: bool = False,
         priority_top_floor: str | None = None,
         priority_directive_id: str | None = None,
         priority_rejection_reason: str | None = None,
@@ -105,6 +107,7 @@ class RoundResult:
         self.priority_order_used = priority_order_used or []
         self.priority_unknown_floor_ids = priority_unknown_floor_ids or []
         self.priority_duplicate_floor_ids = priority_duplicate_floor_ids or []
+        self.priority_order_repeated = priority_order_repeated
         self.priority_top_floor = priority_top_floor
         self.priority_directive_id = priority_directive_id
         self.priority_rejection_reason = priority_rejection_reason
@@ -332,6 +335,22 @@ def _normalize_priority_floor_order(
     return submitted, used, unknown, duplicates, None
 
 
+def _has_repeated_priority_order(
+    directive_store: DirectiveStore,
+    priority_top_floor: str,
+    round_id: int,
+    priority_order_used: list[str],
+) -> bool:
+    """Return True when an active priority directive already has this exact order."""
+    for directive in directive_store.matching_directives(priority_top_floor, round_id):
+        if directive.directive_type != "prioritize_floor_egress":
+            continue
+        previous_order = directive.params.get("ordered_floor_ids", [])
+        if list(previous_order) == list(priority_order_used):
+            return True
+    return False
+
+
 def _lookup_elevator_for_action(env: Any, ep_copy: Any, action: ActionEnvelopeMA) -> Any | None:
     elevator_lookup = env._elevator_lookup(ep_copy.building)
     elevator_id = action.arguments.get("elevator_id", "")
@@ -526,6 +545,7 @@ class RoundProtocol:
         priority_order_used: list[str] = []
         priority_unknown_floor_ids: list[str] = []
         priority_duplicate_floor_ids: list[str] = []
+        priority_order_repeated = False
         priority_top_floor: str | None = None
         priority_directive_id: str | None = None
         priority_rejection_reason: str | None = None
@@ -623,6 +643,12 @@ class RoundProtocol:
                 orchestrator_action = None
             else:
                 priority_top_floor = priority_order_used[0]
+                priority_order_repeated = _has_repeated_priority_order(
+                    directive_store,
+                    priority_top_floor,
+                    round_id,
+                    priority_order_used,
+                )
                 priority_directive_id = (
                     "priority_"
                     + uuid.uuid5(
@@ -653,6 +679,7 @@ class RoundProtocol:
                         "directive_id": priority_directive_id,
                         "priority_order_submitted": priority_order_submitted,
                         "priority_order_used": priority_order_used,
+                        "priority_order_repeated": priority_order_repeated,
                         "priority_top_floor": priority_top_floor,
                         "unknown_floor_ids": priority_unknown_floor_ids,
                         "duplicate_floor_ids": priority_duplicate_floor_ids,
@@ -770,6 +797,7 @@ class RoundProtocol:
             priority_order_used=priority_order_used,
             priority_unknown_floor_ids=priority_unknown_floor_ids,
             priority_duplicate_floor_ids=priority_duplicate_floor_ids,
+            priority_order_repeated=priority_order_repeated,
             priority_top_floor=priority_top_floor,
             priority_directive_id=priority_directive_id,
             priority_rejection_reason=priority_rejection_reason,
