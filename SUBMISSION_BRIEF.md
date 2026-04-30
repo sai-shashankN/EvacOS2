@@ -35,7 +35,7 @@ Benchmark scope: the submitted fixed-suite specialist comparison is a controlled
   - `demo/results/specialist_canary50_report.md`
   - `demo/results/7b_orchestrator_behavior_card.md`
   - `demo/results/submission_scorecard_baseline.md`
-  - `demo/results/baseline_fixed_suite.csv`
+  - `demo/results/baseline_fixed_suite.csv` as a supporting no-GPU evaluator demo artifact, not the headline learning claim
   - Public canary adapters: `shashankN777/evacos2-7b-orchestrator-artifacts`
   - Latest `7B` continuation canary: `runs/vast-unsloth-7b-orchestrator-frozen-specialists-continue360-1c40744-48gb`
 

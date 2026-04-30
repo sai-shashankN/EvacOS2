@@ -181,7 +181,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 |---|---|---|
 | **H200 / HF Jobs specialist artifacts** | Public canary trail | Fire/flood/gas H200 canary adapters, logs, and metrics are hosted on Hugging Face; longer quality-run configs are checked in but not claimed as final results |
 | **Held-out `3B` specialist comparison** | Tracked + public artifact repo | [held-out summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), and plots show base/no-LoRA vs trained LoRA on the same unseen seeds, with raw save-rate overflow audit columns |
-| **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
+| **No-GPU fixed-suite demo artifact** | Tracked / supporting only | [baseline CSV](demo/results/baseline_fixed_suite.csv) and [scorecard](demo/results/submission_scorecard_baseline.md) show the evaluator can be regenerated without a GPU; the headline learning claim comes from the held-out `3B` base-vs-trained proof slice above |
 | **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), [route-target plot](demo/results/plots/3b_route_target_validity.png), and H200 continuation plots covering raw reward and invalid-action movement |
 | **`7B` orchestrator behavior card** | Tracked | [behavior card](demo/results/7b_orchestrator_behavior_card.md) explains the orchestrator role, split-role smoke evidence, the post-fix continuation canary, one trace, and the remaining held-out eval gap |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
@@ -314,8 +314,8 @@ The runtime schema is exposed through `/openenv/schema`, and the canonical types
 ## Fastest Proof Path
 
 ```bash
-# 1. Generate a baseline evidence bundle. No GPU or checkpoint required.
-#    Produces: baseline_vs_trained.csv, submission_scorecard.md, plots/
+# 1. Generate the supporting no-GPU baseline/demo bundle.
+#    This proves evaluator reproducibility; the headline learning claim is the held-out base-vs-trained slice above.
 python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline
 
 # 2. Inspect the OpenEnv contract and live environment package.

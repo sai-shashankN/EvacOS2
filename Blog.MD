@@ -237,7 +237,7 @@ The result is a serious environment for agent post-training: ambitious enough to
 
 ## How To Reproduce The Evidence
 
-Baseline evidence can be regenerated without a GPU:
+The supporting baseline/demo artifact can be regenerated without a GPU. This is useful for checking that the evaluator runs, but the headline learning claim comes from the held-out base/no-LoRA vs trained-LoRA specialist comparison above:
 
 ```bash
 python -m evaluation.demo_bundle --skip-trained --output-dir outputs/demo_bundle_baseline
