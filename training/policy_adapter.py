@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 _PROMPT_TRUNCATION_WARNED = False
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _ACTION_TYPE_VALUES = {item.value for item in ActionTypeMA}
+_CHAT_ROLE_TOKEN_RE = re.compile(r"\n\s*(?:assistant|user|system)\s*\n", re.IGNORECASE)
+_ACTION_TYPE_RE = re.compile(r'"action_type"\s*:\s*"(?P<action_type>[a-z_]+)"')
+_ORDERED_FLOOR_IDS_RE = re.compile(r'"ordered_floor_ids"\s*:\s*\[(?P<body>[^\]]*)\]', re.DOTALL)
+_FLOOR_ID_RE = re.compile(r'"?(floor_\d+)"?')
 
 
 def _as_policy_result(result: PolicyResult | str | object) -> PolicyResult:
@@ -165,6 +169,54 @@ def _json_payload_candidates(completion_text: str) -> list[str]:
         _append(_extract_first_json_object(block))
 
     return candidates
+
+
+def _salvage_orchestrator_priority_payload(
+    completion_text: str,
+    *,
+    expected_episode_id: str,
+    expected_round_id: int,
+    agent_id: str,
+) -> dict[str, Any] | None:
+    """Recover the narrow malformed priority-directive shape seen in traces.
+
+    H200 7B runs occasionally leak chat-role tokens inside JSON strings. That
+    breaks ``json.loads`` even when the intended action type and floor order are
+    still visible. Salvage only this deterministic orchestrator action; the
+    identity fields are overwritten and the floor ids are validated downstream.
+    """
+
+    if _CHAT_ROLE_TOKEN_RE.search(completion_text):
+        logger.debug("Attempting priority JSON salvage after chat-role token leakage.")
+
+    action_types = [match.group("action_type") for match in _ACTION_TYPE_RE.finditer(completion_text)]
+    if ActionTypeMA.evacuate_floor_priority.value not in action_types:
+        return None
+
+    ordered_floor_match = _ORDERED_FLOOR_IDS_RE.search(completion_text)
+    if ordered_floor_match is None:
+        return None
+
+    floor_ids: list[str] = []
+    for match in _FLOOR_ID_RE.finditer(ordered_floor_match.group("body")):
+        floor_id = match.group(1)
+        if floor_id not in floor_ids:
+            floor_ids.append(floor_id)
+    if not floor_ids:
+        return None
+
+    return {
+        "episode_id": expected_episode_id,
+        "round_id": expected_round_id,
+        "agent_id": agent_id,
+        "action_id": f"{agent_id}_{expected_round_id}_priority_salvaged",
+        "action_type": ActionTypeMA.evacuate_floor_priority.value,
+        "arguments": {"ordered_floor_ids": floor_ids},
+        "client_metadata": {
+            "parser_salvaged": True,
+            "salvage_reason": "malformed_priority_json",
+        },
+    }
 
 
 def _normalize_action_payload(
@@ -645,6 +697,7 @@ def parse_completion_to_action(
     expected_round_id: int,
 ) -> tuple[ActionEnvelopeMA | None, str]:
     payload: Any | None = None
+    parse_status = "ok"
     for candidate in _json_payload_candidates(completion_text):
         try:
             payload = json.loads(candidate)
@@ -652,7 +705,17 @@ def parse_completion_to_action(
         except (json.JSONDecodeError, ValueError):
             continue
     if payload is None:
-        return None, "invalid_json"
+        if role == "orchestrator":
+            payload = _salvage_orchestrator_priority_payload(
+                completion_text,
+                expected_episode_id=expected_episode_id,
+                expected_round_id=expected_round_id,
+                agent_id=agent_id,
+            )
+            if payload is not None:
+                parse_status = "salvaged_invalid_json"
+        if payload is None:
+            return None, "invalid_json"
 
     payload = _normalize_action_payload(
         payload,
@@ -686,7 +749,7 @@ def parse_completion_to_action(
     if argument_status != "ok":
         return None, argument_status
 
-    return action, "ok"
+    return action, parse_status
 
 
 def hf_policy_factory(

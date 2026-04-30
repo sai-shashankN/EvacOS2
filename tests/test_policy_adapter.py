@@ -465,6 +465,51 @@ class TestParseCompletionToAction:
         assert action is None
         assert reason == "arguments_invalid"
 
+    def test_parse_completion_salvages_role_token_polluted_priority_json(self):
+        completion = (
+            '{"episode_id":null,"round_id":1,"agent_id":"floor_4_agent",'
+            '"action_id":"act\nuser\n,"action_type":"evacuate_floor_priority",'
+            '"arguments":{"ordered_floor_ids":["floor_1","floor_3"]}}'
+        )
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="orchestrator",
+            role="orchestrator",
+            expected_episode_id="real_episode",
+            expected_round_id=1,
+        )
+
+        assert reason == "salvaged_invalid_json"
+        assert action is not None
+        assert action.episode_id == "real_episode"
+        assert action.agent_id == "orchestrator"
+        assert action.round_id == 1
+        assert action.action_type == ActionTypeMA.evacuate_floor_priority
+        assert action.arguments == {"ordered_floor_ids": ["floor_1", "floor_3"]}
+        assert action.client_metadata["parser_salvaged"] is True
+
+    def test_parse_completion_salvages_duplicated_assistant_priority_json(self):
+        completion = (
+            '{"episode_id":1,"round_id":3,"agent_id":"global_controller",'
+            '"action_id":"act\n\nassistant {"episode_id":1,"round_id":3,'
+            '"agent_id":"global_controller","action_id":"3",'
+            '"action_type":"evacuate_floor_priority",'
+            '"arguments":{"ordered_floor_ids":["floor_2","floor_1","floor_3"]}}'
+        )
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="orchestrator",
+            role="orchestrator",
+            expected_episode_id="real_episode",
+            expected_round_id=3,
+        )
+
+        assert reason == "salvaged_invalid_json"
+        assert action is not None
+        assert action.arguments == {"ordered_floor_ids": ["floor_2", "floor_1", "floor_3"]}
+
     def test_parse_completion_accepts_route_with_explicit_exit_id(self):
         completion = json.dumps({
             "episode_id": "ep1",

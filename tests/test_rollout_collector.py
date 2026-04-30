@@ -369,6 +369,80 @@ class TestParseFallback:
         # Every sample should be present (no crash)
         assert len(result.samples) == result.num_rounds * 6
 
+    def test_parse_error_fallback_receives_direct_reward_penalty(self, tmp_path):
+        class BadPolicy:
+            def act(self, prompt, agent_id, role):
+                return "THIS IS NOT VALID JSON !!!"
+
+        env = _make_env()
+        result = collect_episode(
+            env,
+            BadPolicy(),
+            seed=30,
+            tier="easy",
+            disaster_family=DisasterType.fire,
+            max_rounds=1,
+            jsonl_dir=tmp_path,
+        )
+
+        orchestrator_samples = [sample for sample in result.samples if sample.role == "orchestrator"]
+        assert orchestrator_samples
+        assert orchestrator_samples[0].parsed_action["parse_status"] == "invalid_json"
+        reward_rows = [
+            json.loads(line)
+            for line in (tmp_path / "reward_trace.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        orchestrator_reward = next(row for row in reward_rows if row["agent_id"] == "orchestrator")
+        assert orchestrator_reward["breakdown"]["orchestrator_parse_error"] < 0.0
+        assert orchestrator_reward["raw_reward"] <= env.get_internal_state(result.episode_id).task.reward_weights.orchestrator_parse_error
+        assert any(
+            row["breakdown"].get("floor_parse_error", 0.0) < 0.0
+            for row in reward_rows
+            if row["agent_id"].startswith("floor_")
+        )
+
+    def test_salvaged_priority_completion_receives_format_penalty(self, tmp_path):
+        class SalvagedPriorityPolicy:
+            def act(self, prompt, agent_id, role):
+                if role == "orchestrator":
+                    return (
+                        '{"episode_id":null,"round_id":0,"agent_id":"orchesticator",'
+                        '"action_id":"act\nassistant\n,"action_type":"evacuate_floor_priority",'
+                        '"arguments":{"ordered_floor_ids":["floor_1","floor_0"]}}'
+                    )
+                return json.dumps(
+                    {
+                        "episode_id": "ep",
+                        "round_id": 0,
+                        "agent_id": agent_id,
+                        "action_id": "a",
+                        "action_type": "wait",
+                        "arguments": {},
+                    }
+                )
+
+        env = _make_env()
+        result = collect_episode(
+            env,
+            SalvagedPriorityPolicy(),
+            seed=30,
+            tier="easy",
+            disaster_family=DisasterType.fire,
+            max_rounds=1,
+            jsonl_dir=tmp_path,
+        )
+
+        orchestrator_sample = next(sample for sample in result.samples if sample.role == "orchestrator")
+        assert orchestrator_sample.parsed_action["parse_status"] == "salvaged_invalid_json"
+        reward_rows = [
+            json.loads(line)
+            for line in (tmp_path / "reward_trace.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        orchestrator_reward = next(row for row in reward_rows if row["agent_id"] == "orchestrator")
+        assert orchestrator_reward["breakdown"]["orchestrator_parse_salvage_penalty"] < 0.0
+
     def test_action_trace_captures_parse_status_and_completion_text(self):
         """action_trace should preserve the raw completion plus parser reason for diagnosis."""
 

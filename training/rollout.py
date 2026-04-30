@@ -52,6 +52,79 @@ _PRIORITY_REWARD_KEYS: tuple[str, ...] = (
 )
 
 
+def _has_parse_error(action: ActionEnvelopeMA | None) -> bool:
+    return bool(action is not None and getattr(action, "fallback_reason", None) == "parse_error")
+
+
+def _is_salvaged_parse(action: ActionEnvelopeMA | None) -> bool:
+    if action is None:
+        return False
+    client_metadata = getattr(action, "client_metadata", {})
+    return isinstance(client_metadata, Mapping) and bool(client_metadata.get("parser_salvaged"))
+
+
+def _add_reward_component(role_reward: object, component: str, value: float) -> None:
+    if value == 0.0:
+        return
+    setattr(role_reward, "raw", float(getattr(role_reward, "raw", 0.0) or 0.0) + value)
+    breakdown = getattr(role_reward, "breakdown", None)
+    if breakdown is None:
+        return
+    current = float(getattr(breakdown, component, 0.0) or 0.0)
+    setattr(breakdown, component, current + value)
+
+
+def _clamp_reward_with_component(role_reward: object, component: str, ceiling: float) -> None:
+    raw = float(getattr(role_reward, "raw", 0.0) or 0.0)
+    penalty = min(0.0, float(ceiling) - raw)
+    _add_reward_component(role_reward, component, penalty)
+
+
+def _apply_parse_error_reward_penalties(
+    *,
+    env: EvacEnvironment,
+    episode_id: str,
+    orchestrator_action: ActionEnvelopeMA,
+    floor_actions: Mapping[str, ActionEnvelopeMA],
+    result: object,
+) -> None:
+    """Penalize malformed completions even when fallback wait keeps simulation alive."""
+
+    rewards_by_role = getattr(result, "rewards_by_role", None)
+    if rewards_by_role is None:
+        return
+    weights = env.get_internal_state(episode_id).task.reward_weights
+    if _has_parse_error(orchestrator_action):
+        _clamp_reward_with_component(
+            rewards_by_role.orchestrator,
+            "orchestrator_parse_error",
+            float(getattr(weights, "orchestrator_parse_error", getattr(weights, "invalid_action", -0.75))),
+        )
+    elif _is_salvaged_parse(orchestrator_action):
+        _add_reward_component(
+            rewards_by_role.orchestrator,
+            "orchestrator_parse_salvage_penalty",
+            float(getattr(weights, "orchestrator_parse_salvage_penalty", -0.15)),
+        )
+    floor_rewards = getattr(rewards_by_role, "floors", {})
+    for agent_id, action in floor_actions.items():
+        role_reward = floor_rewards.get(agent_id)
+        if role_reward is None:
+            continue
+        if _has_parse_error(action):
+            _clamp_reward_with_component(
+                role_reward,
+                "floor_parse_error",
+                float(getattr(weights, "floor_parse_error", getattr(weights, "floor_invalid_action", -1.0))),
+            )
+        elif _is_salvaged_parse(action):
+            _add_reward_component(
+                role_reward,
+                "floor_parse_salvage_penalty",
+                float(getattr(weights, "floor_parse_salvage_penalty", -0.15)),
+            )
+
+
 @dataclass
 class TrajectorySample:
     episode_id: str
@@ -877,6 +950,14 @@ def collect_episode(
                     rejected_by_action_id.get(floor_action.action_id),
                 )
 
+            _apply_parse_error_reward_penalties(
+                env=env,
+                episode_id=episode_id,
+                orchestrator_action=orch_action,
+                floor_actions=floor_actions,
+                result=result,
+            )
+
             norm_rewards = normalize_per_role(
                 result.rewards_by_role,
                 tier,
@@ -900,6 +981,7 @@ def collect_episode(
             rationale_rows: list[dict] = []
 
             orch_parsed = orch_action.model_dump(mode="json")
+            orch_parsed["parse_status"] = orch_parse_status
             orch_raw = result.rewards_by_role.orchestrator.raw
             orch_norm = norm_rewards.get("orchestrator", 0.0)
             orch_breakdown = result.rewards_by_role.orchestrator.breakdown.get_components()
@@ -1005,6 +1087,7 @@ def collect_episode(
                 floor_completion, floor_prompt = floor_payloads[agent_id]
                 floor_action = floor_actions[agent_id]
                 floor_parsed = floor_action.model_dump(mode="json")
+                floor_parsed["parse_status"] = floor_parse_statuses[agent_id]
                 floor_reward = result.rewards_by_role.floors.get(agent_id)
                 floor_raw = 0.0 if floor_reward is None else floor_reward.raw
                 floor_norm = norm_rewards.get(agent_id, 0.0)

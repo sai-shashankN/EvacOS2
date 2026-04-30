@@ -288,12 +288,13 @@ def build_floor_prompt(
         "\n### Response format\n"
         "Respond with a SINGLE compact JSON object matching ActionEnvelopeMA. "
         "No prose, no markdown, no code fences, and keep it on one line.\n"
-        "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
+        'Required keys: episode_id, round_id, agent_id, action_id (use short token like "a1"), '
         "action_type (one of the allowed actions), arguments (dict).\n"
         "Never output the literal placeholder action_type=\"action_type\"; replace it with an exact "
         "allowed action such as route_within_floor or wait.\n"
         "round_id must be the integer shown above, not a string or composite id.\n"
         "client_metadata must be omitted or {}, never null.\n"
+        'action_id must be short plain ASCII like "a1"; never include role names, quotes, or newlines.\n'
         "Omit optional keys during training; especially omit rationale to keep the JSON short.\n"
         f"Prompt template version: {version}"
     )
@@ -407,12 +408,13 @@ def build_orchestrator_prompt(
         "\n### Response format\n"
         "Respond with a SINGLE compact JSON object matching ActionEnvelopeMA. "
         "No prose, no markdown, no code fences, and keep it on one line.\n"
-        "Required keys: episode_id, round_id, agent_id, action_id (any unique string), "
+        'Required keys: episode_id, round_id, agent_id, action_id (use short token like "a1"), '
         "action_type (one of the allowed actions), arguments (dict).\n"
         "Never output the literal placeholder action_type=\"action_type\"; replace it with an exact "
         "allowed action from the action mask.\n"
         "round_id must be the integer shown above, not a string or composite id.\n"
         "client_metadata must be omitted or {}, never null.\n"
+        'action_id must be short plain ASCII like "a1"; never include role names, quotes, or newlines.\n'
         "Omit optional keys during training; especially omit rationale to keep the JSON short.\n"
         "Do not repeat long ids or continue generating after the closing brace.\n"
         f"Prompt template version: {version}"

@@ -19,6 +19,10 @@ class RewardBreakdown(BaseModel):
     floor_saved: float = 0.0
     floor_lost: float = 0.0
     floor_invalid_action: float = 0.0
+    floor_parse_error: float = 0.0
+    orchestrator_parse_error: float = 0.0
+    floor_parse_salvage_penalty: float = 0.0
+    orchestrator_parse_salvage_penalty: float = 0.0
     total_saved_terminal: float = 0.0
     total_lost_terminal: float = 0.0
     coordination_bonus: float = 0.0

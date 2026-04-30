@@ -242,6 +242,8 @@ def test_build_floor_prompt_includes_identity_contract_and_action_mask():
     assert '"exit_id":"exit_floor_2"' in user_message
     assert '"stairwell_id":"stair_A"' in user_message
     assert '"action_type":"open_exit"' in user_message
+    assert 'action_id (use short token like "a1")' in user_message
+    assert "never include role names, quotes, or newlines" in user_message
     assert '"action_type":"scout"' not in user_message
 
 
@@ -375,6 +377,8 @@ def test_build_orchestrator_prompt_includes_identity_contract_and_action_mask():
     assert "evacuate_floor_priority_arguments" not in user_message
     assert "Orchestrator argument schemas:" in user_message
     assert "never use priority_floor" in user_message
+    assert 'action_id (use short token like "a1")' in user_message
+    assert "never include role names, quotes, or newlines" in user_message
     assert "Beliefs: total=4, avg_conf=0.75, resolved=1, pending=3" in user_message
     assert "Recent floor actions:" in user_message
     assert "Unresolved escalations:" in user_message

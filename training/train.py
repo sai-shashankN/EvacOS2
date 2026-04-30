@@ -2493,6 +2493,10 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
             total_samples = 0
             invalid_by_role: dict[str, int] = {"orchestrator": 0, "floor_agent": 0}
             total_by_role: dict[str, int] = {"orchestrator": 0, "floor_agent": 0}
+            parse_error_count = 0
+            parse_error_by_role: dict[str, int] = {"orchestrator": 0, "floor_agent": 0}
+            parser_salvage_count = 0
+            parser_salvage_by_role: dict[str, int] = {"orchestrator": 0, "floor_agent": 0}
             for result in results:
                 all_raw_orch.append(result.total_raw_reward_by_role.get("orchestrator", 0.0))
                 all_norm_orch.append(result.total_normalized_reward_by_role.get("orchestrator", 0.0))
@@ -2506,9 +2510,22 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                     total_samples += 1
                     role = "orchestrator" if getattr(sample, "role", "") == "orchestrator" else "floor_agent"
                     total_by_role[role] = total_by_role.get(role, 0) + 1
-                    if sample.parsed_action.get("fallback_reason"):
+                    parsed_action = sample.parsed_action if isinstance(sample.parsed_action, dict) else {}
+                    parse_status = str(parsed_action.get("parse_status", ""))
+                    if parsed_action.get("fallback_reason"):
                         invalid_count += 1
                         invalid_by_role[role] = invalid_by_role.get(role, 0) + 1
+                    if parsed_action.get("fallback_reason") == "parse_error" or parse_status in {
+                        "invalid_json",
+                        "schema_invalid",
+                        "arguments_invalid",
+                        "role_forbidden",
+                    }:
+                        parse_error_count += 1
+                        parse_error_by_role[role] = parse_error_by_role.get(role, 0) + 1
+                    if parse_status.startswith("salvaged_"):
+                        parser_salvage_count += 1
+                        parser_salvage_by_role[role] = parser_salvage_by_role.get(role, 0) + 1
 
             rollout_metrics = _compute_rollout_metrics(results)
             metrics_row = {
@@ -2545,6 +2562,28 @@ def run_training(config_path: Path = Path("training/config.yaml")) -> None:
                 ),
                 "orchestrator_invalid_action_count": invalid_by_role.get("orchestrator", 0),
                 "floor_agent_invalid_action_count": invalid_by_role.get("floor_agent", 0),
+                "parse_error_rate": round(parse_error_count / max(total_samples, 1), 4),
+                "orchestrator_parse_error_rate": round(
+                    parse_error_by_role.get("orchestrator", 0)
+                    / max(total_by_role.get("orchestrator", 0), 1),
+                    4,
+                ),
+                "floor_agent_parse_error_rate": round(
+                    parse_error_by_role.get("floor_agent", 0)
+                    / max(total_by_role.get("floor_agent", 0), 1),
+                    4,
+                ),
+                "parser_salvage_rate": round(parser_salvage_count / max(total_samples, 1), 4),
+                "orchestrator_parser_salvage_rate": round(
+                    parser_salvage_by_role.get("orchestrator", 0)
+                    / max(total_by_role.get("orchestrator", 0), 1),
+                    4,
+                ),
+                "floor_agent_parser_salvage_rate": round(
+                    parser_salvage_by_role.get("floor_agent", 0)
+                    / max(total_by_role.get("floor_agent", 0), 1),
+                    4,
+                ),
                 **rollout_metrics,
                 "episodes_seen": (step + 1) * config.rollout.episodes_per_step,
             }
