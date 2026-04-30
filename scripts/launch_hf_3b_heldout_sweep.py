@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from huggingface_hub import HfApi
@@ -87,8 +88,115 @@ def _job_command() -> list[str]:
     ]
 
 
+def _smoke_command() -> list[str]:
+    return [
+        "python",
+        "-c",
+        (
+            "import os,time; "
+            "print('BOOT_START', flush=True); "
+            "print('JOB_ID=' + os.environ.get('JOB_ID', ''), flush=True); "
+            "print('ACCELERATOR=' + os.environ.get('ACCELERATOR', ''), flush=True); "
+            "time.sleep(20); "
+            "print('BOOT_DONE', flush=True)"
+        ),
+    ]
+
+
+def _gpu_smoke_command() -> list[str]:
+    return [
+        "python",
+        "-c",
+        (
+            "import json, torch; "
+            "print('BOOT_START', flush=True); "
+            "payload={'torch': torch.__version__, 'cuda': torch.version.cuda, "
+            "'available': torch.cuda.is_available(), 'count': torch.cuda.device_count()}; "
+            "print('TORCH_PREFLIGHT ' + json.dumps(payload, sort_keys=True), flush=True); "
+            "print('GPU_NAME=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'), flush=True); "
+            "print('BOOT_DONE', flush=True)"
+        ),
+    ]
+
+
+def _monitor_boot_marker(
+    *,
+    api: HfApi,
+    job_id: str,
+    namespace: str,
+    token: str,
+    wait_seconds: int,
+    marker: str = "BOOT_START",
+    cancel_on_timeout: bool = True,
+) -> None:
+    if wait_seconds <= 0:
+        return
+    deadline = time.monotonic() + wait_seconds
+    seen_marker = False
+    last_log_count = -1
+    while time.monotonic() < deadline:
+        info = api.inspect_job(job_id=job_id, namespace=namespace, token=token)
+        status = getattr(info, "status", None)
+        logs = list(
+            api.fetch_job_logs(
+                job_id=job_id,
+                namespace=namespace,
+                follow=False,
+                token=token,
+            )
+        )
+        if len(logs) != last_log_count:
+            print(
+                json.dumps(
+                    {
+                        "job_id": job_id,
+                        "status": str(status),
+                        "log_lines": len(logs),
+                        "tail": [str(line).rstrip() for line in logs[-8:]],
+                    },
+                    indent=2,
+                )
+            )
+            last_log_count = len(logs)
+        if any(marker in str(line) for line in logs):
+            seen_marker = True
+            break
+        stage = getattr(status, "stage", None)
+        if stage in {"COMPLETED", "ERROR", "CANCELED", "DELETED"}:
+            break
+        time.sleep(10)
+    if not seen_marker and cancel_on_timeout:
+        api.cancel_job(job_id=job_id, namespace=namespace, token=token)
+        info = api.inspect_job(job_id=job_id, namespace=namespace, token=token)
+        print(
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "boot_marker": marker,
+                    "result": "timeout_canceled",
+                    "status": str(getattr(info, "status", None)),
+                    "wait_seconds": wait_seconds,
+                },
+                indent=2,
+            )
+        )
+    elif seen_marker:
+        print(
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "boot_marker": marker,
+                    "result": "seen",
+                    "wait_seconds": wait_seconds,
+                },
+                indent=2,
+            )
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=("sweep", "smoke", "gpu-smoke"), default="sweep")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--token-env", default="HFALT1_TOKEN")
     parser.add_argument("--namespace", default="hfnasjdjas")
@@ -97,11 +205,14 @@ def main() -> int:
     parser.add_argument("--seeds", default="9101,9103,9107")
     parser.add_argument("--max-rounds", type=int, default=50)
     parser.add_argument("--flavor", default="h200")
+    parser.add_argument("--smoke-flavor", default="cpu-basic")
     parser.add_argument("--timeout", default="3h")
     parser.add_argument("--image", default="pytorch/pytorch:2.7.1-cuda12.6-cudnn9-devel")
+    parser.add_argument("--smoke-image", default="python:3.12-slim")
     parser.add_argument("--run-label", default="")
     parser.add_argument("--source-tgz", type=Path)
     parser.add_argument("--candidates-json", type=Path)
+    parser.add_argument("--wait-for-boot-seconds", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -114,6 +225,54 @@ def main() -> int:
     artifact_repo = args.artifact_repo or f"{namespace}/evacos2-h200-specialist-artifacts"
     sha = _git_sha()
     run_label = args.run_label or f"{args.family}-candidate-sweep-{sha}"
+
+    if args.mode in {"smoke", "gpu-smoke"}:
+        image = args.smoke_image if args.mode == "smoke" else args.image
+        flavor = args.smoke_flavor if args.mode == "smoke" else args.flavor
+        timeout = "5m" if args.mode == "smoke" else args.timeout
+        payload = {
+            "namespace": namespace,
+            "mode": args.mode,
+            "image": image,
+            "flavor": flavor,
+            "timeout": timeout,
+            "run_label": run_label,
+            "dry_run": args.dry_run,
+        }
+        print(json.dumps(payload, indent=2))
+        if args.dry_run:
+            return 0
+        api = HfApi(token=token)
+        job = api.run_job(
+            image=image,
+            command=_smoke_command() if args.mode == "smoke" else _gpu_smoke_command(),
+            flavor=flavor,  # type: ignore[arg-type]
+            timeout=timeout,
+            labels={"project": "evacos2", "run": "jobs-smoke", "mode": args.mode},
+            namespace=namespace,
+            token=token,
+        )
+        print(
+            json.dumps(
+                {
+                    "job_id": job.id,
+                    "namespace": namespace,
+                    "mode": args.mode,
+                    "url": str(getattr(job, "url", "")),
+                },
+                indent=2,
+            )
+        )
+        wait_seconds = args.wait_for_boot_seconds or (180 if args.mode == "smoke" else 600)
+        _monitor_boot_marker(
+            api=api,
+            job_id=job.id,
+            namespace=namespace,
+            token=token,
+            wait_seconds=wait_seconds,
+        )
+        return 0
+
     temp_dir_obj: tempfile.TemporaryDirectory[str] | None = None
     if args.source_tgz is None:
         temp_dir_obj = tempfile.TemporaryDirectory()
@@ -193,6 +352,13 @@ def main() -> int:
                 },
                 indent=2,
             )
+        )
+        _monitor_boot_marker(
+            api=api,
+            job_id=job.id,
+            namespace=namespace,
+            token=token,
+            wait_seconds=args.wait_for_boot_seconds,
         )
     finally:
         if temp_dir_obj is not None:
