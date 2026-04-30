@@ -200,6 +200,7 @@ from huggingface_hub import HfApi
 
 api = HfApi(token=os.environ["HF_TOKEN"])
 repo_id = os.environ["HF_7B_ARTIFACT_REPO"]
+artifact_private = os.environ.get("HF_7B_ARTIFACT_PRIVATE", "0").lower() in {"1", "true", "yes"}
 run_name = os.environ["RUN_NAME"]
 checkpoint_dir = Path(os.environ["CHECKPOINT_DIR"])
 metrics_path = Path(os.environ["METRICS"])
@@ -213,7 +214,7 @@ if state_path.exists():
     except Exception:
         last_uploaded = -1
 
-api.create_repo(repo_id=repo_id, repo_type="model", private=False, exist_ok=True)
+api.create_repo(repo_id=repo_id, repo_type="model", private=artifact_private, exist_ok=True)
 while True:
     stop_path = Path(os.environ.get("HF_7B_UPLOAD_STOP_PATH", "/workspace/stop_7b_checkpoint_uploader"))
     latest = checkpoint_dir / "latest"
@@ -372,7 +373,8 @@ from huggingface_hub import HfApi
 
 api = HfApi(token=os.environ["HF_TOKEN"])
 repo_id = os.environ["HF_7B_ARTIFACT_REPO"]
-api.create_repo(repo_id=repo_id, repo_type="model", private=False, exist_ok=True)
+artifact_private = os.environ.get("HF_7B_ARTIFACT_PRIVATE", "0").lower() in {"1", "true", "yes"}
+api.create_repo(repo_id=repo_id, repo_type="model", private=artifact_private, exist_ok=True)
 api.upload_folder(
     repo_id=repo_id,
     repo_type="model",

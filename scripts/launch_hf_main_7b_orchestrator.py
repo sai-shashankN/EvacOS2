@@ -76,6 +76,16 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--namespace", default=None)
     parser.add_argument("--artifact-repo", default=None)
+    parser.add_argument(
+        "--artifact-private",
+        action="store_true",
+        help="Create/upload the artifact repo as private. Useful for alt-account compute repos.",
+    )
+    parser.add_argument(
+        "--token-env",
+        default=None,
+        help="Optional .env/environment key to use as the HF token, e.g. HFALT1_TOKEN.",
+    )
     parser.add_argument("--image", default="pytorch/pytorch:2.7.1-cuda12.6-cudnn9-devel")
     parser.add_argument("--flavor", default="h100")
     parser.add_argument("--timeout", default="4h")
@@ -94,9 +104,13 @@ def main() -> int:
     args = parser.parse_args()
 
     env_values = {**os.environ, **_load_env(args.env_file)}
-    token = env_values.get("HFMAIN_TOKEN") or env_values.get("HF_TOKEN")
+    if args.token_env:
+        token = env_values.get(args.token_env)
+    else:
+        token = env_values.get("HFMAIN_TOKEN") or env_values.get("HF_TOKEN")
     if not token:
-        raise SystemExit("Missing HFMAIN_TOKEN or HF_TOKEN")
+        wanted = args.token_env or "HFMAIN_TOKEN or HF_TOKEN"
+        raise SystemExit(f"Missing {wanted}")
 
     namespace = args.namespace or env_values.get("HFMAIN_NAMESPACE") or DEFAULT_NAMESPACE
     artifact_repo = args.artifact_repo or env_values.get("HF_7B_ARTIFACT_REPO") or DEFAULT_ARTIFACT_REPO
@@ -116,6 +130,7 @@ def main() -> int:
         "RUN_NAME": args.run_name,
         "STEPS": str(args.steps),
         "HF_7B_ARTIFACT_REPO": artifact_repo,
+        "HF_7B_ARTIFACT_PRIVATE": "1" if args.artifact_private else "0",
         "HF_SOURCE_REPO": artifact_repo,
         "HF_SOURCE_FILENAME": source_filename,
         "HF_FIRE_ADAPTER_REPO": _env_or_arg(env_values, args.fire_adapter_repo, "HF_FIRE_ADAPTER_REPO"),
@@ -154,7 +169,13 @@ def main() -> int:
         if args.dry_run:
             return 0
 
-        api.create_repo(repo_id=artifact_repo, repo_type="model", private=False, exist_ok=True, token=token)
+        api.create_repo(
+            repo_id=artifact_repo,
+            repo_type="model",
+            private=args.artifact_private,
+            exist_ok=True,
+            token=token,
+        )
         api.upload_file(
             repo_id=artifact_repo,
             repo_type="model",
