@@ -70,14 +70,18 @@ def _job_command() -> list[str]:
         "bash",
         "-lc",
         (
-            "python -m pip install -q 'huggingface_hub>=0.34.0,<1.0' && "
+            "set -euo pipefail; echo BOOT_START $(date -Is); "
+            "python -m pip install 'huggingface_hub>=0.34.0,<1.0' && "
+            "echo SOURCE_FETCH_START $(date -Is) && "
             "mkdir -p /workspace/source /workspace/EvacOS2_boot && "
             "python -c \"import os; from huggingface_hub import hf_hub_download; "
             "p=hf_hub_download(repo_id=os.environ['HF_SOURCE_REPO'], "
             "filename=os.environ['HF_SOURCE_FILENAME'], repo_type='model', "
             "token=os.environ['HF_TOKEN'], local_dir='/workspace/source'); print(p)\" && "
+            "echo SOURCE_EXTRACT_START $(date -Is) && "
             "tar -xzf \"/workspace/source/$HF_SOURCE_FILENAME\" -C /workspace/EvacOS2_boot && "
             "cd /workspace/EvacOS2_boot && "
+            "echo JOB_SCRIPT_START $(date -Is) && "
             "bash scripts/hf_3b_heldout_sweep_job.sh"
         ),
     ]
