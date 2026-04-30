@@ -2,7 +2,7 @@
 
 EvacOS2 is a multi-agent evacuation RL environment where one orchestrator and multiple floor agents must coordinate people movement, exits, overrides, and hazard response inside a deterministic simulator.
 
-Evidence status: the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus trained LoRA specialists on the same unseen seeds and evaluator. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `58.65%` to `80.45%` and reduced invalid actions from `39.18%` to `0.87%`. A non-trivial base score is expected because EvacOS2 is an instruction-legible emergency benchmark; the learning claim is improved bounded score, invalid-action reduction, and stricter route-target discipline under the same evaluator. The scorecard also includes raw save-rate overflow audit columns for fire/gas simulator-accounting traces, so the safest claim is invalid-action reduction plus bounded score movement rather than final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+Evidence status: the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus trained LoRA specialists on the same unseen seeds and evaluator. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `62.38%` to `80.05%` and reduced invalid actions from `34.47%` to `1.10%`. A non-trivial base score is expected because EvacOS2 is an instruction-legible emergency benchmark; the learning claim is improved bounded score, invalid-action reduction, and stricter route-target discipline under the same evaluator. The scorecard also includes raw save-rate overflow audit columns for simulator-accounting traces, so the safest claim is invalid-action reduction plus bounded score movement rather than final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
 
 Benchmark scope: the submitted fixed-suite specialist comparison is a controlled proof slice. That keeps the baseline-vs-trained result deterministic, judge-runnable, and directly auditable. The simulator and training configs are built for broader curricula; higher-difficulty scorecards are the next evaluation milestone after the submitted slice.
 
@@ -82,14 +82,14 @@ python -m evaluation.demo_bundle \
 
 ## Held-out base-vs-trained headline
 
-On a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score by `+21.80 pp` and cut invalid actions from `39.18%` to `0.87%` across fire, flood, and gas response lanes. The canary route diagnostics also show `1.0000` route-action averages and `0.0000` missing-target averages across all three specialist lanes. The CSV includes raw save-rate overflow audit columns; use invalid-action reduction and route-contract reliability as the cleanest learning headline.
+On a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score by `+17.67 pp` and cut invalid actions from `34.47%` to `1.10%` across fire, flood, and gas response lanes. The canary route diagnostics also show `1.0000` route-action averages and `0.0000` missing-target averages across all three specialist lanes. The refreshed gas held-out audit records `0.73%` route-missing-targets on the stricter `10`-seed slice. Use invalid-action reduction and route-contract reliability as the cleanest learning headline.
 
 | Family | Episodes | Base bounded score | Trained bounded score | Delta | Base invalid | Trained invalid | Raw save overflows |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` | `5/7` |
 | Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` | `0/0` |
-| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` | `2/8` |
-| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** | **audit logged** |
+| Gas | `10` | `79.43%` | `98.09%` | `+18.67 pp` | `28.23%` | `0.69%` | `0/0` |
+| **Average** | `30 total` | **`62.38%`** | **`80.05%`** | **`+17.67 pp`** | **`34.47%`** | **`1.10%`** | **audit logged** |
 
 ## Core competitive claims
 

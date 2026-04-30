@@ -153,18 +153,20 @@ The cleanest reward-improvement evidence is now a held-out `3B` specialist compa
 
 This is intentionally framed as a controlled proof lane, not the full ceiling of the simulator. For judges, the goal is a clean scientific slice: same seeds, same evaluator, same task families, base model versus trained adapter. The simulator and curriculum can be extended to harder slices, but the submitted public table focuses on the benchmark slice we can make reproducible and inspectable end to end.
 
-The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`. The base model is not meant to be helpless: EvacOS2 is deliberately instruction-legible because emergency interfaces should be clear. The learning signal is that training makes the same model more reliable under the same contract.
+The headline is the part that matters: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score from `62.38%` to `80.05%` (`+17.67 pp`), while cutting invalid actions from `34.47%` to `1.10%`. The base model is not meant to be helpless: EvacOS2 is deliberately instruction-legible because emergency interfaces should be clear. The learning signal is that training makes the same model more reliable under the same contract.
 
-One audit detail is worth making explicit because this is a simulator, not a static worksheet: the scorecard records raw save-rate overflow counts for fire/gas traces where the simulator-accounting layer can double-count saved civilians. The public eval score is still bounded to `0-100%`, but the cleanest learning signal is the invalid-action reduction plus the bounded score movement, not a claim that this is a final converged policy.
+One audit detail is worth making explicit because this is a simulator, not a static worksheet: the scorecard records raw save-rate overflow counts for fire traces where the simulator-accounting layer can double-count saved civilians. The public eval score is still bounded to `0-100%`, but the cleanest learning signal is the invalid-action reduction plus the bounded score movement, not a claim that this is a final converged policy.
 
 | Family | Held-out episodes | Base bounded score | Trained bounded score | Delta | Base invalid rate | Trained invalid rate | Raw save overflows |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` | `5/7` |
 | Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` | `0/0` |
-| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` | `2/8` |
-| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** | **audit logged** |
+| Gas | `10` | `79.43%` | `98.09%` | `+18.67 pp` | `28.23%` | `0.69%` | `0/0` |
+| **Average** | `30 total` | **`62.38%`** | **`80.05%`** | **`+17.67 pp`** | **`34.47%`** | **`1.10%`** | **audit logged** |
 
-The public artifact path is `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). This run is intentionally labeled as a fast `10`-seed held-out comparison; the same evaluator path supports larger seed counts.
+The gas row was refreshed after the route-target audit using the public `gas/h200-resume200-ckpt199` adapter on the same `10` held-out seeds. That run is uploaded under `heldout/vast-gas-ckpt199-heldout10-f3ad625-20260430T202253Z` and records `0.73%` route-missing-targets, so the previous gas ambiguity is now a documented diagnostic rather than the headline.
+
+The public artifact paths are `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214` and the refreshed gas route audit `heldout/vast-gas-ckpt199-heldout10-f3ad625-20260430T202253Z` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts). These runs are intentionally labeled as fast `10`-seed held-out comparisons; the same evaluator path supports larger seed counts.
 
 ![Held-out 3B base-vs-trained eval score](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png)
 

@@ -49,7 +49,7 @@ but also:
 | Public model/artifact repo | [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
 | Source code on GitHub | [sai-shashankN/EvacOS2](https://github.com/sai-shashankN/EvacOS2) |
 
-**Evidence status:** the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `58.65%` to `80.45%` and reduced invalid actions from `39.18%` to `0.87%`. The base/no-LoRA model is intentionally non-trivial because EvacOS2 is an instruction-legible emergency benchmark, not an opaque puzzle; the learning claim is that training improves bounded score, contract reliability, and route-target discipline under the same evaluator. The scorecard also records raw save-rate overflow counts as an evaluator audit trail, so the safest headline is the invalid-action reduction plus bounded score movement rather than a claim of final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
+**Evidence status:** the repo now includes a held-out `3B` specialist comparison: Qwen2.5-3B base/no-LoRA versus the trained LoRA specialists on the same unseen seeds, same evaluator, and same family-specific lanes. On this `30`-episode controlled proof slice, trained LoRA floor specialists improved the bounded eval score from `62.38%` to `80.05%` and reduced invalid actions from `34.47%` to `1.10%`. The base/no-LoRA model is intentionally non-trivial because EvacOS2 is an instruction-legible emergency benchmark, not an opaque puzzle; the learning claim is that training improves bounded score, contract reliability, and route-target discipline under the same evaluator. The scorecard also records raw save-rate overflow counts as an evaluator audit trail, so the safest headline is the invalid-action reduction plus bounded score movement rather than a claim of final convergence. The `7B` orchestrator remains smoke/training-signal validated rather than claimed as a converged held-out policy.
 
 **Benchmark scope note:** the submitted specialist proof lane uses a controlled fixed-suite slice so the public baseline-vs-trained comparison is deterministic, cheap enough to rerun, and easy to audit. The simulator and training stack are designed for broader curricula; expanding the same fixed-suite evaluator to higher-difficulty slices is future evaluation work, not a change to the environment architecture.
 
@@ -242,18 +242,20 @@ This is the clearest reward-improvement evidence: same held-out seeds, same fixe
 
 For submission clarity, this table is reported on the controlled specialist proof slice rather than the full simulator difficulty ceiling. That choice keeps the public result reproducible and directly comparable across base, checkpoint, and trained policies; harder benchmark slices are the next validation milestone using the same evaluator shape.
 
-Audit note: the score is bounded to `0-100%`, and the refreshed CSV also records raw save-rate overflow counts because some fire/gas traces can double-count saved civilians at the simulator-accounting layer. The safest headline is therefore the base/no-LoRA to trained LoRA invalid-action reduction, plus bounded score movement as a controlled proof-slice signal.
+Audit note: the score is bounded to `0-100%`, and the refreshed CSV also records raw save-rate overflow counts because some fire traces can double-count saved civilians at the simulator-accounting layer. The safest headline is therefore the base/no-LoRA to trained LoRA invalid-action reduction, plus bounded score movement as a controlled proof-slice signal.
 
-Headline: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score from `58.65%` to `80.45%` (`+21.80 pp`), while cutting invalid actions from `39.18%` to `0.87%`.
+Headline: on a `30`-episode held-out specialist evaluation, trained LoRA floor specialists improved the base/no-LoRA Qwen2.5-3B bounded eval score from `62.38%` to `80.05%` (`+17.67 pp`), while cutting invalid actions from `34.47%` to `1.10%`.
 
 | Family | Held-out episodes | Base bounded score | Trained bounded score | Delta | Base invalid rate | Trained invalid rate | Raw save overflows |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` | `5/7` |
 | Flood | `10` | `22.95%` | `45.42%` | `+22.47 pp` | `47.67%` | `0.00%` | `0/0` |
-| Gas | `10` | `68.22%` | `99.28%` | `+31.06 pp` | `42.34%` | `0.00%` | `2/8` |
-| **Average** | `30 total` | **`58.65%`** | **`80.45%`** | **`+21.80 pp`** | **`39.18%`** | **`0.87%`** | **audit logged** |
+| Gas | `10` | `79.43%` | `98.09%` | `+18.67 pp` | `28.23%` | `0.69%` | `0/0` |
+| **Average** | `30 total` | **`62.38%`** | **`80.05%`** | **`+17.67 pp`** | **`34.47%`** | **`1.10%`** | **audit logged** |
 
-Public artifact path: `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214` in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts).
+Gas route-target refresh: the public `gas/h200-resume200-ckpt199` adapter was re-evaluated on the same `10` held-out seeds after the route audit. It scored `98.09%`, cut invalid actions from `28.23%` to `0.69%`, and kept route-missing-targets to `0.73%`. The uploaded artifact path is `heldout/vast-gas-ckpt199-heldout10-f3ad625-20260430T202253Z` in `shashankN777/evacos2-7b-orchestrator-artifacts`.
+
+Public artifact paths in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts): the original fire/flood/gas held-out bundle is `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214`, and the refreshed gas route audit is `heldout/vast-gas-ckpt199-heldout10-f3ad625-20260430T202253Z`.
 
 ![Held-out 3B base-vs-trained eval score](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png)
 
