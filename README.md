@@ -181,7 +181,7 @@ The repo now includes lightweight, Git-tracked artifacts for reviewers. Large Lo
 | **H200 / HF Jobs specialist artifacts** | Public canary trail | Fire/flood/gas H200 canary adapters, logs, and metrics are hosted on Hugging Face; longer quality-run configs are checked in but not claimed as final results |
 | **Held-out `3B` specialist comparison** | Tracked + public artifact repo | [held-out summary](demo/results/heldout_3b_base_vs_trained_summary.md), [CSV](demo/results/heldout_3b_base_vs_trained_summary.csv), and plots show base/no-LoRA vs trained LoRA on the same unseen seeds, with raw save-rate overflow audit columns |
 | **Fixed-suite baseline evidence** | Tracked | [baseline CSV](demo/results/baseline_fixed_suite.csv), [scorecard](demo/results/submission_scorecard_baseline.md), [plots](demo/results/plots) |
-| **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), [route-target plot](demo/results/plots/3b_route_target_validity.png), and checkpoint plots covering fire/flood/gas route validity, invalid-action reduction, checkpoints, and runtime |
+| **`3B` specialist canaries** | Tracked | [canary report](demo/results/specialist_canary50_report.md), [score CSV](demo/results/3b_specialist_canary50_scores.csv), [route-target plot](demo/results/plots/3b_route_target_validity.png), and H200 continuation plots covering raw reward and invalid-action movement |
 | **`7B` orchestrator behavior card** | Tracked | [behavior card](demo/results/7b_orchestrator_behavior_card.md) explains the orchestrator role, split-role smoke evidence, one trace, and the remaining held-out eval gap |
 | **Hugging Face Space / live demo surface** | Deployed | [evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) exposes the canonical `/openenv/*` API surface |
 | **Walkthrough video** | External link slot | Link the final public video in this row and in the submission form; draft flow lives in [demo/storyboard.md](demo/storyboard.md) |
@@ -256,6 +256,8 @@ Headline: on a `30`-episode held-out specialist evaluation, trained LoRA floor s
 Gas route-target refresh: the public `gas/h200-resume200-ckpt199` adapter was re-evaluated on the same `10` held-out seeds after the route audit. It scored `98.09%`, cut invalid actions from `28.23%` to `0.69%`, and kept route-missing-targets to `0.73%`. The uploaded artifact path is `heldout/vast-gas-ckpt199-heldout10-f3ad625-20260430T202253Z` in `shashankN777/evacos2-7b-orchestrator-artifacts`.
 
 Public artifact paths in [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts): the original fire/flood/gas held-out bundle is `heldout/base-model-vs-h200-resume200-ckpt199-3b-heldout10-batched-20260429-094214`, and the refreshed gas route audit is `heldout/vast-gas-ckpt199-heldout10-f3ad625-20260430T202253Z`.
+
+![EvacOS2 3B judge evidence dashboard](demo/results/plots/evacos2_3b_judge_evidence_dashboard.png)
 
 ![Held-out 3B base-vs-trained eval score](demo/results/plots/heldout_3b_base_vs_trained_eval_score.png)
 

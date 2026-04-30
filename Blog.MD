@@ -157,6 +157,8 @@ The headline is the part that matters: on a `30`-episode held-out specialist eva
 
 One audit detail is worth making explicit because this is a simulator, not a static worksheet: the scorecard records raw save-rate overflow counts for fire traces where the simulator-accounting layer can double-count saved civilians. The public eval score is still bounded to `0-100%`, but the cleanest learning signal is the invalid-action reduction plus the bounded score movement, not a claim that this is a final converged policy.
 
+![EvacOS2 3B judge evidence dashboard](demo/results/plots/evacos2_3b_judge_evidence_dashboard.png)
+
 | Family | Held-out episodes | Base bounded score | Trained bounded score | Delta | Base invalid rate | Trained invalid rate | Raw save overflows |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Fire | `10` | `84.77%` | `96.64%` | `+11.87 pp` | `27.52%` | `2.60%` | `5/7` |
