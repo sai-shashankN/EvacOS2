@@ -1009,6 +1009,36 @@ def test_compute_rollout_metrics_excludes_rejected_selected_actions_from_behavio
     assert metrics["valid_but_hollow_action_rate"] == 1.0
 
 
+def test_compute_rollout_metrics_tracks_floor_route_missing_target_rate() -> None:
+    results = [
+        SimpleNamespace(
+            override_count=0,
+            orchestrator_action_count=0,
+            override_win_count=0,
+            rationale_bonus_total=0.0,
+            rationale_bonus_count=0,
+            samples=[
+                SimpleNamespace(
+                    role="floor_agent",
+                    parsed_action={
+                        "action_type": "route_within_floor",
+                        "arguments": {"from_room_id": "gas_room_01"},
+                        "selected_for_execution": True,
+                    },
+                ),
+            ],
+        )
+    ]
+
+    metrics = train_mod._compute_rollout_metrics(results)
+
+    assert metrics["floor_route_action_rate"] == 1.0
+    assert metrics["floor_route_missing_target_rate"] == 1.0
+    assert metrics["floor_route_exit_rate"] == 0.0
+    assert metrics["floor_route_stairwell_rate"] == 0.0
+    assert metrics["floor_route_room_rate"] == 0.0
+
+
 def test_training_watchdog_flags_zero_grpo_signal_after_window() -> None:
     config = TrainingConfig(
         watchdog={"warmup_steps": 1, "zero_signal_window": 2},

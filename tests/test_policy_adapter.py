@@ -465,6 +465,27 @@ class TestParseCompletionToAction:
         assert action is None
         assert reason == "arguments_invalid"
 
+    def test_parse_completion_rejects_route_with_from_room_but_no_target(self):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": 0,
+            "agent_id": "floor_0_agent",
+            "action_id": "gas_bad_route",
+            "action_type": "route_within_floor",
+            "arguments": {"from_room_id": "gas_room_01"},
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="floor_0_agent",
+            role="floor_agent",
+            expected_episode_id="ep1",
+            expected_round_id=0,
+        )
+
+        assert action is None
+        assert reason == "arguments_invalid"
+
     def test_parse_completion_salvages_role_token_polluted_priority_json(self):
         completion = (
             '{"episode_id":null,"round_id":1,"agent_id":"floor_4_agent",'

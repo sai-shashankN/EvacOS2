@@ -13,6 +13,7 @@ from evaluation.fixed_suite import (
     FixedSuiteResult,
     _bounded_civilian_counts,
     _count_actions,
+    _is_floor_route_missing_target,
     _seed_eval_normalizer,
     run_fixed_suite,
 )
@@ -80,6 +81,36 @@ def test_action_diagnostics_count_current_and_legacy_action_names():
         counts,
         ("evacuate_floor_priority", "evacuate_floor", "evacuate_room"),
     ) == 4
+
+
+def test_action_diagnostics_detect_floor_route_missing_target_from_completion_text():
+    row = {
+        "agent_id": "floor_1_agent",
+        "action_type": "wait",
+        "arguments": {},
+        "valid": False,
+        "rejection_reason": "parse_error",
+        "parse_status": "arguments_invalid",
+        "completion_text": (
+            '{"action_type":"route_within_floor",'
+            '"arguments":{"from_room_id":"F1_R2"}}'
+        ),
+    }
+
+    assert _is_floor_route_missing_target(row) is True
+
+
+def test_action_diagnostics_accept_floor_route_with_target():
+    row = {
+        "agent_id": "floor_1_agent",
+        "action_type": "route_within_floor",
+        "arguments": {"from_room_id": "F1_R2", "exit_id": "EX1"},
+        "valid": True,
+        "parse_status": "ok",
+        "completion_text": "",
+    }
+
+    assert _is_floor_route_missing_target(row) is False
 
 
 def test_bounded_civilian_counts_prevent_impossible_eval_totals():

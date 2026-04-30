@@ -83,6 +83,10 @@ class EpisodeResult(BaseModel):
     override_win_rate: float = 0.0
     action_type_counts: dict[str, int] = Field(default_factory=dict)
     action_type_counts_by_role: dict[str, dict[str, int]] = Field(default_factory=dict)
+    parse_status_counts: dict[str, int] = Field(default_factory=dict)
+    parse_status_counts_by_role: dict[str, dict[str, int]] = Field(default_factory=dict)
+    floor_route_missing_target_count: int = 0
+    floor_route_missing_target_rate: float = 0.0
     wait_rate: float = 0.0
     scout_rate: float = 0.0
     route_rate: float = 0.0
@@ -212,6 +216,46 @@ def _read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+def _has_route_target(arguments: object) -> bool:
+    if not isinstance(arguments, dict):
+        return False
+    return any(arguments.get(key) for key in ("to_room_id", "exit_id", "stairwell_id"))
+
+
+def _json_completion_payload(row: Mapping[str, object]) -> dict[str, object] | None:
+    completion = row.get("completion_text")
+    if not isinstance(completion, str) or not completion.strip():
+        return None
+    try:
+        payload = json.loads(completion)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _is_floor_route_missing_target(row: Mapping[str, object]) -> bool:
+    """Detect the gas regression where a routed action omits its target.
+
+    Invalid model outputs are recorded as fallback ``wait`` actions, so the
+    normalized action row alone is not enough. Inspect completion_text when the
+    parser rejected the payload.
+    """
+
+    agent_id = str(row.get("agent_id", ""))
+    if agent_id == "orchestrator" or not agent_id.startswith("floor_"):
+        return False
+
+    if row.get("action_type") == "route_within_floor":
+        return not _has_route_target(row.get("arguments"))
+
+    if row.get("parse_status") != "arguments_invalid":
+        return False
+    payload = _json_completion_payload(row)
+    if payload is None or payload.get("action_type") != "route_within_floor":
+        return False
+    return not _has_route_target(payload.get("arguments"))
+
+
 def _build_episode_result(
     *,
     label: str,
@@ -243,11 +287,22 @@ def _build_episode_result(
     action_counts = Counter(
         str(row.get("action_type", "unknown")) for row in action_rows
     )
+    parse_status_counts = Counter(
+        str(row.get("parse_status", "missing")) for row in action_rows
+    )
     action_counts_by_role: dict[str, Counter[str]] = defaultdict(Counter)
+    parse_status_counts_by_role: dict[str, Counter[str]] = defaultdict(Counter)
+    floor_action_count = 0
+    floor_route_missing_target_count = 0
     for row in action_rows:
         agent_id = str(row.get("agent_id", ""))
         role = "orchestrator" if agent_id == "orchestrator" else "floor_agent"
         action_counts_by_role[role][str(row.get("action_type", "unknown"))] += 1
+        parse_status_counts_by_role[role][str(row.get("parse_status", "missing"))] += 1
+        if role == "floor_agent":
+            floor_action_count += 1
+            if _is_floor_route_missing_target(row):
+                floor_route_missing_target_count += 1
     override_ids = {
         row["action_id"]
         for row in action_rows
@@ -308,6 +363,17 @@ def _build_episode_result(
             role: {key: int(value) for key, value in sorted(counts.items())}
             for role, counts in sorted(action_counts_by_role.items())
         },
+        parse_status_counts={key: int(value) for key, value in sorted(parse_status_counts.items())},
+        parse_status_counts_by_role={
+            role: {key: int(value) for key, value in sorted(counts.items())}
+            for role, counts in sorted(parse_status_counts_by_role.items())
+        },
+        floor_route_missing_target_count=int(floor_route_missing_target_count),
+        floor_route_missing_target_rate=(
+            float(floor_route_missing_target_count / floor_action_count)
+            if floor_action_count
+            else 0.0
+        ),
         wait_rate=float(action_counts.get("wait", 0) / action_count) if action_count else 0.0,
         scout_rate=float(_count_actions(action_counts, ("scout", "scout_status")) / action_count)
         if action_count
