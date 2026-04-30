@@ -532,6 +532,33 @@ class TestParseCompletionToAction:
         assert action is not None
         assert action.arguments["ordered_floor_ids"] == ["floor_1"]
 
+    def test_parse_completion_unwraps_nested_priority_arguments(self, caplog):
+        completion = json.dumps({
+            "episode_id": "ep1",
+            "round_id": 0,
+            "agent_id": "orchestrator",
+            "action_id": "orch_priority",
+            "action_type": "evacuate_floor_priority",
+            "arguments": {
+                "evacuate_floor_priority_arguments": {
+                    "ordered_floor_ids": ["floor_2", "floor_1"],
+                },
+            },
+        })
+
+        action, reason = parse_completion_to_action(
+            completion,
+            agent_id="orchestrator",
+            role="orchestrator",
+            expected_episode_id="ep1",
+            expected_round_id=0,
+        )
+
+        assert reason == "ok"
+        assert action is not None
+        assert action.arguments == {"ordered_floor_ids": ["floor_2", "floor_1"]}
+        assert "Unwrapped nested evacuate_floor_priority_arguments" in caplog.text
+
     def test_parse_completion_rejects_active_action_with_non_dict_arguments(self):
         completion = json.dumps({
             "episode_id": "ep1",

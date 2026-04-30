@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from evacos_ma.env import EvacEnvironment
 from evacos_ma.models import WaitAction
 from evacos_ma.schemas.multi_agent import (
@@ -265,3 +267,99 @@ def test_floor_summary_queue_pressure_saturates_at_1_when_no_outflow():
     summary = next(item for item in obs.floor_summaries if item.floor_id == "floor_0")
 
     assert summary.queue_pressure == 1.0
+
+
+def test_evacuate_floor_priority_issues_high_priority_directive_and_reward():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+    top_floor = ep.building.floors[-1]
+    top_floor_id = env._floor_public_id(top_floor.floor_id)
+
+    for floor in ep.building.floors:
+        for room in floor.rooms:
+            room.hazard.severity = 0.0
+            room.occupancy.mobile = 0
+            room.occupancy.injured = 0
+            room.occupancy.mobility_impaired = 0
+    top_floor.rooms[0].hazard.severity = 1.0
+    top_floor.rooms[0].occupancy.mobile = 25
+
+    oracle_order, _ = env._priority_oracle_order(ep)
+    assert oracle_order[0] == top_floor_id
+
+    result = env.step_multi_agent(
+        ActionBundleMA(
+            episode_id=episode_id,
+            round_id=ep.step,
+            orchestrator_action=ActionEnvelopeMA(
+                episode_id=episode_id,
+                round_id=ep.step,
+                agent_id="orchestrator",
+                action_id="priority_top_floor",
+                action_type=ActionTypeMA.evacuate_floor_priority,
+                arguments={"ordered_floor_ids": oracle_order},
+            ),
+            floor_actions={},
+        )
+    )
+
+    snapshot = result.info.score_snapshot["priority"]
+    directive = env._directive_stores[episode_id].active_directive_for_target(
+        top_floor_id,
+        env.get_internal_state(episode_id).step,
+    )
+
+    assert snapshot["priority_directive_issued_count"] == 1
+    assert snapshot["priority_top_floor"] == top_floor_id
+    assert result.rewards_by_role.orchestrator.breakdown.priority_top_match > 0.0
+    assert result.rewards_by_role.orchestrator.breakdown.priority_rank_score > 0.0
+    assert directive is not None
+    assert directive.directive_type == "prioritize_floor_egress"
+    assert directive.priority.value == "high"
+    assert any(
+        event.get("event_type") == "evacuate_floor_priority_issued"
+        for event in result.round_events
+    )
+
+
+def test_evacuate_floor_priority_rejects_unknown_floor_order():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+
+    result = env.step_multi_agent(
+        ActionBundleMA(
+            episode_id=episode_id,
+            round_id=ep.step,
+            orchestrator_action=ActionEnvelopeMA(
+                episode_id=episode_id,
+                round_id=ep.step,
+                agent_id="orchestrator",
+                action_id="priority_unknown_floor",
+                action_type=ActionTypeMA.evacuate_floor_priority,
+                arguments={"ordered_floor_ids": ["floor_999"]},
+            ),
+            floor_actions={},
+        )
+    )
+
+    snapshot = result.info.score_snapshot["priority"]
+
+    assert snapshot["priority_rejection_reason"] == "priority_order_has_no_known_floors"
+    assert snapshot["priority_unknown_floor_ids"] == ["floor_999"]
+    assert result.rewards_by_role.orchestrator.breakdown.priority_duplicate_or_unknown_penalty < 0.0
+    assert any(
+        row.get("reason") == "priority_order_has_no_known_floors"
+        for row in result.invalid_actions
+    )
+
+
+def test_priority_rank_score_rewards_oracle_order_over_reversed_order():
+    env = EvacEnvironment()
+    episode_id, _ = env.reset_multi_agent("task_1_fire_easy", seed=42)
+    ep = env.get_internal_state(episode_id)
+    oracle_order, _ = env._priority_oracle_order(ep)
+
+    assert env._priority_rank_score(oracle_order, oracle_order) == pytest.approx(1.0)
+    assert env._priority_rank_score(list(reversed(oracle_order)), oracle_order) < 1.0

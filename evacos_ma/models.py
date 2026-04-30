@@ -109,6 +109,11 @@ class RewardWeights(EvacBaseModel):
     total_lost_terminal: float = -1.0
     coordination_bonus: float = -0.3
     directive_quality: float = 0.2
+    priority_top_match: float = 0.25
+    priority_rank_score: float = 0.25
+    priority_coverage: float = 0.10
+    priority_duplicate_or_unknown_penalty: float = -0.25
+    priority_effect_bonus: float = 0.10
 
 
 class ThreatState(EvacBaseModel):

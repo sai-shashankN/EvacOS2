@@ -700,6 +700,8 @@ class EvacEnvironment:
                             }
                         )
 
+        priority_oracle_order, priority_oracle_scores = self._priority_oracle_order(ep)
+
         # --- Phase 5: delegate to RoundProtocol ---
         round_result = self._round_protocol.run_round(
             env=self,
@@ -803,6 +805,15 @@ class EvacEnvironment:
             "directive_quality", 0.0
         ) + (addressed - churn) * weights.directive_quality
 
+        priority_components, priority_snapshot = self._orchestrator_priority_reward_components(
+            action=bundle.orchestrator_action,
+            round_result=round_result,
+            oracle_order=priority_oracle_order,
+            oracle_scores=priority_oracle_scores,
+        )
+        for key, value in priority_components.items():
+            orchestrator_components[key] = orchestrator_components.get(key, 0.0) + value
+
         if done:
             orchestrator_components["total_saved_terminal"] = (
                 orchestrator_components.get("total_saved_terminal", 0.0)
@@ -874,6 +885,7 @@ class EvacEnvironment:
                     },
                     "belief_audits": [row.model_dump(mode="json") for row in audit_rows],
                     "counterfactual_deltas": round_result.counterfactual_deltas,
+                    "priority": priority_snapshot,
                 },
             ),
         )
@@ -2059,6 +2071,138 @@ class EvacEnvironment:
         if outflow <= 0:
             return 1.0 if total_civilians > 0 else 0.0
         return min(1.0, float(total_civilians) / float(outflow))
+
+    def _priority_floor_summaries(self, ep: EpisodeStateInternal) -> list[FloorSummary]:
+        """Full-state floor summaries used only for reward oracle scoring."""
+        summaries: list[FloorSummary] = []
+        for floor in ep.building.floors:
+            summaries.append(
+                FloorSummary(
+                    floor_id=self._floor_public_id(floor.floor_id),
+                    known_civilian_count=sum(room.occupancy.total for room in floor.rooms),
+                    unknown_room_count=0,
+                    hazard_severity=sum(room.hazard.severity for room in floor.rooms) / max(1, len(floor.rooms)),
+                    queue_pressure=self._compute_queue_pressure(floor, ep),
+                    exit_capacity_remaining=sum(1 for exit_obj in floor.exits if not exit_obj.blocked),
+                    last_updated_round=ep.step,
+                )
+            )
+        return summaries
+
+    def _priority_floor_score(self, summary: FloorSummary) -> float:
+        civilian_pressure = min(1.0, float(summary.known_civilian_count) / 50.0)
+        unknown_pressure = min(1.0, float(summary.unknown_room_count) / 10.0)
+        exit_pressure = 1.0 / (1.0 + max(float(summary.exit_capacity_remaining), 0.0))
+        return round(
+            (1.20 * float(summary.hazard_severity))
+            + (0.90 * float(summary.queue_pressure))
+            + (0.50 * civilian_pressure)
+            + (0.25 * unknown_pressure)
+            + (0.25 * exit_pressure),
+            6,
+        )
+
+    def _priority_oracle_order(self, ep: EpisodeStateInternal) -> tuple[list[str], dict[str, float]]:
+        scores = {
+            summary.floor_id: self._priority_floor_score(summary)
+            for summary in self._priority_floor_summaries(ep)
+        }
+        order = sorted(scores, key=lambda floor_id: (-scores[floor_id], floor_id))
+        return order, scores
+
+    def _priority_rank_score(self, submitted: list[str], oracle_order: list[str]) -> float:
+        if not submitted or not oracle_order:
+            return 0.0
+        oracle_rank = {floor_id: idx for idx, floor_id in enumerate(oracle_order)}
+        comparable = [floor_id for floor_id in submitted if floor_id in oracle_rank]
+        if len(comparable) < 2:
+            return 1.0 if comparable and comparable[0] == oracle_order[0] else 0.0
+        total_pairs = 0
+        concordant_pairs = 0
+        for left_idx, left_floor in enumerate(comparable):
+            for right_floor in comparable[left_idx + 1:]:
+                total_pairs += 1
+                if oracle_rank[left_floor] < oracle_rank[right_floor]:
+                    concordant_pairs += 1
+        return concordant_pairs / max(total_pairs, 1)
+
+    def _priority_coverage_score(self, submitted: list[str], oracle_order: list[str]) -> float:
+        if not submitted or not oracle_order:
+            return 0.0
+        top_k = min(2, len(oracle_order))
+        oracle_top = set(oracle_order[:top_k])
+        return len(oracle_top.intersection(submitted)) / max(top_k, 1)
+
+    def _priority_effect_bonus_applies(self, round_result: Any) -> bool:
+        if getattr(round_result, "priority_directive_issued_count", 0) <= 0:
+            return False
+        for row in getattr(round_result, "arbitration_trace", []):
+            if isinstance(row, dict) and row.get("reason") == "directive_priority":
+                return True
+        return False
+
+    def _orchestrator_priority_reward_components(
+        self,
+        *,
+        action: ActionEnvelopeMA | None,
+        round_result: Any,
+        oracle_order: list[str],
+        oracle_scores: dict[str, float],
+    ) -> tuple[dict[str, float], dict[str, Any]]:
+        priority_snapshot = {
+            "priority_action": False,
+            "priority_directive_issued_count": int(getattr(round_result, "priority_directive_issued_count", 0)),
+            "priority_order_submitted": list(getattr(round_result, "priority_order_submitted", [])),
+            "priority_order_used": list(getattr(round_result, "priority_order_used", [])),
+            "priority_unknown_floor_ids": list(getattr(round_result, "priority_unknown_floor_ids", [])),
+            "priority_duplicate_floor_ids": list(getattr(round_result, "priority_duplicate_floor_ids", [])),
+            "priority_top_floor": getattr(round_result, "priority_top_floor", None),
+            "priority_rejection_reason": getattr(round_result, "priority_rejection_reason", None),
+            "priority_oracle_order": list(oracle_order),
+            "priority_oracle_scores": dict(oracle_scores),
+            "priority_rank_fraction": 0.0,
+            "priority_coverage_fraction": 0.0,
+            "priority_effect_bonus_applied": False,
+        }
+        if action is None or action.action_type != ActionTypeMA.evacuate_floor_priority:
+            return {}, priority_snapshot
+
+        priority_snapshot["priority_action"] = True
+        weights = self.get_internal_state(action.episode_id).task.reward_weights
+        used = list(getattr(round_result, "priority_order_used", []))
+        unknown = list(getattr(round_result, "priority_unknown_floor_ids", []))
+        duplicates = list(getattr(round_result, "priority_duplicate_floor_ids", []))
+        rejection_reason = getattr(round_result, "priority_rejection_reason", None)
+        components: dict[str, float] = {
+            "priority_top_match": 0.0,
+            "priority_rank_score": 0.0,
+            "priority_coverage": 0.0,
+            "priority_duplicate_or_unknown_penalty": 0.0,
+            "priority_effect_bonus": 0.0,
+        }
+        if used and oracle_order:
+            if used[0] == oracle_order[0]:
+                components["priority_top_match"] = weights.priority_top_match
+            rank_fraction = self._priority_rank_score(used, oracle_order)
+            coverage_fraction = self._priority_coverage_score(used, oracle_order)
+            components["priority_rank_score"] = weights.priority_rank_score * rank_fraction
+            components["priority_coverage"] = weights.priority_coverage * coverage_fraction
+            priority_snapshot["priority_rank_fraction"] = round(rank_fraction, 6)
+            priority_snapshot["priority_coverage_fraction"] = round(coverage_fraction, 6)
+
+        malformed_count = len(unknown) + len(duplicates)
+        if rejection_reason is not None and malformed_count == 0:
+            malformed_count = 1
+        if malformed_count:
+            components["priority_duplicate_or_unknown_penalty"] = (
+                weights.priority_duplicate_or_unknown_penalty * malformed_count
+            )
+
+        if self._priority_effect_bonus_applies(round_result):
+            components["priority_effect_bonus"] = weights.priority_effect_bonus
+            priority_snapshot["priority_effect_bonus_applied"] = True
+
+        return components, priority_snapshot
 
     def _next_cascade_hint(self, ep: EpisodeStateInternal) -> dict[str, Any] | None:
         upcoming_events = sorted(

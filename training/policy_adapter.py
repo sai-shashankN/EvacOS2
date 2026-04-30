@@ -225,6 +225,13 @@ def _normalize_action_payload(
             action_type = normalized["action_type"]
 
     if action_type == ActionTypeMA.evacuate_floor_priority.value and isinstance(arguments, dict):
+        nested_arguments = arguments.get("evacuate_floor_priority_arguments")
+        if "ordered_floor_ids" not in arguments and isinstance(nested_arguments, dict):
+            logger.warning(
+                "Unwrapped nested evacuate_floor_priority_arguments; prompt should emit flat ordered_floor_ids."
+            )
+            arguments = dict(nested_arguments)
+            normalized["arguments"] = arguments
         priority_floor = arguments.get("priority_floor")
         if "ordered_floor_ids" not in arguments and priority_floor:
             if isinstance(priority_floor, str):

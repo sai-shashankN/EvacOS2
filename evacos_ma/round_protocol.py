@@ -59,6 +59,14 @@ class RoundResult:
         "apply_deltas",
         "directive_issued_count",
         "directive_addressed_count",
+        "priority_directive_issued_count",
+        "priority_order_submitted",
+        "priority_order_used",
+        "priority_unknown_floor_ids",
+        "priority_duplicate_floor_ids",
+        "priority_top_floor",
+        "priority_directive_id",
+        "priority_rejection_reason",
     )
 
     def __init__(
@@ -73,6 +81,14 @@ class RoundResult:
         apply_deltas: dict[str, dict[str, int]] | None = None,
         directive_issued_count: int = 0,
         directive_addressed_count: int = 0,
+        priority_directive_issued_count: int = 0,
+        priority_order_submitted: list[str] | None = None,
+        priority_order_used: list[str] | None = None,
+        priority_unknown_floor_ids: list[str] | None = None,
+        priority_duplicate_floor_ids: list[str] | None = None,
+        priority_top_floor: str | None = None,
+        priority_directive_id: str | None = None,
+        priority_rejection_reason: str | None = None,
     ) -> None:
         self.accepted_actions = accepted_actions
         self.rejected_actions = rejected_actions
@@ -84,6 +100,14 @@ class RoundResult:
         self.apply_deltas = apply_deltas or {}
         self.directive_issued_count = directive_issued_count
         self.directive_addressed_count = directive_addressed_count
+        self.priority_directive_issued_count = priority_directive_issued_count
+        self.priority_order_submitted = priority_order_submitted or []
+        self.priority_order_used = priority_order_used or []
+        self.priority_unknown_floor_ids = priority_unknown_floor_ids or []
+        self.priority_duplicate_floor_ids = priority_duplicate_floor_ids or []
+        self.priority_top_floor = priority_top_floor
+        self.priority_directive_id = priority_directive_id
+        self.priority_rejection_reason = priority_rejection_reason
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +284,54 @@ def _validate_known_action_targets(env: Any, ep: Any, action: ActionEnvelopeMA) 
     return None
 
 
+def _floor_public_id_from_value(floor_id: Any) -> str:
+    text = str(floor_id)
+    return text if text.startswith("floor_") else f"floor_{text}"
+
+
+def _normalize_priority_floor_order(
+    ep: Any,
+    raw_order: Any,
+) -> tuple[list[str], list[str], list[str], list[str], str | None]:
+    """Return submitted, valid, unknown, duplicate floor ids and rejection reason."""
+    if not isinstance(raw_order, list):
+        return [], [], [], [], "priority_order_must_be_list"
+
+    public_by_public: dict[str, str] = {}
+    public_by_internal: dict[str, str] = {}
+    for floor in ep.building.floors:
+        public = _floor_public_id_from_value(getattr(floor, "floor_id", ""))
+        public_by_public[public] = public
+        public_by_internal[str(getattr(floor, "floor_id", ""))] = public
+
+    submitted: list[str] = []
+    used: list[str] = []
+    unknown: list[str] = []
+    duplicates: list[str] = []
+    seen: set[str] = set()
+    for item in raw_order:
+        if not isinstance(item, str) or not item.strip():
+            unknown.append(str(item))
+            continue
+        raw = item.strip()
+        submitted.append(raw)
+        canonical = public_by_public.get(raw) or public_by_internal.get(raw)
+        if canonical is None:
+            unknown.append(raw)
+            continue
+        if canonical in seen:
+            duplicates.append(canonical)
+            continue
+        seen.add(canonical)
+        used.append(canonical)
+
+    if not submitted:
+        return submitted, used, unknown, duplicates, "priority_order_empty"
+    if not used:
+        return submitted, used, unknown, duplicates, "priority_order_has_no_known_floors"
+    return submitted, used, unknown, duplicates, None
+
+
 def _lookup_elevator_for_action(env: Any, ep_copy: Any, action: ActionEnvelopeMA) -> Any | None:
     elevator_lookup = env._elevator_lookup(ep_copy.building)
     elevator_id = action.arguments.get("elevator_id", "")
@@ -284,6 +356,11 @@ def _apply_counterfactual_action(
     stairwell_lookup = env._stairwell_lookup(ep_copy.building)
 
     if action.action_type == ActionTypeMA.wait:
+        return
+
+    if action.action_type == ActionTypeMA.evacuate_floor_priority:
+        # The real effect is the high-priority directive issued in run_round.
+        # Keep this explicit so priority actions never rely on accidental fallthrough.
         return
 
     if action.action_type == ActionTypeMA.prioritize_room:
@@ -441,8 +518,17 @@ class RoundProtocol:
 
         # --- Step 2: process directives ---
         rejections: list[dict[str, Any]] = []
+        round_events: list[dict[str, Any]] = []
         directive_issued_count = 0
         directive_addressed_count = 0
+        priority_directive_issued_count = 0
+        priority_order_submitted: list[str] = []
+        priority_order_used: list[str] = []
+        priority_unknown_floor_ids: list[str] = []
+        priority_duplicate_floor_ids: list[str] = []
+        priority_top_floor: str | None = None
+        priority_directive_id: str | None = None
+        priority_rejection_reason: str | None = None
 
         if orchestrator_action is not None and orchestrator_action.action_type == ActionTypeMA.broadcast_directive:
             directive_data = orchestrator_action.arguments.get("directive")
@@ -503,6 +589,75 @@ class RoundProtocol:
             r["action_id"] == orchestrator_action.action_id for r in rejections
         ):
             orchestrator_action = None
+
+        if orchestrator_action is not None and orchestrator_action.action_type == ActionTypeMA.evacuate_floor_priority:
+            (
+                priority_order_submitted,
+                priority_order_used,
+                priority_unknown_floor_ids,
+                priority_duplicate_floor_ids,
+                priority_rejection_reason,
+            ) = _normalize_priority_floor_order(
+                ep,
+                orchestrator_action.arguments.get("ordered_floor_ids"),
+            )
+            if priority_rejection_reason is not None:
+                rejections.append(
+                    {
+                        "agent_id": orchestrator_action.agent_id,
+                        "action_id": orchestrator_action.action_id,
+                        "action_type": orchestrator_action.action_type.value,
+                        "reason": priority_rejection_reason,
+                    }
+                )
+                round_events.append(
+                    {
+                        "event_type": "evacuate_floor_priority_rejected",
+                        "action_id": orchestrator_action.action_id,
+                        "priority_order_submitted": priority_order_submitted,
+                        "unknown_floor_ids": priority_unknown_floor_ids,
+                        "duplicate_floor_ids": priority_duplicate_floor_ids,
+                        "reason": priority_rejection_reason,
+                    }
+                )
+                orchestrator_action = None
+            else:
+                priority_top_floor = priority_order_used[0]
+                priority_directive_id = (
+                    "priority_"
+                    + uuid.uuid5(
+                        uuid.NAMESPACE_OID,
+                        f"{ep.episode_id}:{round_id}:{orchestrator_action.action_id}:evacuate_floor_priority",
+                    ).hex[:12]
+                )
+                directive = Directive(
+                    directive_id=priority_directive_id,
+                    target=priority_top_floor,
+                    directive_type="prioritize_floor_egress",
+                    params={
+                        "ordered_floor_ids": list(priority_order_used),
+                        "top_floor_id": priority_top_floor,
+                        "source_action_id": orchestrator_action.action_id,
+                    },
+                    priority=DirectivePriority.high,
+                    issued_round=round_id,
+                    ttl_rounds=3,
+                    human_readable_note="Orchestrator priority floor order.",
+                )
+                directive_store.issue(directive)
+                priority_directive_issued_count = 1
+                round_events.append(
+                    {
+                        "event_type": "evacuate_floor_priority_issued",
+                        "action_id": orchestrator_action.action_id,
+                        "directive_id": priority_directive_id,
+                        "priority_order_submitted": priority_order_submitted,
+                        "priority_order_used": priority_order_used,
+                        "priority_top_floor": priority_top_floor,
+                        "unknown_floor_ids": priority_unknown_floor_ids,
+                        "duplicate_floor_ids": priority_duplicate_floor_ids,
+                    }
+                )
 
         # --- Step 4: apply orchestrator override ---
         override_targets: dict[str, ActionEnvelopeMA] = {}
@@ -604,12 +759,20 @@ class RoundProtocol:
             rejected_actions=all_rejections,
             reservation_trace=arb_result.reservation_trace,
             arbitration_trace=arb_result.arbitration_trace,
-            round_events=[],
+            round_events=round_events,
             override_applied=override_applied,
             counterfactual_deltas=counterfactual_deltas,
             apply_deltas=apply_deltas,
             directive_issued_count=directive_issued_count,
             directive_addressed_count=directive_addressed_count,
+            priority_directive_issued_count=priority_directive_issued_count,
+            priority_order_submitted=priority_order_submitted,
+            priority_order_used=priority_order_used,
+            priority_unknown_floor_ids=priority_unknown_floor_ids,
+            priority_duplicate_floor_ids=priority_duplicate_floor_ids,
+            priority_top_floor=priority_top_floor,
+            priority_directive_id=priority_directive_id,
+            priority_rejection_reason=priority_rejection_reason,
         )
 
     def _apply(self, env: Any, ep: Any, accepted: list[ActionEnvelopeMA]) -> dict[str, dict[str, int]]:

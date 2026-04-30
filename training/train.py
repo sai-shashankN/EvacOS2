@@ -1542,6 +1542,46 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
     floor_route_missing_target_count = sum(
         1 for sample in floor_route_samples if _route_target_kind(sample) == "missing"
     )
+    priority_action_count = sum(
+        1
+        for sample in orchestrator_samples
+        if _action_type(sample) == "evacuate_floor_priority"
+    )
+    priority_directive_issue_count = sum(
+        int(getattr(result, "priority_directive_issue_count", 0))
+        for result in results
+    )
+    priority_component_keys = (
+        "priority_top_match",
+        "priority_rank_score",
+        "priority_coverage",
+        "priority_effect_bonus",
+    )
+    priority_component_totals: dict[str, float] = {key: 0.0 for key in priority_component_keys}
+    priority_component_counts: dict[str, int] = {key: 0 for key in priority_component_keys}
+    for result in results:
+        totals = getattr(result, "priority_component_totals", {}) or {}
+        counts = getattr(result, "priority_component_counts", {}) or {}
+        if not isinstance(totals, dict) or not isinstance(counts, dict):
+            continue
+        for key in priority_component_keys:
+            priority_component_totals[key] += float(totals.get(key, 0.0) or 0.0)
+            priority_component_counts[key] += int(counts.get(key, 0) or 0)
+    family_counts = {
+        "fire": 0,
+        "flood": 0,
+        "gas": 0,
+    }
+    for result in results:
+        family = str(getattr(result, "disaster_family", ""))
+        if family in family_counts:
+            family_counts[family] += 1
+
+    def _priority_component_mean(key: str) -> float:
+        return round(
+            priority_component_totals[key] / max(priority_component_counts[key], 1),
+            4,
+        )
 
     return {
         "wait_rate": round(wait_count / max(len(valid_metric_samples), 1), 4),
@@ -1584,6 +1624,21 @@ def _compute_rollout_metrics(results: list[Any]) -> dict[str, float]:
         "override_rate": round(override_count / max(orchestrator_action_count, 1), 4),
         "override_win_rate": round(override_win_count / max(override_count, 1), 4),
         "rationale_bonus_mean": round(rationale_bonus_total / max(rationale_bonus_count, 1), 4),
+        "priority_top_match_mean": _priority_component_mean("priority_top_match"),
+        "priority_rank_score_mean": _priority_component_mean("priority_rank_score"),
+        "priority_coverage_mean": _priority_component_mean("priority_coverage"),
+        "priority_effect_bonus_mean": _priority_component_mean("priority_effect_bonus"),
+        "priority_action_rate": round(
+            priority_action_count / max(len(orchestrator_samples), 1),
+            4,
+        ),
+        "priority_directive_issue_rate": round(
+            priority_directive_issue_count / max(priority_action_count, 1),
+            4,
+        ),
+        "family_fire_fraction": round(family_counts["fire"] / max(len(results), 1), 4),
+        "family_flood_fraction": round(family_counts["flood"] / max(len(results), 1), 4),
+        "family_gas_fraction": round(family_counts["gas"] / max(len(results), 1), 4),
     }
 
 

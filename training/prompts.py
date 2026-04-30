@@ -158,9 +158,7 @@ def _orchestrator_priority_argument_menu(obs: OrchestratorObservationMA) -> str:
     floor_ids = [summary.floor_id for summary in ordered if summary.floor_id]
     if not floor_ids:
         floor_ids = [summary.floor_id for summary in summaries if summary.floor_id]
-    return _compact_json(
-        {"evacuate_floor_priority_arguments": {"ordered_floor_ids": floor_ids[:5]}}
-    )
+    return _compact_json({"ordered_floor_ids": floor_ids[:5]})
 
 
 def build_floor_prompt(
@@ -361,6 +359,15 @@ def build_orchestrator_prompt(
         "or a single string. The only valid key is ordered_floor_ids and its value "
         "must be a list of visible floor_id strings."
     )
+    user_parts.append(
+        "For evacuate_floor_priority, the entire arguments object must be exactly "
+        '{"ordered_floor_ids":[...]}. Do not wrap it inside an action-specific '
+        "or nested object."
+    )
+    user_parts.append(
+        "Keep JSON identifiers short. If unsure, omit optional ids; the parser can "
+        "auto-fill missing episode_id, agent_id, round_id, and action_id."
+    )
 
     # Belief rollup
     br = obs.belief_rollup
@@ -407,6 +414,7 @@ def build_orchestrator_prompt(
         "round_id must be the integer shown above, not a string or composite id.\n"
         "client_metadata must be omitted or {}, never null.\n"
         "Omit optional keys during training; especially omit rationale to keep the JSON short.\n"
+        "Do not repeat long ids or continue generating after the closing brace.\n"
         f"Prompt template version: {version}"
     )
 

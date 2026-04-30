@@ -372,6 +372,7 @@ def test_build_orchestrator_prompt_includes_identity_contract_and_action_mask():
     assert "Floor summaries:" in user_message
     assert "Copyable evacuate_floor_priority arguments:" in user_message
     assert '"ordered_floor_ids":["floor_1"]' in user_message
+    assert "evacuate_floor_priority_arguments" not in user_message
     assert "Orchestrator argument schemas:" in user_message
     assert "never use priority_floor" in user_message
     assert "Beliefs: total=4, avg_conf=0.75, resolved=1, pending=3" in user_message

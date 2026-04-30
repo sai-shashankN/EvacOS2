@@ -6,7 +6,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
@@ -42,6 +42,13 @@ _DEFAULT_REWARD_CONFIG: dict[str, object] = {
     "eligible_token_ceiling": 160,
     "clip_normalized_to": 1.0,
 }
+_PRIORITY_REWARD_KEYS: tuple[str, ...] = (
+    "priority_top_match",
+    "priority_rank_score",
+    "priority_coverage",
+    "priority_duplicate_or_unknown_penalty",
+    "priority_effect_bonus",
+)
 
 
 @dataclass
@@ -84,6 +91,9 @@ class EpisodeRolloutResult:
     wall_clock_seconds: float
     rationale_bonus_total: float = 0.0
     rationale_bonus_count: int = 0
+    priority_component_totals: dict[str, float] = field(default_factory=dict)
+    priority_component_counts: dict[str, int] = field(default_factory=dict)
+    priority_directive_issue_count: int = 0
 
 
 def _extract_tier_str(tier_obj: object) -> str:
@@ -704,6 +714,9 @@ def collect_episode(
         total_norm: dict[str, float] = {"orchestrator": 0.0}
         rationale_bonus_total = 0.0
         rationale_bonus_count = 0
+        priority_component_totals = {key: 0.0 for key in _PRIORITY_REWARD_KEYS}
+        priority_component_counts = {key: 0 for key in _PRIORITY_REWARD_KEYS}
+        priority_directive_issue_count = 0
         for agent_id in obs_by_role.floors:
             total_raw[agent_id] = 0.0
             total_norm[agent_id] = 0.0
@@ -873,6 +886,7 @@ def collect_episode(
             orch_parsed = orch_action.model_dump(mode="json")
             orch_raw = result.rewards_by_role.orchestrator.raw
             orch_norm = norm_rewards.get("orchestrator", 0.0)
+            orch_breakdown = result.rewards_by_role.orchestrator.breakdown.get_components()
             total_raw["orchestrator"] += orch_raw
             total_norm["orchestrator"] += orch_norm
             reward_rows.append(
@@ -880,14 +894,19 @@ def collect_episode(
                     "orchestrator",
                     orch_raw,
                     orch_norm,
-                    result.rewards_by_role.orchestrator.breakdown.get_components(),
+                    orch_breakdown,
                 )
             )
-            orch_bonus = float(
-                result.rewards_by_role.orchestrator.breakdown.get_components().get(
-                    "rationale_bonus", 0.0
+            for key in _PRIORITY_REWARD_KEYS:
+                if key in orch_breakdown:
+                    priority_component_totals[key] += float(orch_breakdown.get(key, 0.0))
+                    priority_component_counts[key] += 1
+            priority_snapshot = result.info.score_snapshot.get("priority", {})
+            if isinstance(priority_snapshot, dict):
+                priority_directive_issue_count += int(
+                    priority_snapshot.get("priority_directive_issued_count", 0) or 0
                 )
-            )
+            orch_bonus = float(orch_breakdown.get("rationale_bonus", 0.0))
             if orch_bonus > 0.0:
                 rationale_bonus_total += orch_bonus
                 rationale_bonus_count += 1
@@ -1099,6 +1118,9 @@ def collect_episode(
             wall_clock_seconds=elapsed,
             rationale_bonus_total=rationale_bonus_total,
             rationale_bonus_count=rationale_bonus_count,
+            priority_component_totals=priority_component_totals,
+            priority_component_counts=priority_component_counts,
+            priority_directive_issue_count=priority_directive_issue_count,
         )
         write_trace_row(
             jsonl_dir / "episode_summary.jsonl",

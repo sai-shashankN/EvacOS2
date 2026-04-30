@@ -23,6 +23,11 @@ class RewardBreakdown(BaseModel):
     total_lost_terminal: float = 0.0
     coordination_bonus: float = 0.0
     directive_quality: float = 0.0
+    priority_top_match: float = 0.0
+    priority_rank_score: float = 0.0
+    priority_coverage: float = 0.0
+    priority_duplicate_or_unknown_penalty: float = 0.0
+    priority_effect_bonus: float = 0.0
     rationale_bonus: float = 0.0
 
     @model_serializer(mode="plain")

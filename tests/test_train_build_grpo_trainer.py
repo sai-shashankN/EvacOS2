@@ -827,6 +827,70 @@ def test_compute_rollout_metrics_tracks_wait_and_hollow_behavior() -> None:
     assert metrics["floor_route_legacy_egress_alias_rate"] == pytest.approx(1 / 2, rel=0, abs=1e-4)
 
 
+def test_compute_rollout_metrics_tracks_priority_components_and_family_mix() -> None:
+    results = [
+        SimpleNamespace(
+            disaster_family="fire",
+            override_count=0,
+            orchestrator_action_count=1,
+            override_win_count=0,
+            rationale_bonus_total=0.0,
+            rationale_bonus_count=0,
+            priority_component_totals={
+                "priority_top_match": 0.25,
+                "priority_rank_score": 0.20,
+                "priority_coverage": 0.10,
+                "priority_effect_bonus": 0.10,
+            },
+            priority_component_counts={
+                "priority_top_match": 1,
+                "priority_rank_score": 1,
+                "priority_coverage": 1,
+                "priority_effect_bonus": 1,
+            },
+            priority_directive_issue_count=1,
+            samples=[
+                SimpleNamespace(
+                    role="orchestrator",
+                    parsed_action={
+                        "action_type": "evacuate_floor_priority",
+                        "arguments": {"ordered_floor_ids": ["floor_2", "floor_1"]},
+                    },
+                ),
+            ],
+        ),
+        SimpleNamespace(
+            disaster_family="gas",
+            override_count=0,
+            orchestrator_action_count=1,
+            override_win_count=0,
+            rationale_bonus_total=0.0,
+            rationale_bonus_count=0,
+            priority_component_totals={},
+            priority_component_counts={},
+            priority_directive_issue_count=0,
+            samples=[
+                SimpleNamespace(
+                    role="orchestrator",
+                    parsed_action={"action_type": "wait", "arguments": {}},
+                ),
+            ],
+        ),
+    ]
+
+    metrics = train_mod._compute_rollout_metrics(results)
+
+    assert metrics["priority_action_rate"] == pytest.approx(0.5, rel=0, abs=1e-4)
+    assert metrics["priority_directive_issue_rate"] == 1.0
+    assert metrics["priority_top_match_mean"] == 0.25
+    assert metrics["priority_rank_score_mean"] == 0.20
+    assert metrics["priority_coverage_mean"] == 0.10
+    assert metrics["priority_effect_bonus_mean"] == 0.10
+    assert metrics["family_fire_fraction"] == 0.5
+    assert metrics["family_flood_fraction"] == 0.0
+    assert metrics["family_gas_fraction"] == 0.5
+
+
 def test_compute_rollout_metrics_uses_selected_candidates_for_action_rates() -> None:
     results = [
         SimpleNamespace(
