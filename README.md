@@ -46,6 +46,7 @@ but also:
 | Hugging Face Space URL for Env | [https://huggingface.co/spaces/shashankN777/evacos2-openenv](https://huggingface.co/spaces/shashankN777/evacos2-openenv) |
 | Training run notebook URL | [notebooks/train_evacos_ma.ipynb](https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/notebooks/train_evacos_ma.ipynb) |
 | Blog post URL | [Blog.MD](https://huggingface.co/spaces/shashankN777/evacos2-openenv/blob/main/Blog.MD) |
+| Research paper draft | [Markdown](RESEARCH_PAPER.md) / [PDF](RESEARCH_PAPER.pdf) |
 | Public model/artifact repo | [shashankN777/evacos2-7b-orchestrator-artifacts](https://huggingface.co/shashankN777/evacos2-7b-orchestrator-artifacts) |
 | Source code on GitHub | [sai-shashankN/EvacOS2](https://github.com/sai-shashankN/EvacOS2) |
 
