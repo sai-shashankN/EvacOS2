@@ -13,9 +13,9 @@
 
 ## Abstract
 
-Large language model agents are increasingly evaluated as interactive systems, yet many benchmarks still reward isolated task completion rather than team performance in realistic settings. Real deployments often require model allocation: small models should handle fast local execution, while larger models should be reserved for global coordination, escalation, and exception handling. We present EvacOS2, an OpenEnv-compatible benchmark for evaluating this question in a high-stakes real-world-inspired domain: emergency evacuation. EvacOS2 places one building-level orchestrator and five floor-level agents inside a deterministic simulator covering fire, flood, and gas emergencies. The environment exposes a live `/openenv/*` API, procedural resets, structured multi-agent observations, validated action schemas, role-specific rewards, LoRA training, and fixed-suite evaluation artifacts.
+Large language model agents are increasingly evaluated as interactive systems, but many benchmarks still reward isolated task completion rather than team performance in realistic settings. Real deployments often require model allocation: small models should handle fast local execution, while larger models should be reserved for global coordination, escalation, and exception handling. We present EvacOS2, an OpenEnv-compatible benchmark built around a simple but demanding question: can an agent team coordinate under pressure when actions have consequences? EvacOS2 places one building-level orchestrator and five floor-level agents inside a deterministic simulator covering fire, flood, and gas emergencies. The environment exposes a live `/openenv/*` API, procedural resets, structured multi-agent observations, validated action schemas, role-specific rewards, LoRA training, and fixed-suite evaluation artifacts.
 
-The central problem is not merely whether an agent can solve an evacuation. It is whether a team can be evaluated on the right division of labor: when fast local agents should act, when they should escalate, when a larger model should coordinate, and whether the resulting actions remain valid under consequences over time. We report three evidence tiers. First, the live Hugging Face Space validates the OpenEnv contract for fire, flood, and gas response lanes with a `1 + 5` topology. Second, held-out floor-specialist evaluation compares Qwen2.5-3B-Instruct without LoRA against trained LoRA specialists over a controlled 30-episode proof slice: 10 unseen seeds each for fire, flood, and gas. Trained specialists improve bounded evaluation score from `62.38%` to `80.05%` (`+17.67 pp`) and reduce invalid actions from `34.47%` to `1.10%` (`-33.37 pp`). This 30-episode scorecard is the clean headline comparison, not the full interaction footprint. The broader artifact trail includes three `50`-step floor-specialist canaries, three H200 continuations from `ckpt_49` to `ckpt_199`, a refreshed gas route audit, a `100`-step split-role `7B/3B` run, and a later `7B` orchestrator continuation canary. Third, the split-role and continuation evidence show that the higher-capacity coordination layer is wired, checkpointable, and role-observable, while final held-out orchestrator convergence remains future work. These results suggest that EvacOS2 is a practical benchmark for evaluating real-world LLM agent teams, model allocation, and environment-driven post-training.
+The central problem is not only whether an agent can solve an evacuation. It is whether a team can be evaluated on the right division of labor: when fast local agents should act, when they should escalate, when a larger model should coordinate, and whether the resulting actions remain valid over time. We report three evidence tiers. First, the live Hugging Face Space validates the OpenEnv contract for fire, flood, and gas response lanes with a `1 + 5` topology. Second, held-out floor-specialist evaluation compares Qwen2.5-3B-Instruct without LoRA against trained LoRA specialists over a controlled 30-episode proof slice: 10 unseen seeds each for fire, flood, and gas. Trained specialists improve bounded evaluation score from `62.38%` to `80.05%` (`+17.67 pp`) and reduce invalid actions from `34.47%` to `1.10%` (`-33.37 pp`). This 30-episode scorecard is the clean headline comparison, not the full interaction footprint. The broader artifact trail includes three `50`-step floor-specialist canaries, three H200 continuations from `ckpt_49` to `ckpt_199`, a refreshed gas route audit, a `100`-step split-role `7B/3B` run, and a later `7B` orchestrator continuation canary. Third, the split-role and continuation evidence show that the higher-capacity coordination layer is wired, checkpointable, and role-observable, while final held-out orchestrator convergence remains future work. Together, these results position EvacOS2 as a practical benchmark for studying real-world LLM agent teams, model allocation, and environment-driven post-training.
 
 ## Keywords
 
@@ -23,11 +23,17 @@ OpenEnv, agentic evaluation, model allocation, multi-agent reinforcement learnin
 
 ## 1. Introduction
 
-Most modern language model evaluation still begins from a prompt and ends with a text answer. That paradigm is useful for measuring factuality, reasoning, and style, but it under-specifies the problems that deployed agents face: actions have delayed effects, state changes after every decision, different agents see different parts of the world, and correctness is often defined by an external environment rather than by an evaluator reading a transcript.
+Most modern language model evaluation still begins from a prompt and ends with a text answer. That paradigm is useful for measuring factuality, reasoning, and style, but it leaves out much of what deployed agents actually face. Actions have delayed effects. State changes after every decision. Different agents see different parts of the world. Correctness is often defined by an external environment rather than by an evaluator reading a transcript.
 
-The next evaluation problem is team performance in real-world scenarios. In practical agent systems, the question is rarely "can one model answer this?" A more realistic question is "which agent should act, which agent should defer, and when should the system spend more compute on a larger model?" Small models may be better for fast local execution because they are cheaper and lower latency. Larger models may be better for global coordination, ambiguity, escalation, and exception handling. A benchmark for agentic systems should therefore measure not only task success, but whether the right model acted at the right time under valid action constraints.
+The next evaluation problem is team performance in real-world scenarios. In practical agent systems, the question is rarely "can one model answer this?" A more realistic question is "which agent should act, which agent should defer, and when should the system spend more compute on a larger model?" Small models may be better for fast local execution because they are cheaper and lower latency. Larger models may be better for global coordination, ambiguity, escalation, and exception handling. A serious benchmark for agentic systems should measure not only whether the task was completed, but whether the right model acted at the right time under valid action constraints.
 
 Emergency evacuation is a compact but demanding testbed for this gap. A floor responder may know which rooms and corridors are blocked locally but not whether another floor has already saturated a stairwell. A building-level coordinator may see global bottlenecks but not every room-level hazard detail. Good behavior therefore requires local autonomy and global coordination at the same time. A model that can write a plausible evacuation plan may still fail if it emits malformed actions, routes civilians into bottlenecks, overrides local responders without improving outcomes, or refuses to escalate when local state is insufficient.
+
+### 1.1 Motivating context
+
+The choice of evacuation was not only technical. The project was shaped by the uncomfortable realization that emergencies often become information problems before they become optimization problems. During the ideation period, personal experiences with conflict abroad and an earthquake at home made evacuation feel less like an abstract benchmark and more like a test of whether agent systems can remain useful when people are scared, information is incomplete, and delay matters.
+
+That context influenced the design. EvacOS2 does not reward a model for writing a polished plan that nobody can execute. It asks agents to act through a schema, preserve route targets, coordinate across limited views, and expose invalid decisions to the evaluator. The aim is not to claim deployment readiness. The aim is to make failure visible in a domain where hidden failure would be unacceptable.
 
 EvacOS2 converts this model-allocation problem into an OpenEnv-compatible benchmark. The environment contains a deterministic simulator with civilians, rooms, corridors, exits, stairwells, elevators, hazards, local floor observations, and building-level orchestration. It supports a `1 + 5` agent topology: one orchestrator and five floor agents. The public evaluation lanes cover fire, flood, and gas response. The training stack supports shared-model policies, split-role policies, and floor-specialist policies with LoRA adapters. The evaluation stack produces fixed-suite scorecards, plots, and artifact trails.
 
@@ -43,7 +49,7 @@ This problem is studied through three research questions:
 
 EvacOS2 answers these questions through emergency evacuation. Smaller `3B` agents are evaluated as fast local floor responders. A larger `7B` agent is evaluated as the slower global coordinator responsible for priorities, bottlenecks, exceptions, and escalation. The evacuation setting is the concrete domain; the broader benchmark target is real-world agent-team evaluation.
 
-This paper makes a careful claim. EvacOS2 already demonstrates a working OpenEnv surface and a measurable held-out improvement for `3B` floor specialists. It also demonstrates a viable `7B` orchestrator path through smoke, checkpoint, parser, and role-metric canary evidence. It does not yet claim final held-out `7B` orchestrator convergence.
+The claim is deliberately bounded. EvacOS2 already demonstrates a working OpenEnv surface and a measurable held-out improvement for `3B` floor specialists. It also demonstrates a viable `7B` orchestrator path through smoke, checkpoint, parser, and role-metric canary evidence. It does not yet claim final held-out `7B` orchestrator convergence.
 
 ## 2. Contributions
 
@@ -296,13 +302,13 @@ A later `7B` continuation canary resumed from public `ckpt_349` over frozen `3B`
 - `78.33%` average priority coverage
 - `100.00%` priority-effect bonus rate
 
-This result matters because earlier `7B` traces included schema and argument issues. The continuation canary shows that parser and role-metric fixes survive a real resumed `7B` run. It still does not prove final held-out orchestrator convergence. The next required artifact is a trained-vs-baseline orchestrator scorecard focused on directive success, override usefulness, bottleneck reduction, and invalid orchestrator action rate.
+This result matters because earlier `7B` traces included schema and argument issues. The continuation canary shows that parser and role-metric fixes survive a real resumed `7B` run. It still does not prove final held-out orchestrator convergence. The next needed artifact is a trained-vs-baseline orchestrator scorecard focused on directive success, override usefulness, bottleneck reduction, and invalid orchestrator action rate.
 
 ## 8. Discussion
 
 ### 8.1 What is proven
 
-The current evidence supports four claims:
+The evidence supports five claims:
 
 1. The environment is live, public, and OpenEnv-compatible.
 2. The floor-specialist training path produces measurable held-out improvements over the same base model without LoRA.
@@ -320,21 +326,21 @@ The current evidence does not yet prove:
 - real-world deployment readiness
 - correctness of every simulator accounting edge case
 
-These limitations are important. EvacOS2 should be read as a benchmark and post-training artifact, not as a deployable emergency-response product.
+These limitations are not footnotes. They are part of the contribution. EvacOS2 should be read as a benchmark and post-training artifact, not as a deployable emergency-response product.
 
 ### 8.3 Why invalid-action reduction matters
 
-In LLM agent systems, malformed actions are not a minor formatting issue. If an agent cannot reliably emit valid actions, it cannot be trusted to participate in long-horizon coordination. The held-out reduction from `34.47%` invalid actions to `1.10%` is therefore more important than a single reward number. It indicates that LoRA training improved contract adherence under the same environment and parser.
+In LLM agent systems, malformed actions are not a minor formatting issue. If an agent cannot reliably emit valid actions, it cannot be trusted to participate in long-horizon coordination. The held-out reduction from `34.47%` invalid actions to `1.10%` is more important than a single reward number because it measures whether the model can stay inside the contract of the world it is acting in. In EvacOS2, LoRA training improved that contract adherence under the same environment and parser.
 
 ### 8.4 Why the 7B remains necessary
 
-The `3B` specialist result might suggest that the larger orchestrator is optional. It is not. Specialists are strong in scoped, single-family response lanes. The orchestrator is needed for cross-floor prioritization, outliers, conflicting local plans, mixed incidents, cascading hazards, and human-readable escalation. The current paper treats the `7B` as a validated coordination layer in progress rather than an already-finished learned policy.
+The `3B` specialist result might suggest that the larger orchestrator is optional. It is not. Specialists are strong in scoped, single-family response lanes. The orchestrator is needed for cross-floor prioritization, outliers, conflicting local plans, mixed incidents, cascading hazards, and human-readable escalation. This paper treats the `7B` as a validated coordination layer in progress rather than an already-finished learned policy.
 
 ### 8.5 Why this is more than an evacuation benchmark
 
 Evacuation is the domain, but the benchmark question is broader. Many real-world agent systems will need a hierarchy of capabilities: smaller agents for cheap, fast, local execution and larger agents for expensive, slower, global judgment. Evaluating such systems requires more than a success/failure score. It requires measuring whether the system chose the right level of cognition for the situation.
 
-EvacOS2 makes that question concrete. A floor specialist can be judged on local validity, route-target preservation, and disaster-specific response. The orchestrator can be judged on whether it improves team outcomes when local agents conflict or when global bottlenecks matter. The scope router can be judged on whether it sends routine single-family incidents to the right specialist and reserves the generalist/orchestrator path for ambiguous cases. This is the central thesis: realistic agent evaluation should include task outcome, action validity, coordination quality, and model allocation.
+EvacOS2 makes that question concrete. A floor specialist can be judged on local validity, route-target preservation, and disaster-specific response. The orchestrator can be judged on whether it improves team outcomes when local agents conflict or when global bottlenecks matter. The scope router can be judged on whether it sends routine single-family incidents to the right specialist and reserves the generalist/orchestrator path for ambiguous cases. The central thesis is simple: realistic agent evaluation should include task outcome, action validity, coordination quality, and model allocation.
 
 ## 9. Reproducibility
 
@@ -406,7 +412,7 @@ python -m evaluation.demo_bundle \
 
 Emergency response is safety-critical. EvacOS2 is intended as a benchmark for research and evaluation, not as an operational deployment system. The environment should be used to study failure modes, coordination, escalation, and simulator-grounded evaluation. Any future real-world adaptation would require human oversight, validated sensors, domain-expert review, legal compliance, robust uncertainty handling, and conservative fail-safe design.
 
-The project also demonstrates a broader evaluation principle: agents should be trained and tested in environments where invalid actions and bad coordination are visible. In safety-relevant domains, plausible language is not enough.
+The project also demonstrates a broader evaluation principle: agents should be trained and tested in environments where invalid actions and bad coordination are visible. In safety-relevant domains, plausible language is not enough. The evaluator has to catch the moment when a fluent plan becomes an invalid action.
 
 ## 12. Declarations
 
@@ -436,7 +442,7 @@ EvacOS2 provides a hierarchical OpenEnv-compatible benchmark for evaluating LLM 
 
 The system combines a deterministic simulator, role-specific observations, structured actions, LoRA-based training, public adapter artifacts, and fixed-suite evaluation. The strongest current result is a held-out `3B` floor-specialist comparison showing a bounded score improvement from `62.38%` to `80.05%` and an invalid-action reduction from `34.47%` to `1.10%`. The `7B` orchestrator is validated as a trainable, checkpointable, role-observable coordination layer, but final held-out orchestrator convergence remains future work.
 
-The main claim is therefore specific and testable: EvacOS2 shows that real-world-inspired environment evaluation can measure not only whether agents solve a task, but whether the right agent acts at the right time under valid action constraints. It demonstrates that environment-based post-training improves local responder reliability and supplies the infrastructure needed to evaluate larger hierarchical coordination policies next.
+The main claim is specific and testable: EvacOS2 shows that real-world-inspired environment evaluation can measure not only whether agents solve a task, but whether the right agent acts at the right time under valid action constraints. It demonstrates that environment-based post-training improves local responder reliability and supplies the infrastructure needed to evaluate larger hierarchical coordination policies next.
 
 ## References
 
